@@ -133,6 +133,8 @@ class TrpcAgentSession(AgentInterface):
                     snapshot_saver.save_snapshot(trace_id=self._snapshot_key, key="fsm_enter", data=req_fsm_state)
                 if (req_metadata := request.agent_state.get("metadata")):
                     metadata.update(req_metadata)
+                    if "template_id" not in req_metadata or req_metadata.get("template_id") is None:
+                        metadata["template_id"] = request.template_id
             else:
                 logger.info(f"Initializing new session for trace {self.trace_id}")
 
