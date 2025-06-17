@@ -289,7 +289,8 @@ async def message(
         if template_id in agent_type:
             selected_agent = agent_type[template_id]
         else:
-            selected_agent = agent_type[CONFIG.agent_type]
+            # Fallback to trpc_agent as the default implementation
+            selected_agent = agent_type["trpc_agent"]
         
         return StreamingResponse(
             run_agent(request, selected_agent),
