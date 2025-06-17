@@ -1,0 +1,10 @@
+{
+  "name": "simple-template-client",
+  "private": true,
+  "scripts": {
+    "dev": "python -m http.server 3000",
+    "build": "echo 'No build needed for simple template'",
+    "start": "python -m http.server 3000"
+  },
+  "devDependencies": {}
+}

@@ -48,7 +48,7 @@ class FSMToolProcessor[T: FSMInterface]:
     fsm_app: T | None
     settings: Dict[str, Any]
 
-    def __init__(self, client: dagger.Client, fsm_class: type[T], fsm_app: T | None = None, settings: Dict[str, Any] | None = None, event_callback: Callable[[str], Awaitable[None]] | None = None):
+    def __init__(self, client: dagger.Client, fsm_class: type[T], fsm_app: T | None = None, settings: Dict[str, Any] | None = None, event_callback: Callable[[str], Awaitable[None]] | None = None, template_id: str | None = None):
         """
         Initialize the FSM Tool Processor
 
@@ -57,12 +57,14 @@ class FSMToolProcessor[T: FSMInterface]:
             fsm_app: Optional existing FSM application instance
             settings: Optional dictionary of settings for the FSM/LLM
             event_callback: Optional callback to emit intermediate SSE events with diffs
+            template_id: Optional template ID to use for the FSM
         """
         self.fsm_class = fsm_class
         self.fsm_app = fsm_app
         self.settings = settings or {}
         self.client = client
         self.event_callback = event_callback
+        self.template_id = template_id or "trpc_agent"
 
         # Define tool definitions for the AI agent using the common Tool structure
         self.tool_definitions: list[Tool] = [
@@ -132,7 +134,7 @@ class FSMToolProcessor[T: FSMInterface]:
                 logger.warning("There's an active FSM session already. Completing it before starting a new one.")
                 return CommonToolResult(content="An active FSM session already exists. Please explain why do you even need to create a new one instead of using existing one. Should you use `change` tool instead?", is_error=True)
 
-            self.fsm_app = await self.fsm_class.start_fsm(self.client, user_prompt=app_description, settings=self.settings)
+            self.fsm_app = await self.fsm_class.start_fsm(self.client, user_prompt=app_description, settings=self.settings, template_id=self.template_id)
 
             # Check for errors
             if (error_msg := self.fsm_app.maybe_error()):

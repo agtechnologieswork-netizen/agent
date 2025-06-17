@@ -42,11 +42,12 @@ class AgentState(TypedDict):
 
 
 class TrpcAgentSession(AgentInterface):
-    def __init__(self, client: dagger.Client, application_id: str | None= None, trace_id: str | None = None, settings: Optional[Dict[str, Any]] = None):
+    def __init__(self, client: dagger.Client, application_id: str | None= None, trace_id: str | None = None, settings: Optional[Dict[str, Any]] = None, template_id: Optional[str] = None):
         """Initialize a new agent session"""
         self.application_id = application_id or uuid4().hex
         self.trace_id = trace_id or uuid4().hex
         self.settings = settings or {}
+        self.template_id = template_id or "trpc_agent"
         self.processor_instance = FSMToolProcessor(client, FSMApplication)
         self.llm_client: AsyncLLM = get_llm_client()
         self.model_params = {
@@ -127,7 +128,7 @@ class TrpcAgentSession(AgentInterface):
                     fsm_state = req_fsm_state
                     if request.all_files:
                         fsm_state["context"]["files"].update({p.path: p.content for p in request.all_files}) # pyright: ignore
-                    fsm_app = await FSMApplication.load(self.client, req_fsm_state)
+                    fsm_app = await FSMApplication.load(self.client, req_fsm_state, self.template_id)
                     snapshot_saver.save_snapshot(trace_id=self._snapshot_key, key="fsm_enter", data=req_fsm_state)
                 if (req_metadata := request.agent_state.get("metadata")):
                     metadata.update(req_metadata)
@@ -148,7 +149,7 @@ class TrpcAgentSession(AgentInterface):
             fsm_settings = {**self.settings, 'event_callback': emit_intermediate_diff}
             
             # Unconditional initialization with event callback
-            self.processor_instance = FSMToolProcessor(self.client, FSMApplication, fsm_app=fsm_app, settings=fsm_settings, event_callback=emit_intermediate_diff)
+            self.processor_instance = FSMToolProcessor(self.client, FSMApplication, fsm_app=fsm_app, settings=fsm_settings, event_callback=emit_intermediate_diff, template_id=self.template_id)
             agent_state: AgentState = {
                 "fsm_messages": fsm_message_history,
                 "fsm_state": fsm_state,
