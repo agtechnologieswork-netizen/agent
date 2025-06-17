@@ -119,21 +119,6 @@ class TrpcAgentSession(AgentInterface):
                 "template_diff_sent": False,
             }
 
-            if request.agent_state:
-                logger.info(f"Continuing with existing state for trace {self.trace_id}")
-                if (fsm_messages := request.agent_state.get("fsm_messages", [])):
-                    fsm_message_history = [InternalMessage.from_dict(m) for m in fsm_messages] + fsm_message_history
-                if (req_fsm_state := request.agent_state.get("fsm_state")):
-                    fsm_state = req_fsm_state
-                    if request.all_files:
-                        fsm_state["context"]["files"].update({p.path: p.content for p in request.all_files}) # pyright: ignore
-                    fsm_app = await FSMApplication.load(self.client, req_fsm_state)
-                    snapshot_saver.save_snapshot(trace_id=self._snapshot_key, key="fsm_enter", data=req_fsm_state)
-                if (req_metadata := request.agent_state.get("metadata")):
-                    metadata.update(req_metadata)
-            else:
-                logger.info(f"Initializing new session for trace {self.trace_id}")
-
             async def emit_intermediate_message(message: str) -> None:
                 await self.send_event(
                     event_tx=event_tx,
@@ -142,10 +127,25 @@ class TrpcAgentSession(AgentInterface):
                     content=message,
                     agent_state=None,
                     unified_diff=None,
-                    app_name=agent_state["metadata"]["app_name"],
+                    app_name=metadata["app_name"],
                 )
 
             fsm_settings = {**self.settings, 'event_callback': emit_intermediate_message}
+
+            if request.agent_state:
+                logger.info(f"Continuing with existing state for trace {self.trace_id}")
+                if (fsm_messages := request.agent_state.get("fsm_messages", [])):
+                    fsm_message_history = [InternalMessage.from_dict(m) for m in fsm_messages] + fsm_message_history
+                if (req_fsm_state := request.agent_state.get("fsm_state")):
+                    fsm_state = req_fsm_state
+                    if request.all_files:
+                        fsm_state["context"]["files"].update({p.path: p.content for p in request.all_files}) # pyright: ignore
+                    fsm_app = await FSMApplication.load(self.client, req_fsm_state, fsm_settings)
+                    snapshot_saver.save_snapshot(trace_id=self._snapshot_key, key="fsm_enter", data=req_fsm_state)
+                if (req_metadata := request.agent_state.get("metadata")):
+                    metadata.update(req_metadata)
+            else:
+                logger.info(f"Initializing new session for trace {self.trace_id}")
             
             # Unconditional initialization with event callback
             self.processor_instance = FSMToolProcessor(self.client, FSMApplication, fsm_app=fsm_app, settings=fsm_settings, event_callback=emit_intermediate_message)

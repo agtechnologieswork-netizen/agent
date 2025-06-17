@@ -87,10 +87,10 @@ class FSMApplication:
         self.client = client
 
     @classmethod
-    async def load(cls, client: dagger.Client, data: MachineCheckpoint) -> Self:
-        root = await cls.make_states(client)
+    async def load(cls, client: dagger.Client, data: MachineCheckpoint, settings: Dict[str, Any] | None = None) -> Self:
+        root, workspace = await cls.make_states(client, settings)
         fsm = await StateMachine[ApplicationContext, FSMEvent].load(root, data, ApplicationContext)
-        return cls(client, fsm)
+        return cls(client, fsm, workspace)
 
     @classmethod
     def base_execution_plan(cls) -> str:
@@ -104,14 +104,14 @@ class FSMApplication:
     @classmethod
     async def start_fsm(cls, client: dagger.Client, user_prompt: str, settings: Dict[str, Any] | None = None) -> Self:
         """Create the state machine for the application"""
-        states = await cls.make_states(client, settings)
+        states, workspace = await cls.make_states(client, settings)
         context = ApplicationContext(user_prompt=user_prompt)
         fsm = StateMachine[ApplicationContext, FSMEvent](states, context)
         await fsm.send(FSMEvent("CONFIRM")) # confirm running first stage immediately
         return cls(client, fsm)
 
     @classmethod
-    async def make_states(cls, client: dagger.Client, settings: Dict[str, Any] | None = None) -> State[ApplicationContext, FSMEvent]:
+    async def make_states(cls, client: dagger.Client, settings: Dict[str, Any] | None = None) -> tuple[State[ApplicationContext, FSMEvent], Workspace]:
         def agg_node_files(solution: Node[BaseData]) -> dict[str, str]:
             files = {}
             for node in solution.get_trajectory():
@@ -217,7 +217,7 @@ class FSMApplication:
             },
         )
 
-        return states
+        return states, workspace
 
     async def confirm_state(self):
         await self.fsm.send(FSMEvent("CONFIRM"))
