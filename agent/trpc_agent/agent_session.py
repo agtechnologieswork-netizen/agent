@@ -33,6 +33,7 @@ logger = logging.getLogger(__name__)
 class StateMetadata(TypedDict):
     app_name: str | None
     template_diff_sent: bool
+    template_id: str | None
 
 
 class AgentState(TypedDict):
@@ -117,6 +118,7 @@ class TrpcAgentSession(AgentInterface):
             metadata: StateMetadata = {
                 "app_name": None,
                 "template_diff_sent": False,
+                "template_id": request.template_id,
             }
 
             if request.agent_state:
