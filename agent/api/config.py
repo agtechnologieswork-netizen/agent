@@ -24,7 +24,7 @@ class Config:
     @property
     def available_templates(self):
         """List of all available template IDs"""
-        return ["trpc_agent"]
+        return ["trpc_agent", "dummy_template"]
 
     @property
     def default_template_id(self):
@@ -35,7 +35,8 @@ class Config:
     def template_paths(self):
         """Mapping of template IDs to their filesystem paths"""
         return {
-            "trpc_agent": "trpc_agent/template"
+            "trpc_agent": "trpc_agent/template",
+            "dummy_template": "dummy_template/template"
         }
 
 

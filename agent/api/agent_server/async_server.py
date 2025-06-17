@@ -35,6 +35,7 @@ from api.agent_server.models import (
 from api.agent_server.interface import AgentInterface
 from trpc_agent.agent_session import TrpcAgentSession
 from api.agent_server.template_diff_impl import TemplateDiffAgentImplementation
+from api.agent_server.dummy_template_impl import DummyTemplateAgentImplementation
 from api.config import CONFIG
 
 from log import get_logger, configure_uvicorn_logging, set_trace_id, clear_trace_id
@@ -281,10 +282,17 @@ async def message(
         agent_type = {
             "template_diff": TemplateDiffAgentImplementation,
             "trpc_agent": TrpcAgentSession,
+            "dummy_template": DummyTemplateAgentImplementation,
         }
         
+        # Use template_id to select the appropriate agent implementation
+        if template_id in agent_type:
+            selected_agent = agent_type[template_id]
+        else:
+            selected_agent = agent_type[CONFIG.agent_type]
+        
         return StreamingResponse(
-            run_agent(request, agent_type[CONFIG.agent_type]),
+            run_agent(request, selected_agent),
             media_type="text/event-stream"
         )
 
