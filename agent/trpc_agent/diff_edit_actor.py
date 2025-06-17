@@ -9,7 +9,7 @@ from llm.common import AsyncLLM, Message, TextRaw, Tool, ToolUse, ToolUseResult
 from trpc_agent import playbooks
 from trpc_agent.actors import run_tests, run_tsc_compile, run_frontend_build
 from trpc_agent.playwright import PlaywrightRunner
-from trpc_agent.notification_utils import notify_if_callback
+from trpc_agent.notification_utils import notify_if_callback, notify_files_processed
 
 logger = logging.getLogger(__name__)
 
@@ -107,32 +107,17 @@ async def run_write_files(node: Node[BaseData], event_callback = None) -> TextRa
 
     if files_written > 0:
         logger.debug(f"Written {files_written} files to workspace")
-        # Create user-friendly progress message for edits
-        file_summary = []
-        for file in all_files_written[:3]:  # Show first 3 files
-            if file.endswith('.ts') or file.endswith('.tsx'):
-                file_summary.append(f"📝 {file}")
-            elif file.endswith('.css'):
-                file_summary.append(f"🎨 {file}")
-            elif file.endswith('.json'):
-                file_summary.append(f"⚙️ {file}")
-            else:
-                file_summary.append(f"📄 {file}")
-        
-        more_files = f" (+{len(all_files_written)-3} more)" if len(all_files_written) > 3 else ""
-        
-        # Different message for edits vs new files
+        # Calculate edit vs new file counts
         edit_count = sum(1 for item in parsed_files if isinstance(item, FileDiff))
         new_count = sum(1 for item in parsed_files if isinstance(item, File))
         
-        if edit_count > 0 and new_count > 0:
-            progress_msg = f"✏️ Edited {edit_count} files and created {new_count} files:\n" + "\n".join(file_summary) + more_files
-        elif edit_count > 0:
-            progress_msg = f"✏️ Edited {edit_count} files:\n" + "\n".join(file_summary) + more_files
-        else:
-            progress_msg = f"✨ Created {new_count} files:\n" + "\n".join(file_summary) + more_files
-        
-        await notify_if_callback(event_callback, progress_msg, "edit progress")
+        await notify_files_processed(
+            event_callback, 
+            all_files_written, 
+            edit_count=edit_count, 
+            new_count=new_count, 
+            operation_type="edit"
+        )
 
     if errors:
         errors.append(f"Only those files should be written: {node.data.workspace.allowed}")

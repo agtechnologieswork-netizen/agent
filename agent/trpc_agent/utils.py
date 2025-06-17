@@ -5,7 +5,7 @@ from core.base_node import Node
 from core.workspace import ExecResult
 from core.actors import BaseData
 from llm.common import TextRaw
-from trpc_agent.notification_utils import notify_if_callback
+from trpc_agent.notification_utils import notify_if_callback, notify_files_processed
 
 logger = logging.getLogger(__name__)
 
@@ -51,21 +51,7 @@ async def run_write_files(
 
     if files_written > 0:
         logger.debug(f"Written {files_written} files to workspace")
-        # Create user-friendly progress message instead of raw diff
-        file_summary = []
-        for file in all_files_written[:3]:  # Show first 3 files
-            if file.endswith('.ts') or file.endswith('.tsx'):
-                file_summary.append(f"📝 {file}")
-            elif file.endswith('.css'):
-                file_summary.append(f"🎨 {file}")
-            elif file.endswith('.json'):
-                file_summary.append(f"⚙️ {file}")
-            else:
-                file_summary.append(f"📄 {file}")
-        
-        more_files = f" (+{len(all_files_written)-3} more)" if len(all_files_written) > 3 else ""
-        progress_msg = f"✨ Generated {files_written} files:\n" + "\n".join(file_summary) + more_files
-        await notify_if_callback(event_callback, progress_msg, "progress update")
+        await notify_files_processed(event_callback, all_files_written, operation_type="generated")
 
     if errors:
         errors.append(f"Only those files should be written: {node.data.workspace.allowed}")
