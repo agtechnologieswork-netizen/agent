@@ -228,7 +228,6 @@ class HandlersActor(BaseTRPCActor):
                     else:
                         solution[key] = node
                         logger.info(f"Received solution for handler: {key}")
-                        await notify_if_callback(self.event_callback, f"✅ {key} handler completed", "handler completion")
 
         await notify_if_callback(self.event_callback, "✅ All backend handlers generated!", "handlers completion")
 

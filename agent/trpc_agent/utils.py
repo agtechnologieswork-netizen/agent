@@ -5,7 +5,7 @@ from core.base_node import Node
 from core.workspace import ExecResult
 from core.actors import BaseData
 from llm.common import TextRaw
-from trpc_agent.notification_utils import notify_if_callback, notify_files_processed, notify_stage
+from trpc_agent.notification_utils import notify_files_processed
 
 logger = logging.getLogger(__name__)
 
@@ -62,17 +62,13 @@ async def run_write_files(
 async def run_tsc_compile(node: Node[BaseData], event_callback: Callable[[str], Awaitable[None]] | None = None) -> tuple[ExecResult, TextRaw | None]:
     logger.debug("Running TypeScript compilation")
     
-    await notify_stage(event_callback, "building handlers", "in_progress")
-    
     result = await node.data.workspace.exec(["bun", "run", "tsc", "--noEmit", "--incremental"], cwd="server")
     
     if result.exit_code == 0:
         logger.info("TypeScript compilation succeeded")
-        await notify_stage(event_callback, "building handlers", "completed")
         return result, None
 
     logger.debug(f"TypeScript compilation failed with exit code {result.exit_code}")
-    await notify_stage(event_callback, "building handlers", "failed")
     return result, TextRaw(f"Error running tsc: {result.stdout}")
 
 
@@ -83,16 +79,12 @@ class RunTests:
         self.test_output_normalizer = re.compile(r"\[\d+(\.\d+)?(ms|s)\]")
 
     async def __call__(self, node: Node[BaseData], event_callback: Callable[[str], Awaitable[None]] | None = None) -> tuple[ExecResult, TextRaw | None]:
-        await notify_stage(event_callback, "running tests", "in_progress")
-        
         result = await node.data.workspace.exec_with_pg(["bun", "test"], cwd="server")
         
         if result.exit_code == 0:
-            await notify_stage(event_callback, "handlers tests passed", "completed")
             return result, None
 
         logger.info(f"Tests failed with exit code {result.exit_code}")
-        await notify_stage(event_callback, "running tests", "failed")
         
         err = self.test_output_normalizer.sub("", result.stderr)
         err = "\n".join([x.rstrip() for x in err.splitlines()])
@@ -105,23 +97,15 @@ class RunFrontendBuild:
         self.build_output_normalizer = re.compile(r"\d+(\.\d+)?(ms|s)")
 
     async def __call__(self, node: Node[BaseData], event_callback: Callable[[str], Awaitable[None]] | None = None) -> str | None:
-        await notify_stage(event_callback, "building frontend", "in_progress")
-        
         result = await node.data.workspace.exec(["bun", "run", "build"], cwd="client")
         if result.exit_code != 0:
-            await notify_stage(event_callback, "building frontend", "failed")
             err = self.build_output_normalizer.sub("", result.stderr)
             return f"Build errors:\n{err}\n"
-
-        await notify_stage(event_callback, "formatting and linting frontend", "in_progress")
 
         result = await node.data.workspace.exec(["bun", "run", "lint"], cwd="client")
         if result.exit_code != 0:
             logger.info(f"Linting failed with exit code {result.exit_code}")
-            await notify_stage(event_callback, "formatting and linting frontend", "failed")
             return f"Lint errors:\n{result.stdout}\n"
-
-        await notify_stage(event_callback, "frontend generated", "completed")
 
         return None
 
