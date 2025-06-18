@@ -25,7 +25,7 @@ def test_ollama_conditional_behavior():
     os.environ['OLLAMA_HOST'] = 'http://localhost:11434'
     
     try:
-        client = get_llm_client(backend="auto", model_name="llama3.2", cache_mode="off")
+        get_llm_client(backend="auto", model_name="llama3.2", cache_mode="off")
         print("✓ OllamaLLM can be created when OLLAMA_HOST is set")
     except ImportError as e:
         if "ollama package" in str(e):
