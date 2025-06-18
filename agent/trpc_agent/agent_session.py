@@ -187,7 +187,7 @@ class TrpcAgentSession(AgentInterface):
                         status=AgentStatus.RUNNING,
                         kind=MessageKind.REVIEW_RESULT,
                         content="Initializing...",
-                        agent_state=agent_state,
+                        agent_state=None,
                         unified_diff=initial_template_diff,
                         app_name=app_name,
                         commit_message="Initial commit"
@@ -201,7 +201,7 @@ class TrpcAgentSession(AgentInterface):
                             status=AgentStatus.RUNNING,
                             kind=MessageKind.STAGE_RESULT,
                             content=messages_to_user,
-                            agent_state=agent_state,
+                            agent_state=None,
                             app_name=agent_state["metadata"]["app_name"],
                         )
                     case FSMStatus.REFINEMENT_REQUEST:
