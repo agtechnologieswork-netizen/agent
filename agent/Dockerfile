@@ -9,7 +9,7 @@ WORKDIR /app
 COPY pyproject.toml uv.lock ./
 ENV UV_COMPILE_BYTECODE=1
 ENV UV_FROZEN=1
-RUN uv venv && uv sync --no-dev
+RUN uv venv && uv sync --no-dev && if [ -n "${OLLAMA_HOST:-}" ]; then uv sync --group ollama --no-dev; fi
 # should be cacheable
 
 COPY . /app

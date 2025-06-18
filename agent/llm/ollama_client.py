@@ -1,5 +1,11 @@
 from typing import List, Dict, Any
-import ollama
+try:
+    import ollama
+except ImportError:
+    raise ImportError(
+        "ollama package is required for OllamaLLM. "
+        "Install it with: uv sync --group ollama"
+    )
 from llm import common
 from log import get_logger
 import logging
