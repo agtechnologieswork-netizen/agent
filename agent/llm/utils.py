@@ -6,6 +6,7 @@ from llm.common import AsyncLLM, Message, TextRaw, ContentBlock
 from llm.anthropic_client import AnthropicLLM
 from llm.cached import CachedLLM, CacheMode
 from llm.gemini import GeminiLLM
+from llm.models_config import MODELS_MAP, ALL_MODEL_NAMES, OLLAMA_MODEL_NAMES
 
 from log import get_logger
 from hashlib import md5
@@ -57,7 +58,7 @@ def _guess_llm_backend(model_name: str) -> LLMBackend:
             if os.getenv("GEMINI_API_KEY"):
                 return "gemini"
             raise ValueError("Gemini backend requires GEMINI_API_KEY to be set")
-        case ("llama3.2" | "llama3.1" | "codellama" | "gemma3" | "deepseek-r1:32b" | "devstral:latest" | "qwen2.5vl:32b"):
+        case model_name if model_name in OLLAMA_MODEL_NAMES:
             if os.getenv("OLLAMA_HOST") or os.getenv("OLLAMA_API_BASE"):
                 return "ollama"
             raise ValueError("Ollama backend requires OLLAMA_HOST or OLLAMA_API_BASE to be set")
@@ -72,7 +73,7 @@ def _cache_key_from_seq(key: Sequence) -> str:
 
 def get_llm_client(
     backend: Literal["auto"] | LLMBackend = "auto",
-    model_name: Literal["sonnet", "haiku", "gemini-flash", "gemini-pro", "gemini-flash-lite", "llama3.2", "llama3.1", "codellama", "gemma3", "deepseek-r1:32b", "devstral:latest", "qwen2.5vl:32b"] = "sonnet",
+    model_name: str = "sonnet",
     cache_mode: CacheMode = "auto",
     client_params: dict | None = None,
 ) -> AsyncLLM:
@@ -107,37 +108,10 @@ def get_llm_client(
         return llm_clients_cache[cache_key]
 
     # Otherwise create a new client
-    models_map = {
-        "sonnet": {
-            "bedrock": "us.anthropic.claude-sonnet-4-20250514-v1:0",
-            "anthropic": "claude-sonnet-4-20250514"
-        },
-        "haiku": {
-            "bedrock": "us.anthropic.claude-3-5-haiku-20241022-v1:0",
-            "anthropic": "claude-3-5-haiku-20241022"
-        },
-        "gemini-pro":
-            {
-                "gemini": "gemini-2.5-pro-preview-05-06",
-            },
-        "gemini-flash":
-            {
-                "gemini": "gemini-2.5-flash-preview-05-20",
-            },
-        "gemini-flash-lite":
-            {
-                "gemini": "gemini-2.5-flash-lite-preview-06-17",
-            },
-        "llama3.2": {"ollama": "llama3.2"},
-        "llama3.1": {"ollama": "llama3.1"},
-        "codellama": {"ollama": "codellama"},
-        "gemma3": {"ollama": "gemma3"},
-        "deepseek-r1:32b": {"ollama": "deepseek-r1:32b"},
-        "devstral:latest": {"ollama": "devstral:latest"},
-        "qwen2.5vl:32b": {"ollama": "qwen2.5vl:32b"},
-    }
-
-    chosen_model = models_map[model_name][backend]
+    if model_name not in MODELS_MAP:
+        raise ValueError(f"Unknown model name: {model_name}. Available models: {', '.join(ALL_MODEL_NAMES)}")
+    
+    chosen_model = MODELS_MAP[model_name][backend]
 
     match backend:
         case "bedrock" | "anthropic":
