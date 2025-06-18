@@ -3,7 +3,10 @@ name = "appdotbuild-server"
 version = "0.1.0"
 readme = "README.md"
 requires-python = ">=3.12"
-dependencies = ["fullstack-agent"]
+dependencies = [
+    "fullstack-agent",
+    "ollama>=0.5.1",
+]
 
 [tool.uv.sources]
 fullstack-agent = { workspace = true }
