@@ -12,7 +12,7 @@ def test_ollama_conditional_behavior():
     
     try:
         from llm.utils import get_llm_client
-        client = get_llm_client(backend="auto", model_name="llama3.2", cache_mode="off")
+        get_llm_client(backend="auto", model_name="llama3.2", cache_mode="off")
         print("❌ Expected error when OLLAMA_HOST not set")
         return False
     except ValueError as e:
