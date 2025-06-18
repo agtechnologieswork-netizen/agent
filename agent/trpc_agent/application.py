@@ -90,7 +90,7 @@ class FSMApplication:
     async def load(cls, client: dagger.Client, data: MachineCheckpoint, settings: Dict[str, Any] | None = None) -> Self:
         root, workspace = await cls.make_states(client, settings)
         fsm = await StateMachine[ApplicationContext, FSMEvent].load(root, data, ApplicationContext)
-        return cls(client, fsm, workspace)
+        return cls(client, fsm)
 
     @classmethod
     def base_execution_plan(cls) -> str:
