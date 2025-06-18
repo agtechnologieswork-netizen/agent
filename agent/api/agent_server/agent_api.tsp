@@ -109,11 +109,17 @@ model AgentMessage {
   @doc("Lightweight per-file summary of changes since the previous message.")
   diffStat: DiffStatEntry[] | null;
   
-  @doc("Generated application name suitable for use as a GitHub repository name.")
+  @doc("Deprecated. Use 'appName' instead. Generated application name suitable for use as a GitHub repository name.")
   app_name: string | null;
   
-  @doc("Generated commit message suitable for use in Git commits.")
+  @doc("Generated application name suitable for use as a GitHub repository name.")
+  appName: string | null;
+  
+  @doc("Deprecated. Use 'commitMessage' instead. Generated commit message suitable for use in Git commits.")
   commit_message: string | null;
+  
+  @doc("Generated commit message suitable for use in Git commits.")
+  commitMessage: string | null;
 }
 
 @doc("Structure of the data payload within each Server-Sent Event (SSE).")
@@ -230,4 +236,4 @@ model BadRequestResponse {
 model InternalServerErrorResponse {
   @statusCode _: 500;
   @body body: ErrorResponse;
-} 
+}  

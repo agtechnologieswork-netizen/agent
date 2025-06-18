@@ -88,10 +88,20 @@ class AgentMessage(BaseModel):
     )
     app_name: Optional[str] = Field(
         None,
+        description="Deprecated. Use 'app_name_camel' instead. Generated application name suitable for use as a GitHub repository name."
+    )
+    app_name_camel: Optional[str] = Field(
+        None,
+        alias="appName",
         description="Generated application name suitable for use as a GitHub repository name."
     )
     commit_message: Optional[str] = Field(
         None,
+        description="Deprecated. Use 'commit_message_camel' instead. Generated commit message suitable for use in Git commits."
+    )
+    commit_message_camel: Optional[str] = Field(
+        None,
+        alias="commitMessage",
         description="Generated commit message suitable for use in Git commits."
     )
     
