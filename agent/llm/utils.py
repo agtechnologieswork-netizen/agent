@@ -6,9 +6,14 @@ from llm.common import AsyncLLM, Message, TextRaw, ContentBlock
 from llm.anthropic_client import AnthropicLLM
 from llm.cached import CachedLLM, CacheMode
 from llm.gemini import GeminiLLM
-from llm.ollama_client import OllamaLLM
+
 from log import get_logger
 from hashlib import md5
+
+try:
+    from llm.ollama_client import OllamaLLM
+except ImportError:
+    OllamaLLM = None
 
 logger = get_logger(__name__)
 
@@ -53,7 +58,9 @@ def _guess_llm_backend(model_name: str) -> LLMBackend:
                 return "gemini"
             raise ValueError("Gemini backend requires GEMINI_API_KEY to be set")
         case ("llama3.2" | "llama3.1" | "codellama"):
-            return "ollama"
+            if os.getenv("OLLAMA_HOST") or os.getenv("OLLAMA_API_BASE"):
+                return "ollama"
+            raise ValueError("Ollama backend requires OLLAMA_HOST or OLLAMA_API_BASE to be set")
         case _:
             raise ValueError(f"Unknown model name: {model_name}")
 
@@ -136,6 +143,8 @@ def get_llm_client(
             client_params["model_name"] = chosen_model
             client = GeminiLLM(**client_params)
         case "ollama":
+            if OllamaLLM is None:
+                raise ValueError("Ollama backend requires ollama package to be installed. Install with: uv sync --group ollama")
             host = client_params.get("host", "http://localhost:11434")
             client = OllamaLLM(host=host, model_name=chosen_model)
         case _:

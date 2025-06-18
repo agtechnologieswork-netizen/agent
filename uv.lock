@@ -634,7 +634,7 @@ requires-dist = [
     { name = "fire", specifier = ">=0.7.0" },
     { name = "google-genai", specifier = ">=1.18.0" },
     { name = "jinja2", specifier = ">=3.1.6" },
-    { name = "ollama", specifier = ">=0.4.0" },
+    { name = "ollama", specifier = ">=0.5.1" },
     { name = "patch-ng", specifier = ">=1.17.4" },
     { name = "sentry-sdk", specifier = ">=2.25.1" },
     { name = "tenacity", specifier = ">=9.1.2" },
