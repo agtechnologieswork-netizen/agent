@@ -6,6 +6,7 @@ from llm.common import AsyncLLM, Message, TextRaw, ContentBlock
 from llm.anthropic_client import AnthropicLLM
 from llm.cached import CachedLLM, CacheMode
 from llm.gemini import GeminiLLM
+from llm.ollama_client import OllamaLLM
 from log import get_logger
 from hashlib import md5
 
@@ -14,7 +15,7 @@ logger = get_logger(__name__)
 # Cache for LLM clients
 llm_clients_cache: Dict[str, AsyncLLM] = {}
 
-LLMBackend = Literal["bedrock", "anthropic", "gemini"]
+LLMBackend = Literal["bedrock", "anthropic", "gemini", "ollama"]
 
 
 def merge_text(content: list[ContentBlock]) -> list[ContentBlock]:
@@ -51,6 +52,8 @@ def _guess_llm_backend(model_name: str) -> LLMBackend:
             if os.getenv("GEMINI_API_KEY"):
                 return "gemini"
             raise ValueError("Gemini backend requires GEMINI_API_KEY to be set")
+        case ("llama3.2" | "llama3.1" | "codellama"):
+            return "ollama"
         case _:
             raise ValueError(f"Unknown model name: {model_name}")
 
@@ -62,7 +65,7 @@ def _cache_key_from_seq(key: Sequence) -> str:
 
 def get_llm_client(
     backend: Literal["auto"] | LLMBackend = "auto",
-    model_name: Literal["sonnet", "haiku", "gemini-flash", "gemini-pro", "gemini-flash-lite"] = "sonnet",
+    model_name: Literal["sonnet", "haiku", "gemini-flash", "gemini-pro", "gemini-flash-lite", "llama3.2", "llama3.1", "codellama"] = "sonnet",
     cache_mode: CacheMode = "auto",
     client_params: dict | None = None,
 ) -> AsyncLLM:
@@ -118,6 +121,9 @@ def get_llm_client(
             {
                 "gemini": "gemini-2.5-flash-lite-preview-06-17",
             },
+        "llama3.2": {"ollama": "llama3.2"},
+        "llama3.1": {"ollama": "llama3.1"},
+        "codellama": {"ollama": "codellama"},
     }
 
     chosen_model = models_map[model_name][backend]
@@ -129,6 +135,9 @@ def get_llm_client(
         case "gemini":
             client_params["model_name"] = chosen_model
             client = GeminiLLM(**client_params)
+        case "ollama":
+            host = client_params.get("host", "http://localhost:11434")
+            client = OllamaLLM(host=host, model_name=chosen_model)
         case _:
             raise ValueError(f"Unknown backend: {backend}")
 
