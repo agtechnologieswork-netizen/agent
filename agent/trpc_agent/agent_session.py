@@ -128,7 +128,7 @@ class TrpcAgentSession(AgentInterface):
                     agent_state=None,
                     unified_diff=None,
                     app_name=metadata["app_name"],
-                    app_name_camel=metadata["app_name"],
+                    application_name=metadata["app_name"],
                 )
 
             fsm_settings = {**self.settings, 'event_callback': emit_intermediate_message}
@@ -191,9 +191,9 @@ class TrpcAgentSession(AgentInterface):
                         agent_state=agent_state,
                         unified_diff=initial_template_diff,
                         app_name=app_name,
-                        app_name_camel=app_name,
+                        application_name=app_name,
                         commit_message="Initial commit",
-                        commit_message_camel="Initial commit"
+                        commit_msg="Initial commit"
                     )
 
                 # Send event based on FSM status
@@ -206,7 +206,7 @@ class TrpcAgentSession(AgentInterface):
                             content=messages_to_user,
                             agent_state=agent_state,
                             app_name=agent_state["metadata"]["app_name"],
-                            app_name_camel=agent_state["metadata"]["app_name"],
+                            application_name=agent_state["metadata"]["app_name"],
                         )
                     case FSMStatus.REFINEMENT_REQUEST:
                         await self.send_event(
@@ -216,7 +216,7 @@ class TrpcAgentSession(AgentInterface):
                             content=messages_to_user,
                             agent_state=agent_state,
                             app_name=agent_state["metadata"]["app_name"],
-                            app_name_camel=agent_state["metadata"]["app_name"],
+                            application_name=agent_state["metadata"]["app_name"],
                         )
                     case FSMStatus.FAILED:
                         await self.send_event(
@@ -257,7 +257,7 @@ class TrpcAgentSession(AgentInterface):
                                     content=content_with_message,
                                     agent_state=agent_state,
                                     app_name=agent_state["metadata"]["app_name"],
-                                    app_name_camel=agent_state["metadata"]["app_name"],
+                                    application_name=agent_state["metadata"]["app_name"],
                                 )
                             else:
                                 if isinstance(request.all_messages[-1], UserMessage):
@@ -275,9 +275,9 @@ class TrpcAgentSession(AgentInterface):
                                     agent_state=agent_state,
                                     unified_diff=final_diff,
                                     app_name=agent_state["metadata"]["app_name"],
-                                    app_name_camel=agent_state["metadata"]["app_name"],
+                                    application_name=agent_state["metadata"]["app_name"],
                                     commit_message=commit_message,
-                                    commit_message_camel=commit_message
+                                    commit_msg=commit_message
                                 )
                         except Exception as e:
                             logger.exception(f"Error sending final diff: {e}")
@@ -315,9 +315,9 @@ class TrpcAgentSession(AgentInterface):
         agent_state: Optional[AgentState] = None,
         unified_diff: Optional[str] = None,
         app_name: Optional[str] = None,
-        app_name_camel: Optional[str] = None,
+        application_name: Optional[str] = None,
         commit_message: Optional[str] = None,
-        commit_message_camel: Optional[str] = None,
+        commit_msg: Optional[str] = None,
     ) -> None:
         """Send event with specified parameters."""
         structured_blocks: List[ExternalContentBlock]
@@ -354,9 +354,9 @@ class TrpcAgentSession(AgentInterface):
                 complete_diff_hash=None,
                 diff_stat=None,
                 app_name=app_name,
-                app_name_camel=app_name_camel,
+                application_name=application_name,
                 commit_message=commit_message,
-                commit_message_camel=commit_message_camel
+                commit_msg=commit_msg
             )
         )
         await event_tx.send(event)
