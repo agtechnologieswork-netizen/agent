@@ -58,6 +58,9 @@ model DiffStatEntry {
 
   @doc("Number of lines deleted in this file during the current step.")
   deletions: int32;
+
+  @doc("Whether this file contains binary content.")
+  isBinary?: boolean;
 }
 
 // --- Models ---
@@ -67,8 +70,14 @@ model FileEntry {
   @doc("The relative path of the file.")
   path: string;
 
-  @doc("The content of the file.")
+  @doc("The content of the file (UTF-8 text for text files, empty for binary files).")
   content: string;
+
+  @doc("MIME type of the file (e.g., 'text/plain', 'image/png', 'application/pdf').")
+  mimeType: string;
+
+  @doc("Base64-encoded content for binary files. Null for text files.")
+  contentBase64?: string;
 }
 
 @doc("Represents a single content block in an external message.")
@@ -230,4 +239,4 @@ model BadRequestResponse {
 model InternalServerErrorResponse {
   @statusCode _: 500;
   @body body: ErrorResponse;
-} 
+}  
