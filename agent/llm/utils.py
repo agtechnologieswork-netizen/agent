@@ -57,7 +57,7 @@ def _guess_llm_backend(model_name: str) -> LLMBackend:
             if os.getenv("GEMINI_API_KEY"):
                 return "gemini"
             raise ValueError("Gemini backend requires GEMINI_API_KEY to be set")
-        case ("llama3.2" | "llama3.1" | "codellama"):
+        case ("llama3.2" | "llama3.1" | "codellama" | "gemma3" | "deepseek-r1:32b" | "devstral:latest" | "qwen2.5vl:32b"):
             if os.getenv("OLLAMA_HOST") or os.getenv("OLLAMA_API_BASE"):
                 return "ollama"
             raise ValueError("Ollama backend requires OLLAMA_HOST or OLLAMA_API_BASE to be set")
@@ -72,7 +72,7 @@ def _cache_key_from_seq(key: Sequence) -> str:
 
 def get_llm_client(
     backend: Literal["auto"] | LLMBackend = "auto",
-    model_name: Literal["sonnet", "haiku", "gemini-flash", "gemini-pro", "gemini-flash-lite", "llama3.2", "llama3.1", "codellama"] = "sonnet",
+    model_name: Literal["sonnet", "haiku", "gemini-flash", "gemini-pro", "gemini-flash-lite", "llama3.2", "llama3.1", "codellama", "gemma3", "deepseek-r1:32b", "devstral:latest", "qwen2.5vl:32b"] = "sonnet",
     cache_mode: CacheMode = "auto",
     client_params: dict | None = None,
 ) -> AsyncLLM:
@@ -131,6 +131,10 @@ def get_llm_client(
         "llama3.2": {"ollama": "llama3.2"},
         "llama3.1": {"ollama": "llama3.1"},
         "codellama": {"ollama": "codellama"},
+        "gemma3": {"ollama": "gemma3"},
+        "deepseek-r1:32b": {"ollama": "deepseek-r1:32b"},
+        "devstral:latest": {"ollama": "devstral:latest"},
+        "qwen2.5vl:32b": {"ollama": "qwen2.5vl:32b"},
     }
 
     chosen_model = models_map[model_name][backend]
