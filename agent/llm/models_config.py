@@ -1,9 +1,15 @@
 """
 Model configuration for all LLM providers.
-Centralizes model definitions for better maintainability.
+Centralizes model definitions with categorization for better maintainability.
 """
 
+import os
 from typing import Dict
+
+class ModelCategory:
+    FAST = "fast"
+    CODEGEN = "codegen"
+    VISION = "vision"
 
 ANTHROPIC_MODELS = {
     "sonnet": {
@@ -43,6 +49,17 @@ MODELS_MAP: Dict[str, Dict[str, str]] = {
     **GEMINI_MODELS,
     **OLLAMA_MODELS,
 }
+
+DEFAULT_MODELS = {
+    ModelCategory.FAST: "gemini-flash-lite",
+    ModelCategory.CODEGEN: "sonnet", 
+    ModelCategory.VISION: "gemini-flash-lite",
+}
+
+def get_model_for_category(category: str) -> str:
+    """Get model name for a specific category, with environment variable override support."""
+    env_var = f"LLM_{category.upper()}_MODEL"
+    return os.getenv(env_var, DEFAULT_MODELS.get(category, "sonnet"))
 
 ANTHROPIC_MODEL_NAMES = list(ANTHROPIC_MODELS.keys())
 GEMINI_MODEL_NAMES = list(GEMINI_MODELS.keys())

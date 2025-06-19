@@ -2,7 +2,7 @@ import pytest
 import tempfile
 from llm.cached import CachedLLM, AsyncLLM
 from llm.common import Message, TextRaw, Completion, Tool, AttachedFiles
-from llm.utils import get_llm_client, merge_text
+from llm.utils import get_fast_llm_client, get_vision_llm_client, merge_text
 import uuid
 import ujson as json
 import os
@@ -115,7 +115,7 @@ async def test_cached_lru():
 
 @pytest.mark.skipif(os.getenv("GEMINI_API_KEY") is None, reason="GEMINI_API_KEY is not set")
 async def test_gemini():
-    client = get_llm_client(model_name="gemini-flash")
+    client = get_fast_llm_client()
     resp = await client.completion(
         messages=[Message(role="user", content=[TextRaw("Hello, what are you?")])],
         max_tokens=512,
@@ -130,7 +130,7 @@ async def test_gemini():
 
 @pytest.mark.skipif(os.getenv("GEMINI_API_KEY") is None, reason="GEMINI_API_KEY is not set")
 async def test_gemini_with_image():
-    client = get_llm_client(model_name="gemini-flash-lite")
+    client = get_vision_llm_client()
     image_path = os.path.join(
         os.path.dirname(__file__),
         "image.png",
