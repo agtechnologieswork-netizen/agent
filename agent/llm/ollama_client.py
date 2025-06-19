@@ -79,7 +79,18 @@ class OllamaLLM:
         
         tool_calls = message.get("tool_calls", [])
         for tool_call in (tool_calls or []):
-            if tool_call.get("type") == "function":
+            # Handle both dict and object formats from Ollama client
+            if hasattr(tool_call, 'function'):  # Object format
+                func = tool_call.function
+                tool_name = func.name if hasattr(func, 'name') else func.get("name", "")
+                tool_args = func.arguments if hasattr(func, 'arguments') else func.get("arguments", {})
+                tool_id = getattr(tool_call, 'id', None)
+                content_blocks.append(common.ToolUse(
+                    name=tool_name,
+                    input=tool_args,
+                    id=tool_id
+                ))
+            elif isinstance(tool_call, dict) and tool_call.get("type") == "function":  # Dict format
                 func = tool_call.get("function", {})
                 content_blocks.append(common.ToolUse(
                     name=func.get("name", ""),
@@ -136,8 +147,12 @@ class OllamaLLM:
             request_params["tools"] = ollama_tools
         
         try:
+            logger.info(f"Ollama request params: {request_params}")
             response = await self.client.chat(**request_params)
-            return self._completion_into(response, input_tokens=0)
+            logger.info(f"Ollama raw response: {response}")
+            completion = self._completion_into(response, input_tokens=0)
+            logger.info(f"Parsed completion: content_length={len(completion.content)}, stop_reason={completion.stop_reason}")
+            return completion
         except Exception as e:
             logger.error(f"Ollama API error: {e}")
             raise
