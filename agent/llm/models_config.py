@@ -56,10 +56,26 @@ DEFAULT_MODELS = {
     ModelCategory.VISION: "gemini-flash-lite",
 }
 
+OLLAMA_DEFAULT_MODELS = {
+    ModelCategory.FAST: "llama3.2",
+    ModelCategory.CODEGEN: "deepseek-r1:32b",
+    ModelCategory.VISION: "qwen2.5vl:32b",
+}
+
 def get_model_for_category(category: str) -> str:
     """Get model name for a specific category, with environment variable override support."""
     env_var = f"LLM_{category.upper()}_MODEL"
-    return os.getenv(env_var, DEFAULT_MODELS.get(category, "sonnet"))
+    
+    # Check for explicit model override first
+    if explicit_model := os.getenv(env_var):
+        return explicit_model
+    
+    # If PREFER_OLLAMA is set, use Ollama models as default
+    if os.getenv("PREFER_OLLAMA"):
+        return OLLAMA_DEFAULT_MODELS.get(category, "llama3.2")
+    
+    # Otherwise use regular defaults
+    return DEFAULT_MODELS.get(category, "sonnet")
 
 ANTHROPIC_MODEL_NAMES = list(ANTHROPIC_MODELS.keys())
 GEMINI_MODEL_NAMES = list(GEMINI_MODELS.keys())

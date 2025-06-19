@@ -333,9 +333,9 @@ async def main(initial_prompt: str = "A simple greeting app that says hello in f
     import os
     import dagger
     from trpc_agent.application import FSMApplication
-    from llm.utils import get_codegen_llm_client
+    from llm.utils import get_llm_client
     logger.info("Initializing FSM tools...")
-    client = get_codegen_llm_client()
+    client = get_llm_client()
     model_params = {"max_tokens": 8192 }
 
 

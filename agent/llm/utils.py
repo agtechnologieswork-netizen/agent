@@ -46,6 +46,10 @@ async def loop_completion(m_client: AsyncLLM, messages: list[Message], system_pr
 
 
 def _guess_llm_backend(model_name: str) -> LLMBackend:
+    # If PREFER_OLLAMA is set and model is available in Ollama, use Ollama
+    if os.getenv("PREFER_OLLAMA") and model_name in OLLAMA_MODEL_NAMES:
+        return "ollama"
+    
     if model_name in ANTHROPIC_MODEL_NAMES:
         if os.getenv("AWS_SECRET_ACCESS_KEY") or os.getenv("PREFER_BEDROCK"):
             return "bedrock"
@@ -58,9 +62,8 @@ def _guess_llm_backend(model_name: str) -> LLMBackend:
             return "gemini"
         raise ValueError("Gemini backend requires GEMINI_API_KEY to be set")
     elif model_name in OLLAMA_MODEL_NAMES:
-        if os.getenv("OLLAMA_HOST") or os.getenv("OLLAMA_API_BASE"):
-            return "ollama"
-        raise ValueError("Ollama backend requires OLLAMA_HOST or OLLAMA_API_BASE to be set")
+        # Default to localhost if no host is specified
+        return "ollama"
     else:
         raise ValueError(f"Unknown model name: {model_name}")
 
@@ -73,7 +76,7 @@ def _cache_key_from_seq(key: Sequence) -> str:
 def get_llm_client(
     backend: Literal["auto"] | LLMBackend = "auto",
     model_name: str | None = None,
-    category: str | None = None,
+    category: ModelCategory | None = None,
     cache_mode: CacheMode = "auto",
     client_params: dict | None = None,
 ) -> AsyncLLM:
@@ -128,7 +131,12 @@ def get_llm_client(
         case "ollama":
             if OllamaLLM is None:
                 raise ValueError("Ollama backend requires ollama package to be installed. Install with: uv sync --group ollama")
-            host = client_params.get("host", "http://localhost:11434")
+            # Use OLLAMA_HOST/OLLAMA_API_BASE env vars or default to localhost
+            host = (
+                os.getenv("OLLAMA_HOST") or 
+                os.getenv("OLLAMA_API_BASE") or 
+                client_params.get("host", "http://localhost:11434")
+            )
             client = OllamaLLM(host=host, model_name=chosen_model)
         case _:
             raise ValueError(f"Unknown backend: {backend}")
