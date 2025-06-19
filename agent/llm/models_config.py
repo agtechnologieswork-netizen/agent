@@ -98,7 +98,6 @@ OLLAMA_MODELS = {
     # Mistral
     "mistral-large": {"ollama": "mistral-large:123b"}, # Latest large model
     "devstral": {"ollama": "devstral:24b"},     # Latest code-specialized
-    "ministral": {"ollama": "ministral:3b"},      # Fast, small model
     
     # Microsoft Phi
     "phi4": {"ollama": "phi4:14b"},               # Latest Phi model
