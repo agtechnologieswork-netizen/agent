@@ -595,7 +595,6 @@ dependencies = [
     { name = "fire" },
     { name = "google-genai" },
     { name = "jinja2" },
-    { name = "ollama" },
     { name = "patch-ng" },
     { name = "sentry-sdk" },
     { name = "tenacity" },
@@ -618,6 +617,9 @@ dev = [
 google = [
     { name = "google-genai" },
 ]
+ollama = [
+    { name = "ollama" },
+]
 openai = [
     { name = "openai" },
 ]
@@ -634,7 +636,6 @@ requires-dist = [
     { name = "fire", specifier = ">=0.7.0" },
     { name = "google-genai", specifier = ">=1.18.0" },
     { name = "jinja2", specifier = ">=3.1.6" },
-    { name = "ollama", specifier = ">=0.5.1" },
     { name = "patch-ng", specifier = ">=1.17.4" },
     { name = "sentry-sdk", specifier = ">=2.25.1" },
     { name = "tenacity", specifier = ">=9.1.2" },
@@ -655,6 +656,7 @@ dev = [
     { name = "streamlit", specifier = ">=1.45.1" },
 ]
 google = [{ name = "google-genai", specifier = ">=1.7.0" }]
+ollama = [{ name = "ollama", specifier = ">=0.5.1" }]
 openai = [{ name = "openai", specifier = ">=1.68.2" }]
 
 [[package]]
