@@ -15,7 +15,7 @@ logger = get_logger(__name__)
 
 
 class OllamaLLM:
-    def __init__(self, host: str = "http://localhost:11434", model_name: str = "llama3.2"):
+    def __init__(self, host: str = "http://localhost:11434", model_name: str = "devstral:latest"):
         self.client = ollama.AsyncClient(host=host)
         self.model_name = model_name
         self.default_model = model_name
