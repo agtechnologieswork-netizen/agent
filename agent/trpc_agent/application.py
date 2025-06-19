@@ -5,7 +5,7 @@ import enum
 from typing import Dict, Self, Optional, Literal, Any
 from dataclasses import dataclass, field
 from core.statemachine import StateMachine, State, Context
-from llm.utils import get_llm_client
+from llm.utils import get_codegen_llm_client, get_vision_llm_client
 from core.actors import BaseData
 from core.base_node import Node
 from core.statemachine import MachineCheckpoint
@@ -133,8 +133,8 @@ class FSMApplication:
             logger.exception("Setting error in context:", exc_info=error)
             ctx.error = str(error)
 
-        llm = get_llm_client()
-        vlm = get_llm_client(model_name="gemini-flash-lite")
+        llm = get_codegen_llm_client()
+        vlm = get_vision_llm_client()
         model_params = settings or {}
         workspace = await Workspace.create(
             client=client,
