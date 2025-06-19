@@ -78,7 +78,7 @@ class OllamaLLM:
             content_blocks.append(common.TextRaw(content))
         
         tool_calls = message.get("tool_calls", [])
-        for tool_call in tool_calls:
+        for tool_call in (tool_calls or []):
             if tool_call.get("type") == "function":
                 func = tool_call.get("function", {})
                 content_blocks.append(common.ToolUse(
