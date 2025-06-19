@@ -19,7 +19,7 @@ For FAST_TEXT tasks:
 - gemini-flash-lite (Google)
 
 For BEST_CODEGEN tasks:
-- codestral (Mistral 22B)
+- devstral (Mistral 24B)
 - qwen3-coder (Qwen 7B)
 - granite-code (IBM 20B)
 - llama3.3 (Meta)
@@ -32,8 +32,8 @@ For VISION tasks:
 Example .env configuration for best performance:
 ==============================================
 # Recommended: local models
-LLM_FAST_MODEL=ministral           # Mistral 3B - fastest for simple tasks
-LLM_CODEGEN_MODEL=codestral        # Mistral 22B - excellent for code
+LLM_FAST_MODEL=phi4               # Phi4 14B - good model from Microsoft
+LLM_CODEGEN_MODEL=devstral        # Mistral 24B - excellent for code
 LLM_VISION_MODEL=gemma3            # Google - best vision model
 
 # Alternative 1 local models
@@ -56,11 +56,10 @@ from typing import Dict
 from enum import Enum
 
 
-class ModelCategory(Enum):
-    """Enum for different LLM model categories/use cases"""
-    FAST_TEXT = "fast"           # Fast models for simple text tasks (name generation, commit messages)
-    BEST_CODEGEN = "codegen"     # Best models for code generation and reasoning
-    VISION = "vision"            # Models optimized for vision and UI analysis tasks
+class ModelCategory:
+    FAST = "fast"
+    CODEGEN = "codegen"
+    VISION = "vision"
 
 ANTHROPIC_MODELS = {
     "sonnet": {
@@ -98,7 +97,7 @@ OLLAMA_MODELS = {
     
     # Mistral
     "mistral-large": {"ollama": "mistral-large:123b"}, # Latest large model
-    "codestral": {"ollama": "codestral:22b"},     # Latest code-specialized
+    "devstral": {"ollama": "devstral:24b"},     # Latest code-specialized
     "ministral": {"ollama": "ministral:3b"},      # Fast, small model
     
     # Microsoft Phi
@@ -116,23 +115,31 @@ MODELS_MAP: Dict[str, Dict[str, str]] = {
 }
 
 DEFAULT_MODELS = {
-    ModelCategory.FAST_TEXT: "ministral",        # Fast Mistral model for quick tasks
-    ModelCategory.BEST_CODEGEN: "codestral",     # Best code generation (non-Chinese)
-    ModelCategory.VISION: "gemma3",     # Latest vision capabilities
+    ModelCategory.FAST: "gemini-flash-lite",
+    ModelCategory.CODEGEN: "sonnet", 
+    ModelCategory.VISION: "gemini-flash-lite",
 }
 
-def get_model_for_category(category: ModelCategory | str) -> str:
+OLLAMA_DEFAULT_MODELS = {
+    ModelCategory.FAST: "phi4",
+    ModelCategory.CODEGEN: "devstral",
+    ModelCategory.VISION: "gemma3",
+}
+
+def get_model_for_category(category: str) -> str:
     """Get model name for a specific category, with environment variable override support."""
-    if isinstance(category, ModelCategory):
-        category_str = category.value
-        enum_category = category
-    else:
-        category_str = category
-        # Convert string to enum for DEFAULT_MODELS lookup
-        enum_category = next((cat for cat in ModelCategory if cat.value == category), ModelCategory.BEST_CODEGEN)
+    env_var = f"LLM_{category.upper()}_MODEL"
     
-    env_var = f"LLM_{category_str.upper()}_MODEL"
-    return os.getenv(env_var, DEFAULT_MODELS.get(enum_category, "sonnet"))
+    # Check for explicit model override first
+    if explicit_model := os.getenv(env_var):
+        return explicit_model
+    
+    # If PREFER_OLLAMA is set, use Ollama models as default
+    if os.getenv("PREFER_OLLAMA"):
+        return OLLAMA_DEFAULT_MODELS.get(category, "gemma3")
+    
+    # Otherwise use regular defaults
+    return DEFAULT_MODELS.get(category, "sonnet")
 
 ANTHROPIC_MODEL_NAMES = list(ANTHROPIC_MODELS.keys())
 GEMINI_MODEL_NAMES = list(GEMINI_MODELS.keys())
