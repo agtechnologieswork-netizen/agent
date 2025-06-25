@@ -298,7 +298,7 @@ class BaseAgentSession(AgentInterface, ABC):
                                     event_tx=event_tx,
                                     status=AgentStatus.IDLE,
                                     kind=MessageKind.REVIEW_RESULT,
-                                    content="Changes generated: " + commit_message,
+                                    content=f"Changes generated: \n{commit_message}",
                                     agent_state=agent_state,
                                     unified_diff=final_diff,
                                     app_name=agent_state["metadata"]["app_name"],
