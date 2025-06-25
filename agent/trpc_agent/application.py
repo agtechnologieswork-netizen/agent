@@ -100,7 +100,7 @@ class FSMApplication:
             "",
             "The result application will be based on Typescript, Drizzle, tRPC and React. The list of available libraries is limited but sufficient to build CRUD apps."
         ])
-    
+
     @classmethod
     def template_path(cls) -> str:
         return "./trpc_agent/template"
@@ -147,7 +147,12 @@ class FSMApplication:
             setup_cmd=[["bun", "install"]],
         )
 
-        event_callback = settings.get('event_callback') if settings else None
+        if settings and "event_callback" in settings:
+            event_callback = settings.pop("event_callback")
+        else:
+            event_callback = None
+        model_params = settings or {}
+
         draft_actor = DraftActor(llm, workspace.clone(), model_params, event_callback=event_callback)
         application_actor = ConcurrentActor(
             handlers=HandlersActor(llm, workspace.clone(), model_params, beam_width=3, event_callback=event_callback),

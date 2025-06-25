@@ -58,8 +58,21 @@ def run_format():
 
 
 def run_e2e_tests():
+    Fire(_run_e2e_tests)
+
+
+def _run_e2e_tests(template=None):
     coloredlogs.install(level="INFO")
-    _run_tests_with_cache("tests/test_e2e.py", n_workers="0", verbose=True)
+    os.chdir(_current_dir())
+    
+    args = ["-v", "-n", "0", "tests/test_e2e.py"]
+    
+    if template:
+        # Run only tests marked with the specific template
+        args.extend(["-m", template])
+    
+    code = pytest.main(args)
+    sys.exit(code)
 
 
 def generate():

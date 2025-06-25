@@ -167,9 +167,12 @@ jobs:
           echo "Cleanup complete."
 
   e2e-tests:
-    name: Run E2E Tests
+    name: E2E Tests (${{ matrix.template }})
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    strategy:
+      matrix:
+        template: [nicegui, trpc]
     steps:
       - name: Checkout repository
         uses: actions/checkout@v3
@@ -192,24 +195,14 @@ jobs:
       - name: Run E2E tests
         working-directory: ./agent/
         run: |
-          echo "Running E2E tests..."
-          uv run test_e2e
-          exit_code=$?
-          if [ $exit_code -ne 0 ]; then
-            echo "E2E tests failed with exit code $exit_code"
-            exit $exit_code
-          else
-            echo "E2E tests passed successfully!"
-          fi
+          echo "Running E2E tests for ${{ matrix.template }}..."
+          uv run test_e2e ${{ matrix.template }}
 
       # Cleanup even if the job fails
       - name: Clean up Docker Compose services
         working-directory: ./agent/
         if: always()
-        run: |
-          echo "Stopping and removing Docker Compose services..."
-          docker compose down -v --remove-orphans
-          echo "Cleanup complete."
+        run: docker compose down -v --remove-orphans
 
   # 6. Build and push to ECR (only runs if previous jobs succeed)
   build-and-push:
