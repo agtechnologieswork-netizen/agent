@@ -35,5 +35,8 @@ def is_llm_provider_available() -> bool:
 
 
 # Reusable skipif condition for tests that require any LLM provider
-requires_llm_provider = lambda: not is_llm_provider_available()
-requires_llm_provider_reason = "No LLM provider configured (set GEMINI_API_KEY, ANTHROPIC_API_KEY, PREFER_OLLAMA, or configure specific models)" 
+def requires_llm_provider() -> bool:
+    """Return True if LLM provider is not available, for use with pytest.mark.skipif."""
+    return not is_llm_provider_available()
+
+requires_llm_provider_reason = "No LLM provider configured (set GEMINI_API_KEY, ANTHROPIC_API_KEY, PREFER_OLLAMA, or configure specific models)"

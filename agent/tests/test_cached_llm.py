@@ -6,7 +6,7 @@ from llm.utils import get_fast_llm_client, get_vision_llm_client, get_codegen_ll
 import uuid
 import ujson as json
 import os
-from typing import Any, Dict, List
+from typing import Any, Dict
 from tests.test_utils import requires_llm_provider, requires_llm_provider_reason
 
 pytestmark = pytest.mark.anyio
