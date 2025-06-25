@@ -6,6 +6,7 @@ from llm.utils import get_fast_llm_client, get_vision_llm_client, get_codegen_ll
 import uuid
 import ujson as json
 import os
+from typing import Any, Dict
 
 pytestmark = pytest.mark.anyio
 
@@ -53,7 +54,7 @@ async def test_cached_llm():
             cache_path=tmp_file.name,
         )
 
-        call_args = {
+        call_args: Dict[str, Any] = {
             "messages": [Message(role="user", content=[TextRaw("Hello, world!")])],
             "max_tokens": 100,
         }
@@ -81,7 +82,7 @@ async def test_cached_lru():
             max_cache_size=2,
         )
 
-        requests = {
+        requests: Dict[str, Dict[str, Any]] = {
             key: {
                 "messages": [Message(role="user", content=[TextRaw(str(i + 1))])],
                 "max_tokens": 100,
@@ -120,7 +121,7 @@ async def test_gemini():
         messages=[Message(role="user", content=[TextRaw("Hello, what are you?")])],
         max_tokens=512,
     )
-    text, = merge_text(resp.content)
+    text, = merge_text(list(resp.content))
     match text:
         case TextRaw(text=text):
             assert text != "", "Gemini should return a non-empty response"
@@ -140,7 +141,7 @@ async def test_gemini_with_image():
         max_tokens=512,
         attach_files=AttachedFiles(files=[image_path], _cache_key="test")
     )
-    text, = merge_text(resp.content)
+    text, = merge_text(list(resp.content))
 
     match text:
         case TextRaw(text=text):
@@ -152,8 +153,6 @@ async def test_gemini_with_image():
 @pytest.mark.skipif(os.getenv("PREFER_OLLAMA") is None, reason="PREFER_OLLAMA is not set")
 async def test_ollama_function_calling():
     """Test that Ollama function calling infrastructure works correctly"""
-    from llm.utils import get_codegen_llm_client
-    from llm.common import ToolUse
     
     client = get_codegen_llm_client()
     

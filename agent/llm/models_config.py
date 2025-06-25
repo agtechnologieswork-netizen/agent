@@ -53,7 +53,6 @@ LLM_VISION_MODEL=gemma3            # Google - best vision model
 
 import os
 from typing import Dict
-from enum import Enum
 
 
 class ModelCategory:
