@@ -162,7 +162,7 @@ class TrpcAgentSession(AgentInterface):
             top_level_agent_llm = get_universal_llm_client()
 
             while True:
-                new_messages, fsm_status = await self.processor_instance.step(
+                new_messages, fsm_status, full_thread = await self.processor_instance.step(
                     agent_state["fsm_messages"],
                     top_level_agent_llm,
                     self.model_params
