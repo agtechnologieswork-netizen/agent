@@ -80,8 +80,9 @@ async def run_e2e(prompt: str, standalone: bool, with_edit=True, template_id=Non
                 )
                 updated_diff = latest_unified_diff(new_events)
                 assert updated_diff, "No diff was generated in the agent response after edit"
-                # NEW ASSERTION: diff after edit must differ from the original diff, i.e. edit applied
                 assert updated_diff != diff, "Edit did not produce a new diff"
+            else:
+                updated_diff = diff
 
             with tempfile.TemporaryDirectory() as temp_dir:
                 # Determine template path based on template_id
@@ -91,8 +92,9 @@ async def run_e2e(prompt: str, standalone: bool, with_edit=True, template_id=Non
                     None: "trpc_agent/template"  # default
                 }
 
-                success, message = apply_patch(diff, temp_dir, template_paths[template_id])
-                assert success, f"Failed to apply patch: {message}"
+                for d in (diff, updated_diff):
+                    success, message = apply_patch(d, temp_dir, template_paths[template_id])
+                    assert success, f"Failed to apply patch: {message}"
 
                 original_dir = os.getcwd()
                 container_names = setup_docker_env()
@@ -144,6 +146,16 @@ async def run_e2e(prompt: str, standalone: bool, with_edit=True, template_id=Non
 @pytest.mark.parametrize("template_id", ["nicegui_agent", "trpc_agent"])
 async def test_e2e_generation(template_id):
     await run_e2e(standalone=False, prompt=DEFAULT_APP_REQUEST, template_id=template_id)
+
+@pytest.mark.skipif(os.getenv("GEMINI_API_KEY") is None, reason="GEMINI_API_KEY is not set")
+@pytest.mark.nicegui
+async def test_e2e_generation_nicegui():
+    await run_e2e(standalone=False, prompt=DEFAULT_APP_REQUEST, template_id="nicegui_agent")
+
+@pytest.mark.skipif(os.getenv("GEMINI_API_KEY") is None, reason="GEMINI_API_KEY is not set")
+@pytest.mark.trpc
+async def test_e2e_generation_trpc():
+    await run_e2e(standalone=False, prompt=DEFAULT_APP_REQUEST, template_id="trpc_agent")
 
 def create_app(prompt):
     import coloredlogs

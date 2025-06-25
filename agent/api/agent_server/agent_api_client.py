@@ -1077,6 +1077,7 @@ async def run_chatbot_client(
                             all_files=all_files_payload,  # Pass the files
                             settings=settings_dict,
                             stream_cb=print_event,
+                            template_id=template_id,
                         )
                     # Ensure newline after streaming events
                     print()
