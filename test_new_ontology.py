@@ -42,10 +42,10 @@ def test_new_ontology():
     print("✓ Default models correct for new ontology")
     
     print("\n2. Testing new environment variable names...")
-    os.environ['LLM_BEST_CODING_MODEL'] = 'deepseek-r1:32b'
-    os.environ['LLM_UNIVERSAL_MODEL'] = 'devstral:latest'
-    os.environ['LLM_ULTRA_FAST_MODEL'] = 'devstral:latest'
-    os.environ['LLM_VISION_MODEL'] = 'qwen2.5vl:32b'
+    os.environ['LLM_BEST_CODING_MODEL'] = 'devstral'
+    os.environ['LLM_UNIVERSAL_MODEL'] = 'llama3.3'
+    os.environ['LLM_ULTRA_FAST_MODEL'] = 'phi4'
+    os.environ['LLM_VISION_MODEL'] = 'gemma3'
     
     overrides = {
         'BEST_CODING': get_model_for_category(ModelCategory.BEST_CODING),
@@ -56,10 +56,10 @@ def test_new_ontology():
     print(f"   Overrides: {overrides}")
     
     expected_overrides = {
-        'BEST_CODING': 'deepseek-r1:32b',
-        'UNIVERSAL': 'devstral:latest',
-        'ULTRA_FAST': 'devstral:latest',
-        'VISION': 'qwen2.5vl:32b'
+        'BEST_CODING': 'devstral',
+        'UNIVERSAL': 'llama3.3',
+        'ULTRA_FAST': 'phi4',
+        'VISION': 'gemma3'
     }
     if overrides != expected_overrides:
         print(f"❌ Expected {expected_overrides}, got {overrides}")
