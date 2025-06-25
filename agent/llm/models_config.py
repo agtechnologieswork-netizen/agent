@@ -7,9 +7,10 @@ import os
 from typing import Dict
 
 class ModelCategory:
-    FAST = "fast"
-    CODEGEN = "codegen"
-    VISION = "vision"
+    BEST_CODING = "best_coding"  # slow, high quality coding
+    UNIVERSAL = "universal"      # medium speed, used for FSM tools
+    ULTRA_FAST = "ultra_fast"    # commit names etc
+    VISION = "vision"            # vision tasks
 
 ANTHROPIC_MODELS = {
     "sonnet": {
@@ -51,9 +52,10 @@ MODELS_MAP: Dict[str, Dict[str, str]] = {
 }
 
 DEFAULT_MODELS = {
-    ModelCategory.FAST: "gemini-flash-lite",
-    ModelCategory.CODEGEN: "sonnet", 
-    ModelCategory.VISION: "gemini-flash-lite",
+    ModelCategory.BEST_CODING: "sonnet",           # slow, high quality
+    ModelCategory.UNIVERSAL: "gemini-flash",       # medium speed for FSM tools
+    ModelCategory.ULTRA_FAST: "gemini-flash-lite", # ultra fast for commit names
+    ModelCategory.VISION: "gemini-flash-lite",     # vision tasks
 }
 
 def get_model_for_category(category: str) -> str:

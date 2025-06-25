@@ -85,7 +85,7 @@ def get_llm_client(
     Args:
         backend: LLM backend provider, either "bedrock", "anthropic", "gemini", or "ollama"
         model_name: Specific model name to use (overrides category)
-        category: Model category ("fast", "codegen", "vision") for automatic selection
+        category: Model category ("best_coding", "universal", "ultra_fast", "vision") for automatic selection
         cache_mode: Cache mode, either "off", "record", or "replay"
         client_params: Additional parameters to pass to the client constructor
 
@@ -94,7 +94,7 @@ def get_llm_client(
     """
     if model_name is None:
         if category is None:
-            category = ModelCategory.CODEGEN
+            category = ModelCategory.UNIVERSAL
         model_name = get_model_for_category(category)
     
     # Convert client_params dict to frozenset for caching
@@ -145,14 +145,19 @@ def get_llm_client(
     return client
 
 
-def get_fast_llm_client(**kwargs) -> AsyncLLM:
-    """Get LLM client optimized for fast tasks (name generation, commit messages)."""
-    return get_llm_client(category=ModelCategory.FAST, **kwargs)
+def get_best_coding_llm_client(**kwargs) -> AsyncLLM:
+    """Get LLM client optimized for best coding (slow, high quality)."""
+    return get_llm_client(category=ModelCategory.BEST_CODING, **kwargs)
 
 
-def get_codegen_llm_client(**kwargs) -> AsyncLLM:
-    """Get LLM client optimized for code generation and reasoning."""
-    return get_llm_client(category=ModelCategory.CODEGEN, **kwargs)
+def get_universal_llm_client(**kwargs) -> AsyncLLM:
+    """Get LLM client optimized for universal tasks (medium speed, FSM tools)."""
+    return get_llm_client(category=ModelCategory.UNIVERSAL, **kwargs)
+
+
+def get_ultra_fast_llm_client(**kwargs) -> AsyncLLM:
+    """Get LLM client optimized for ultra fast tasks (commit names etc)."""
+    return get_llm_client(category=ModelCategory.ULTRA_FAST, **kwargs)
 
 
 def get_vision_llm_client(**kwargs) -> AsyncLLM:
