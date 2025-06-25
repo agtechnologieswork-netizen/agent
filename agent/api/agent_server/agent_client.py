@@ -15,6 +15,9 @@ __all__ = [
     "MessageKind",
 ]
 
+# Sentinel value to distinguish between "not provided" and "explicitly None"
+_NOT_PROVIDED = object()
+
 class AgentApiClient:
     """Reusable client for interacting with the Agent API server"""
 
@@ -51,7 +54,7 @@ class AgentApiClient:
                           all_files: Optional[List[Dict[str, str]]] = None,
                           template_id: Optional[str] = None,
                           settings: Optional[Dict[str, Any]] = None,
-                          auth_token: Optional[str] = None,
+                          auth_token: Optional[str] = _NOT_PROVIDED,
                           stream_cb: Optional[Callable[[AgentSseEvent], None]] = None
                          ) -> Tuple[List[AgentSseEvent], AgentRequest]:
 
@@ -66,7 +69,8 @@ class AgentApiClient:
 
         # Resolve auth token at call time, so that environment variables loaded
         # later (e.g. via `load_dotenv()`) are picked up even after module import.
-        if auth_token is None:
+        # Only use CONFIG.builder_token if auth_token is not explicitly provided
+        if auth_token is _NOT_PROVIDED:
             auth_token = CONFIG.builder_token
 
         url = self.base_url or "http://test"
