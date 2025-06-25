@@ -11,6 +11,7 @@ from enum import Enum
 import ujson as json
 from typing import Dict, List, Optional, Any, Union, Literal, Type, TypeVar
 from pydantic import BaseModel, Field
+import datetime
 
 
 T = TypeVar('T', bound='BaseModel')
@@ -35,11 +36,11 @@ class UserMessage(BaseModel):
     """Represents a message from the user to the agent."""
     role: Literal["user"] = Field("user", description="Fixed field for client to detect user message in the history")
     content: str = Field(..., description="The content of the user's message.")
-    
+
     def to_json(self) -> str:
         """Serialize the model to JSON string."""
         return self.model_dump_json(by_alias=True)
-    
+
     @classmethod
     def from_json(cls: Type[T], json_str: str) -> T:
         """Deserialize a JSON string to a model instance."""
@@ -61,19 +62,19 @@ class ExternalContentBlock(BaseModel):
 
 class AgentMessage(BaseModel):
     """The detailed message payload from the agent."""
-    role: Literal["assistant"] = Field("assistant", description="Fixed field for client to detect assistant message in the history") 
+    role: Literal["assistant"] = Field("assistant", description="Fixed field for client to detect assistant message in the history")
     kind: MessageKind = Field(..., description="The type of message being sent.")
     messages: Optional[List[ExternalContentBlock]] = Field(
         None,
         description="Structured content blocks. Present only for new clients.")
     agent_state: Optional[Dict[str, Any]] = Field(
-        None, 
-        alias="agentState", 
+        None,
+        alias="agentState",
         description="Updated state of the Agent Server for the next request."
     )
     unified_diff: Optional[str] = Field(
-        None, 
-        alias="unifiedDiff", 
+        None,
+        alias="unifiedDiff",
         description="A unified diff format string representing code changes made by the agent."
     )
     complete_diff_hash: Optional[str] = Field(
@@ -94,11 +95,11 @@ class AgentMessage(BaseModel):
         None,
         description="Generated commit message suitable for use in Git commits."
     )
-    
+
     def to_json(self) -> str:
         """Serialize the model to JSON string."""
         return self.model_dump_json(by_alias=True)
-    
+
     @classmethod
     def from_json(cls: Type[T], json_str: str) -> T:
         """Deserialize a JSON string to a model instance."""
@@ -124,11 +125,12 @@ class AgentSseEvent(BaseModel):
     status: AgentStatus = Field(..., description="Current status of the agent (running or idle).")
     trace_id: Optional[str] = Field(None, alias="traceId", description="The trace ID corresponding to the POST request.")
     message: AgentMessage = Field(..., description="The detailed message payload from the agent.")
-    
+    timestamp: str = Field(default_factory=lambda: datetime.datetime.utcnow().isoformat(), description="UTC timestamp when the event was created in ISO format.")
+
     def to_json(self) -> str:
         """Serialize the model to JSON string."""
         return self.model_dump_json(by_alias=True)
-    
+
     @classmethod
     def from_json(cls: Type[T], json_str: str) -> T:
         """Deserialize a JSON string to a model instance."""
@@ -149,19 +151,19 @@ class AgentRequest(BaseModel):
     all_files: Optional[List[FileEntry]] = Field(None, alias="allFiles", description="All files in the workspace to be used for diff generation.")
     template_id: Optional[str] = Field(None, alias="templateId", description="Unique identifier of the template the agent supports.")
     agent_state: Optional[Dict[str, Any]] = Field(
-        None, 
-        alias="agentState", 
+        None,
+        alias="agentState",
         description="The full state of the Agent Server to restore from."
     )
     settings: Optional[Dict[str, Any]] = Field(
-        None, 
+        None,
         description="Settings for the agent execution, such as maximum number of iterations."
     )
-    
+
     def to_json(self) -> str:
         """Serialize the model to JSON string."""
         return self.model_dump_json(by_alias=True)
-    
+
     @classmethod
     def from_json(cls: Type[T], json_str: str) -> T:
         """Deserialize a JSON string to a model instance."""
@@ -172,11 +174,11 @@ class ErrorResponse(BaseModel):
     """Error response model."""
     error: str
     details: Optional[str] = None
-    
+
     def to_json(self) -> str:
         """Serialize the model to JSON string."""
         return self.model_dump_json()
-    
+
     @classmethod
     def from_json(cls: Type[T], json_str: str) -> T:
         """Deserialize a JSON string to a model instance."""
@@ -186,10 +188,10 @@ class ErrorResponse(BaseModel):
 def format_internal_message_for_display(message) -> str:
     """
     Convert an InternalMessage to user-friendly display format.
-    
+
     Args:
         message: InternalMessage object to format
-        
+
     Returns:
         User-friendly string representation
     """
@@ -197,7 +199,7 @@ def format_internal_message_for_display(message) -> str:
     tool_descriptions = {
         "start_fsm": "🚀 Starting application development",
         "create_file": "📄 Creating file",
-        "edit_file": "✏️  Editing file", 
+        "edit_file": "✏️  Editing file",
         "read_file": "📖 Reading file",
         "run_command": "⚡ Running command",
         "install_dependencies": "📦 Installing dependencies",
@@ -220,11 +222,11 @@ def format_internal_message_for_display(message) -> str:
         "lint_code": "✨ Linting code",
         "format_code": "💅 Formatting code",
     }
-    
+
     parts = []
     for block in message.content:
         block_type = type(block).__name__
-        
+
         if block_type == "TextRaw":
             parts.append(block.text)
         elif block_type == "ToolUse":
@@ -235,14 +237,14 @@ def format_internal_message_for_display(message) -> str:
             else:
                 # Convert snake_case to Title Case for unknown tools
                 description = f"🔧 {name.replace('_', ' ').title()}"
-            
+
             parts.append(description)
-            
+
             # Add relevant context from input in a user-friendly way
             input_data = block.input
             if input_data and isinstance(input_data, dict):
                 context_parts = []
-                
+
                 # Extract meaningful information based on common input patterns
                 if "app_description" in input_data:
                     context_parts.append(f"Building: {input_data['app_description']}")
@@ -257,14 +259,14 @@ def format_internal_message_for_display(message) -> str:
                     context_parts.append(f"Query: {input_data['query']}")
                 elif "message" in input_data:
                     context_parts.append(f"Message: {input_data['message']}")
-                
+
                 if context_parts:
                     parts.append(f"  {' | '.join(context_parts)}")
-                    
+
         elif block_type == "ToolUseResult":
             tool_use = block.tool_use
             tool_result = block.tool_result
-            
+
             if tool_result.is_error:
                 parts.append(f"❌ Error in {tool_use.name}: {tool_result.content}")
             else:
@@ -275,7 +277,7 @@ def format_internal_message_for_display(message) -> str:
                     parts.append(base_desc)
                 else:
                     parts.append(f"✅ {tool_name.replace('_', ' ').title()} completed")
-                
+
                 # Show brief result summary if content is short and meaningful
                 if tool_result.content and len(tool_result.content.strip()) < 200:
                     content_preview = tool_result.content.strip()
@@ -284,5 +286,5 @@ def format_internal_message_for_display(message) -> str:
         elif block_type == "ThinkingBlock":
             # Skip thinking blocks for external display
             pass
-    
+
     return "\n".join(parts).strip()
