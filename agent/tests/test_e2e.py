@@ -9,6 +9,7 @@ from api.agent_server.agent_client import AgentApiClient, MessageKind
 from api.agent_server.agent_api_client import apply_patch, latest_unified_diff, DEFAULT_APP_REQUEST, DEFAULT_EDIT_REQUEST, spawn_local_server
 from api.docker_utils import setup_docker_env, start_docker_compose, wait_for_healthy_containers, stop_docker_compose, get_container_logs
 from log import get_logger
+from tests.test_utils import requires_llm_provider, requires_llm_provider_reason
 
 logger = get_logger(__name__)
 
@@ -140,7 +141,7 @@ async def run_e2e(prompt: str, standalone: bool, with_edit=True, template_id=Non
                     # Clean up Docker containers
                     stop_docker_compose(temp_dir, container_names["project_name"])
 
-@pytest.mark.skipif(os.getenv("GEMINI_API_KEY") is None, reason="GEMINI_API_KEY is not set")
+@pytest.mark.skipif(requires_llm_provider(), reason=requires_llm_provider_reason)
 @pytest.mark.parametrize("template_id", ["nicegui_agent", "trpc_agent"])
 async def test_e2e_generation(template_id):
     await run_e2e(standalone=False, prompt=DEFAULT_APP_REQUEST, template_id=template_id)

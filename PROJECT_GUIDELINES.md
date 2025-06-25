@@ -566,3 +566,38 @@ Then set `OLLAMA_HOST=http://localhost:11434` in your `.env` file.
 
 Choose models based on your hardware capabilities and performance requirements.
 
+## Test LLM Provider Flexibility (Jan 2025)
+
+**Problem Solved**: Tests were hardcoded to only run when `GEMINI_API_KEY` was set, making it impossible to run tests with Ollama or other LLM providers.
+
+**Solution Implemented**:
+1. **Centralized Provider Detection**: Created `tests/test_utils.py` with `is_llm_provider_available()` function that checks for any configured LLM provider:
+   - Cloud providers: `GEMINI_API_KEY`, `ANTHROPIC_API_KEY`, `AWS_SECRET_ACCESS_KEY`/`PREFER_BEDROCK`
+   - Local providers: `PREFER_OLLAMA` 
+   - Explicit model overrides: `LLM_FAST_MODEL`, `LLM_CODEGEN_MODEL`, `LLM_VISION_MODEL`
+
+2. **Updated Test Conditions**: Replaced hardcoded `@pytest.mark.skipif(os.getenv("GEMINI_API_KEY") is None)` with flexible `@pytest.mark.skipif(requires_llm_provider())` in:
+   - `tests/test_e2e.py::test_e2e_generation` 
+   - `tests/test_cached_llm.py` (4 tests)
+
+3. **Provider-Agnostic Test Names**: Renamed tests from `test_gemini*` to `test_llm_*` to reflect their provider independence
+
+**Usage Examples**:
+```bash
+# Run tests with Ollama
+PREFER_OLLAMA=1 uv run pytest tests/test_e2e.py
+
+# Run tests with Gemini  
+GEMINI_API_KEY=your_key uv run pytest tests/test_e2e.py
+
+# Run tests with Anthropic
+ANTHROPIC_API_KEY=your_key uv run pytest tests/test_e2e.py
+
+# Tests are skipped when no provider is configured
+uv run pytest tests/test_e2e.py  # SKIPPED
+```
+
+This enables the test suite to work with any configured LLM provider, supporting both cloud and local development workflows.
+
+**Critical Fix**: Updated `tests/test_utils.py` to load `.env` files at import time, ensuring environment variables are available when `@pytest.mark.skipif` conditions are evaluated during test collection phase.
+

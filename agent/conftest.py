@@ -3,6 +3,18 @@ import asyncio
 import gc
 from llm.utils import llm_clients_cache
 
+try:
+    from dotenv import load_dotenv
+except ImportError:
+    load_dotenv = None
+
+
+
+@pytest.fixture(scope="session", autouse=True)
+def load_env_for_tests():
+    """Load .env file for tests if python-dotenv is available."""
+    if load_dotenv:
+        load_dotenv()
 
 
 @pytest.fixture(scope="session")
