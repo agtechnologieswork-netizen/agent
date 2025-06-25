@@ -14,7 +14,7 @@ def test_new_ontology():
             del os.environ[key]
     
     try:
-        from llm.utils import get_best_coding_llm_client, get_universal_llm_client, get_ultra_fast_llm_client, get_vision_llm_client
+        from llm.utils import get_best_coding_llm_client
         from llm.models_config import ModelCategory, get_model_for_category
         print("✓ Successfully imported all new categorized client functions")
     except ImportError as e:
@@ -70,7 +70,7 @@ def test_new_ontology():
     os.environ['OLLAMA_HOST'] = 'http://localhost:11434'
     
     try:
-        best_coding_client = get_best_coding_llm_client(cache_mode='off')
+        get_best_coding_llm_client(cache_mode='off')
         print("❌ Should have failed without ollama package")
         return False
     except ImportError as e:

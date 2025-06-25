@@ -25,7 +25,6 @@ from api.agent_server.models import (
 )
 from api.agent_server.interface import AgentInterface
 from llm.llm_generators import generate_app_name, generate_commit_message
-from api.base_agent_session import BaseAgentSession
 
 logger = logging.getLogger(__name__)
 
@@ -354,9 +353,3 @@ class TrpcAgentSession(AgentInterface):
             data=event.model_dump(),
         )
         self._sse_counter += 1
-
-
-class TrpcAgentSession(BaseAgentSession):
-    def __init__(self, client: dagger.Client, application_id: str | None = None, trace_id: str | None = None, settings: Optional[Dict[str, Any]] = None):
-        """Initialize a new TRPC agent session"""
-        super().__init__(client, FSMApplication, application_id, trace_id, settings)
