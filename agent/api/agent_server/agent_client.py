@@ -51,7 +51,7 @@ class AgentApiClient:
                           all_files: Optional[List[Dict[str, str]]] = None,
                           template_id: Optional[str] = None,
                           settings: Optional[Dict[str, Any]] = None,
-                          auth_token: Optional[str] = CONFIG.builder_token,
+                          auth_token: Optional[str] = None,
                           stream_cb: Optional[Callable[[AgentSseEvent], None]] = None
                          ) -> Tuple[List[AgentSseEvent], AgentRequest]:
 
@@ -63,6 +63,11 @@ class AgentApiClient:
             logger.info(f"Using existing request with trace ID: {request.trace_id}, ignoring some parameters like message, all_files")
             if all_files is not None:
                 request.all_files = [FileEntry(**f) for f in all_files]
+
+        # Resolve auth token at call time, so that environment variables loaded
+        # later (e.g. via `load_dotenv()`) are picked up even after module import.
+        if auth_token is None:
+            auth_token = CONFIG.builder_token
 
         url = self.base_url or "http://test"
         url += "/message"
