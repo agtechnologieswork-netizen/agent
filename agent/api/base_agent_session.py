@@ -43,7 +43,7 @@ class AgentState(TypedDict):
 
 class BaseAgentSession(AgentInterface, ABC):
     """Base class for agent sessions with common functionality"""
-    
+
     def __init__(self, client: dagger.Client, fsm_application_class: Type[FSMInterface], application_id: str | None = None, trace_id: str | None = None, settings: Optional[Dict[str, Any]] = None):
         """Initialize a new agent session"""
         self.application_id = application_id or uuid4().hex
@@ -127,6 +127,7 @@ class BaseAgentSession(AgentInterface, ABC):
             }
 
             async def emit_intermediate_message(message: str) -> None:
+                logger.info(f"Emitting intermediate message: {message}")
                 await self.send_event(
                     event_tx=event_tx,
                     status=AgentStatus.RUNNING,
@@ -153,7 +154,7 @@ class BaseAgentSession(AgentInterface, ABC):
                     metadata.update(req_metadata)
             else:
                 logger.info(f"Initializing new session for trace {self.trace_id}")
-            
+
             # Unconditional initialization with event callback
             self.processor_instance = FSMToolProcessor(self.client, self.fsm_application_class, fsm_app=fsm_app, settings=fsm_settings, event_callback=emit_intermediate_message)
             agent_state: AgentState = {
