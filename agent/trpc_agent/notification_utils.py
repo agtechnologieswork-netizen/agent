@@ -20,6 +20,34 @@ async def notify_if_callback(event_callback: Callable[[str], Awaitable[None]] | 
             logger.warning(f"Failed to emit {error_context}: {e}")
 
 
+async def notify_stage(event_callback: Callable[[str], Awaitable[None]] | None, stage: str, status: str = "in_progress") -> None:
+    """
+    Send consolidated stage-based notifications.
+    
+    Args:
+        event_callback: Optional callback function to send events
+        stage: The stage name (e.g., "building handlers", "running tests")
+        status: Stage status - "in_progress", "completed", "failed"
+    """
+    if not event_callback:
+        return
+        
+    # Create simple, consolidated messages without excessive emojis
+    if status == "in_progress":
+        message = f"┃ ⎿  {stage}..."
+    elif status == "completed":
+        message = f"┃ ⎿  ✓ {stage}"
+    elif status == "failed":
+        message = f"┃ ⎿  ✗ {stage}"
+    else:
+        message = f"┃ ⎿  {stage}"
+    
+    try:
+        await event_callback(message)
+    except Exception as e:
+        logger.warning(f"Failed to emit stage notification for '{stage}': {e}")
+
+
 def get_file_emoji(file_path: str) -> str:
     """
     Get appropriate emoji for file type based on file extension.

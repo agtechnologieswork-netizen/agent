@@ -22,6 +22,7 @@ import dagger
 import os
 import json
 from brotli_asgi import BrotliMiddleware
+from dotenv import load_dotenv
 
 from api.agent_server.models import (
     AgentRequest,
@@ -34,6 +35,7 @@ from api.agent_server.models import (
 )
 from api.agent_server.interface import AgentInterface
 from trpc_agent.agent_session import TrpcAgentSession
+from nicegui_agent.agent_session import NiceguiAgentSession
 from api.agent_server.template_diff_impl import TemplateDiffAgentImplementation
 from api.config import CONFIG
 
@@ -43,7 +45,15 @@ logger = get_logger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Load environment variables from .env file
+    load_dotenv()
     logger.info("Initializing Async Agent Server API")
+    logger.info(f"Current working directory: {os.getcwd()}")
+    logger.info(f"PREFER_OLLAMA: {os.getenv('PREFER_OLLAMA', 'NOT_SET')}")
+    logger.info(f"AWS_SECRET_ACCESS_KEY: {'SET' if os.getenv('AWS_SECRET_ACCESS_KEY') else 'NOT_SET'}")
+    logger.info(f"ANTHROPIC_API_KEY: {'SET' if os.getenv('ANTHROPIC_API_KEY') else 'NOT_SET'}")
+    logger.info(f"GEMINI_API_KEY: {'SET' if os.getenv('GEMINI_API_KEY') else 'NOT_SET'}")
+
     yield
     logger.info("Shutting down Async Agent Server API")
 
@@ -268,23 +278,21 @@ async def message(
         logger.info(f"Received message request for application {request.application_id}, trace {request.trace_id}")
         set_trace_id(request.trace_id)
         logger.info("Starting SSE stream for application")
-        
-        # Use template_id from request if provided, otherwise use CONFIG default
-        template_id = request.template_id or CONFIG.default_template_id
+        template_id = request.template_id or CONFIG.agent_type
         logger.info(f"Using template: {template_id}")
-        
-        # Validate template_id
-        if template_id not in CONFIG.available_templates:
-            logger.warning(f"Unknown template {template_id}, falling back to default")
-            template_id = CONFIG.default_template_id
-        
-        agent_type = {
+
+        agent_types = {
             "template_diff": TemplateDiffAgentImplementation,
             "trpc_agent": TrpcAgentSession,
+            "nicegui_agent": NiceguiAgentSession,
         }
-        
+
+        if template_id not in agent_types:
+            logger.warning(f"Unknown template {template_id}, available types: {agent_types}, falling back to default")
+            template_id = CONFIG.agent_type
+
         return StreamingResponse(
-            run_agent(request, agent_type[CONFIG.agent_type]),
+            run_agent(request, agent_types[template_id]),
             media_type="text/event-stream"
         )
 

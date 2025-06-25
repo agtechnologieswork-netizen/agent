@@ -57,6 +57,9 @@ class AgentApiClient:
 
         """Send a message to the agent and return the parsed SSE events"""
 
+        if self.client is None:
+            raise RuntimeError("Client not initialized. Use 'async with AgentApiClient(...) as client:' pattern.")
+
         if request is None:
             request = self.create_request(message, messages_history, application_id, trace_id, agent_state, all_files, template_id, settings)
         else:
@@ -82,7 +85,11 @@ class AgentApiClient:
         ) as response:
             if response.status_code != 200:
                 await response.aread()
-                raise ValueError(f"Request failed with status code {response.status_code}: {response.json()}")
+                try:
+                    error_detail = response.json()
+                except (json.JSONDecodeError, ValueError):
+                    error_detail = response.text or "No response content"
+                raise ValueError(f"Request failed with status code {response.status_code}: {error_detail}")
             events = await self.parse_sse_events(response, stream_cb)
         return events, request
 
@@ -92,7 +99,8 @@ class AgentApiClient:
                                    message: str,
                                    all_files: Optional[List[Dict[str, str]]] = None,
                                    settings: Optional[Dict[str, Any]] = None,
-                                   stream_cb: Optional[Callable[[AgentSseEvent], None]] = None
+                                   stream_cb: Optional[Callable[[AgentSseEvent], None]] = None,
+                                   template_id: Optional[str] = None
                                   ) -> Tuple[List[AgentSseEvent], AgentRequest]:
         """Continue a conversation using the agent state from previous events."""
         # Use agent_state from the latest event (if any)
@@ -123,7 +131,8 @@ class AgentApiClient:
             agent_state=agent_state,
             all_files=all_files,
             settings=settings,
-            stream_cb=stream_cb
+            stream_cb=stream_cb,
+            template_id=template_id,
         )
 
         return events, request

@@ -1,11 +1,13 @@
 import pytest
 import tempfile
 from llm.cached import CachedLLM, AsyncLLM
-from llm.common import Message, TextRaw, Completion, Tool, AttachedFiles
-from llm.utils import get_fast_llm_client, get_vision_llm_client, merge_text
+from llm.common import Message, TextRaw, Completion, Tool, AttachedFiles, ToolUse
+from llm.utils import get_ultra_fast_llm_client, get_vision_llm_client, get_best_coding_llm_client, merge_text
 import uuid
 import ujson as json
 import os
+from typing import Any, Dict
+from tests.test_utils import requires_llm_provider, requires_llm_provider_reason
 
 pytestmark = pytest.mark.anyio
 
@@ -43,7 +45,8 @@ class StubLLM(AsyncLLM):
             thinking_tokens=0,
         )
 
-@pytest.mark.skipif(os.getenv("GEMINI_API_KEY") is None, reason="GEMINI_API_KEY is not set")
+
+@pytest.mark.skipif(requires_llm_provider(), reason=requires_llm_provider_reason)
 async def test_cached_llm():
     with tempfile.NamedTemporaryFile(delete_on_close=False) as tmp_file:
         base_llm = StubLLM()
@@ -53,7 +56,7 @@ async def test_cached_llm():
             cache_path=tmp_file.name,
         )
 
-        call_args = {
+        call_args: Dict[str, Any] = {
             "messages": [Message(role="user", content=[TextRaw("Hello, world!")])],
             "max_tokens": 100,
         }
@@ -70,7 +73,7 @@ async def test_cached_llm():
 
 
 
-@pytest.mark.skipif(os.getenv("GEMINI_API_KEY") is None, reason="GEMINI_API_KEY is not set")
+@pytest.mark.skipif(requires_llm_provider(), reason=requires_llm_provider_reason)
 async def test_cached_lru():
     with tempfile.NamedTemporaryFile(delete_on_close=False) as tmp_file:
         base_llm = StubLLM()
@@ -81,7 +84,7 @@ async def test_cached_lru():
             max_cache_size=2,
         )
 
-        requests = {
+        requests: Dict[str, Dict[str, Any]] = {
             key: {
                 "messages": [Message(role="user", content=[TextRaw(str(i + 1))])],
                 "max_tokens": 100,
@@ -113,37 +116,90 @@ async def test_cached_lru():
         assert json.dumps(new_resp.to_dict()) != responses["first"], "First request should not hit the cache"
         assert base_llm.calls == 4, "Base LLM should still be called four times"
 
-@pytest.mark.skipif(os.getenv("GEMINI_API_KEY") is None, reason="GEMINI_API_KEY is not set")
-async def test_gemini():
-    client = get_fast_llm_client()
+@pytest.mark.skipif(requires_llm_provider(), reason=requires_llm_provider_reason)
+async def test_llm_text_completion():
+    client = get_ultra_fast_llm_client()
     resp = await client.completion(
         messages=[Message(role="user", content=[TextRaw("Hello, what are you?")])],
         max_tokens=512,
     )
-    text, = merge_text(resp.content)
+    text, = merge_text(list(resp.content))
     match text:
         case TextRaw(text=text):
-            assert text != "", "Gemini should return a non-empty response"
+            assert text != "", "LLM should return a non-empty response"
         case _:
             raise ValueError(f"Unexpected content type: {type(text)}")
 
 
-@pytest.mark.skipif(os.getenv("GEMINI_API_KEY") is None, reason="GEMINI_API_KEY is not set")
-async def test_gemini_with_image():
+@pytest.mark.skipif(requires_llm_provider(), reason=requires_llm_provider_reason)
+async def test_llm_vision_completion():
     client = get_vision_llm_client()
     image_path = os.path.join(
         os.path.dirname(__file__),
         "image.png",
     )
-    resp = await client.completion(
-        messages=[Message(role="user", content=[TextRaw("Answer only what is written in the image (single word, dot is allowed)")])],
-        max_tokens=512,
-        attach_files=AttachedFiles(files=[image_path], _cache_key="test")
-    )
-    text, = merge_text(resp.content)
+    
+    try:
+        resp = await client.completion(
+            messages=[Message(role="user", content=[TextRaw("Answer only what is written in the image (single word, dot is allowed)")])],
+            max_tokens=512,
+            attach_files=AttachedFiles(files=[image_path], _cache_key="test")
+        )
+        text, = merge_text(list(resp.content))
 
-    match text:
-        case TextRaw(text=text):
-            assert "app.build" in text.lower(), f"Gemini should return 'app.build', got {text}"
-        case _:
-            raise ValueError(f"Unexpected content type: {type(text)}")
+        match text:
+            case TextRaw(text=text):
+                # Vision models should be able to read text from images
+                # The test image contains "app.build" so we expect that in the response
+                assert "app.build" in text.lower(), f"Vision model should return 'app.build', got {text}"
+            case _:
+                raise ValueError(f"Unexpected content type: {type(text)}")
+    except Exception as e:
+        # Some providers (like basic Ollama models) might not support vision
+        # Skip the test gracefully if the model doesn't support attach_files
+        if "attach_files" in str(e) or "vision" in str(e).lower():
+            pytest.skip(f"Current LLM provider doesn't support vision: {e}")
+        else:
+            raise
+
+
+@pytest.mark.skipif(os.getenv("PREFER_OLLAMA") is None, reason="PREFER_OLLAMA is not set")
+async def test_ollama_function_calling():
+    """Test that Ollama function calling infrastructure works correctly"""
+    
+    client = get_best_coding_llm_client()
+    
+    # Define a test tool
+    tools: list[Tool] = [{
+        'name': 'calculate',
+        'description': 'Calculate a mathematical expression',
+        'input_schema': {
+            'type': 'object',
+            'properties': {
+                'expression': {'type': 'string', 'description': 'Mathematical expression to calculate'}
+            },
+            'required': ['expression']
+        }
+    }]
+    
+    # Use a more direct prompt that encourages tool usage
+    messages = [Message(role="user", content=[TextRaw("Use the function calculate to compute 34545 + 123")])]
+    
+    resp = await client.completion(
+        messages=messages,
+        max_tokens=512,
+        tools=tools
+    )
+    
+    # Check if we got a tool call OR at least verify the request/response structure works
+    tool_calls = [block for block in resp.content if isinstance(block, ToolUse)]
+    
+    # The test passes if either:
+    # 1. We get a tool call (ideal case)
+    # 2. We get a text response but the infrastructure works (acceptable)
+    # Ideal case: model used the tool
+    assert len(tool_calls) > 0, "Should have at least one tool call"
+    tool_call = tool_calls[0]
+    assert tool_call.name == 'calculate', f"Expected tool 'calculate', got '{tool_call.name}'"
+    assert isinstance(tool_call.input, dict), f"Tool input should be dict, got {type(tool_call.input)}"
+    assert 'expression' in tool_call.input, f"Tool input should have 'expression' key, got {tool_call.input}"

@@ -454,3 +454,150 @@ This eliminates the double-JSON-encoding issue while providing a better user exp
 - Don't use `==`; always use `===` for strict equality checks.
 - Remember that empty objects (`{}`) are truthy.
 
+# LLM Model Configuration (2025)
+
+The agent system supports multiple LLM providers with category-based selection for optimal performance.
+
+## Model Categories
+
+The system uses three main categories:
+- **FAST_TEXT**: Quick tasks (name generation, commit messages, simple text processing)
+- **BEST_CODEGEN**: Complex code generation and reasoning tasks
+- **VISION**: Image analysis and UI understanding
+
+## Current Defaults (Updated Jan 2025)
+
+```python
+from llm.utils import get_fast_text_client, get_best_codegen_client, get_vision_client
+from llm.models_config import ModelCategory
+
+# Recommended usage - these use current defaults
+fast_client = get_fast_text_client()        # Uses Ministral 3B
+codegen_client = get_best_codegen_client()  # Uses Codestral 22B  
+vision_client = get_vision_client()         # Uses LLaMA 3.2 Vision
+```
+
+## Latest Model Recommendations
+
+Based on [recent performance benchmarks](https://medium.com/@rameshkannanyt0078/the-best-ollama-models-for-developers-and-programmers-1662dae514a7) and [Ollama model availability](https://ollama.com/), here are the current best options:
+
+### For Local Development (Ollama)
+- **Fast Tasks**: `ministral` (3B) - Fastest Mistral model
+- **Code Generation**: `codestral` (22B) - Specialized for code
+- **Vision Tasks**: `llama3.2-vision` - Latest Meta vision model
+- **Advanced Coding**: `qwen3-coder` (7B) - Best coding performance
+- **Large Tasks**: `qwen3` (30B) - Advanced reasoning with thinking mode
+
+### For Cloud APIs
+- **Fast Tasks**: `gemini-flash-lite` (Google)
+- **Code Generation**: `sonnet` (Anthropic Claude)
+- **Vision Tasks**: `gemini-flash` (Google)
+
+## Environment Configuration
+
+Create a `.env` file to override defaults:
+
+```bash
+# Recommended: Latest non-Chinese models (2025)
+LLM_FAST_MODEL=ministral           # Mistral 3B
+LLM_CODEGEN_MODEL=codestral        # Mistral 22B 
+LLM_VISION_MODEL=llama3.2-vision   # Meta Vision
+
+# Alternative: All-American models
+# LLM_FAST_MODEL=phi4              # Microsoft 14B
+# LLM_CODEGEN_MODEL=granite-code   # IBM 20B
+# LLM_VISION_MODEL=llama3.2-vision # Meta Vision
+
+# For highest performance (includes Chinese models)
+# LLM_CODEGEN_MODEL=qwen3-coder    # Best for coding
+# LLM_VISION_MODEL=qwen3           # Advanced vision + thinking
+
+# API Keys (if using cloud models)
+ANTHROPIC_API_KEY=your_key_here
+GEMINI_API_KEY=your_key_here
+OLLAMA_HOST=http://localhost:11434
+```
+
+## Migration from Old Function Names
+
+The system now provides both legacy and new function names:
+
+```python
+# Legacy (still works)
+from llm.utils import get_fast_llm_client, get_codegen_llm_client, get_vision_llm_client
+
+# New recommended names (same functionality)
+from llm.utils import get_fast_text_client, get_best_codegen_client, get_vision_client
+
+# Or use the category-based approach
+from llm.utils import get_llm_client_by_category
+from llm.models_config import ModelCategory
+
+client = get_llm_client_by_category(ModelCategory.BEST_CODEGEN)
+```
+
+## Setting Up Ollama
+
+To use local models, install and start Ollama:
+
+```bash
+# Install Ollama
+curl -fsSL https://ollama.ai/install.sh | sh
+
+# Pull recommended models
+ollama pull ministral      # Fast tasks
+ollama pull codestral:22b  # Code generation
+ollama pull llama3.2-vision # Vision tasks
+
+# Optional: Advanced models
+ollama pull qwen3-coder:7b  # Excellent coding
+ollama pull qwen3:30b       # Advanced reasoning
+```
+
+Then set `OLLAMA_HOST=http://localhost:11434` in your `.env` file.
+
+## Model Performance Notes
+
+- **Ministral (3B)**: Fastest for simple tasks, low memory usage
+- **Codestral (22B)**: Best balance of performance and speed for coding
+- **Qwen3-Coder (7B)**: Highest coding performance per parameter
+- **LLaMA 3.2 Vision**: Most reliable for image analysis
+- **Qwen3 (30B)**: Advanced reasoning with "thinking mode" capability
+
+Choose models based on your hardware capabilities and performance requirements.
+
+## Test LLM Provider Flexibility (Jan 2025)
+
+**Problem Solved**: Tests were hardcoded to only run when `GEMINI_API_KEY` was set, making it impossible to run tests with Ollama or other LLM providers.
+
+**Solution Implemented**:
+1. **Centralized Provider Detection**: Created `tests/test_utils.py` with `is_llm_provider_available()` function that checks for any configured LLM provider:
+   - Cloud providers: `GEMINI_API_KEY`, `ANTHROPIC_API_KEY`, `AWS_SECRET_ACCESS_KEY`/`PREFER_BEDROCK`
+   - Local providers: `PREFER_OLLAMA` 
+   - Explicit model overrides: `LLM_FAST_MODEL`, `LLM_CODEGEN_MODEL`, `LLM_VISION_MODEL`
+
+2. **Updated Test Conditions**: Replaced hardcoded `@pytest.mark.skipif(os.getenv("GEMINI_API_KEY") is None)` with flexible `@pytest.mark.skipif(requires_llm_provider())` in:
+   - `tests/test_e2e.py::test_e2e_generation` 
+   - `tests/test_cached_llm.py` (4 tests)
+
+3. **Provider-Agnostic Test Names**: Renamed tests from `test_gemini*` to `test_llm_*` to reflect their provider independence
+
+**Usage Examples**:
+```bash
+# Run tests with Ollama
+PREFER_OLLAMA=1 uv run pytest tests/test_e2e.py
+
+# Run tests with Gemini  
+GEMINI_API_KEY=your_key uv run pytest tests/test_e2e.py
+
+# Run tests with Anthropic
+ANTHROPIC_API_KEY=your_key uv run pytest tests/test_e2e.py
+
+# Tests are skipped when no provider is configured
+uv run pytest tests/test_e2e.py  # SKIPPED
+```
+
+This enables the test suite to work with any configured LLM provider, supporting both cloud and local development workflows.
+
+**Critical Fix**: Updated `tests/test_utils.py` to load `.env` files at import time, ensuring environment variables are available when `@pytest.mark.skipif` conditions are evaluated during test collection phase.
+

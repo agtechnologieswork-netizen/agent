@@ -1,5 +1,6 @@
 import itertools
 import os
+import re
 from typing import Literal, Dict, Sequence
 from anthropic import AsyncAnthropic, AsyncAnthropicBedrock
 from llm.common import AsyncLLM, Message, TextRaw, ContentBlock
@@ -33,6 +34,14 @@ def merge_text(content: list[ContentBlock]) -> list[ContentBlock]:
             merged.extend(g)
     return merged
 
+def extract_tag(source: str | None, tag: str):
+    if source is None:
+        return None
+    pattern = re.compile(rf"<{tag}>(.*?)</{tag}>", re.DOTALL)
+    match = pattern.search(source)
+    if match:
+        return match.group(1).strip()
+    return None
 
 async def loop_completion(m_client: AsyncLLM, messages: list[Message], system_prompt: str | None = None, **kwargs) -> Message:
     content: list[ContentBlock] = []
@@ -46,6 +55,10 @@ async def loop_completion(m_client: AsyncLLM, messages: list[Message], system_pr
 
 
 def _guess_llm_backend(model_name: str) -> LLMBackend:
+    # If PREFER_OLLAMA is set and model is available in Ollama, use Ollama
+    if os.getenv("PREFER_OLLAMA") and model_name in OLLAMA_MODEL_NAMES:
+        return "ollama"
+    
     if model_name in ANTHROPIC_MODEL_NAMES:
         if os.getenv("AWS_SECRET_ACCESS_KEY") or os.getenv("PREFER_BEDROCK"):
             return "bedrock"
@@ -58,9 +71,8 @@ def _guess_llm_backend(model_name: str) -> LLMBackend:
             return "gemini"
         raise ValueError("Gemini backend requires GEMINI_API_KEY to be set")
     elif model_name in OLLAMA_MODEL_NAMES:
-        if os.getenv("OLLAMA_HOST") or os.getenv("OLLAMA_API_BASE"):
-            return "ollama"
-        raise ValueError("Ollama backend requires OLLAMA_HOST or OLLAMA_API_BASE to be set")
+        # Default to localhost if no host is specified
+        return "ollama"
     else:
         raise ValueError(f"Unknown model name: {model_name}")
 
@@ -128,7 +140,12 @@ def get_llm_client(
         case "ollama":
             if OllamaLLM is None:
                 raise ValueError("Ollama backend requires ollama package to be installed. Install with: uv sync --group ollama")
-            host = client_params.get("host", "http://localhost:11434")
+            # Use OLLAMA_HOST/OLLAMA_API_BASE env vars or default to localhost
+            host = (
+                os.getenv("OLLAMA_HOST") or 
+                os.getenv("OLLAMA_API_BASE") or 
+                client_params.get("host", "http://localhost:11434")
+            )
             client = OllamaLLM(host=host, model_name=chosen_model)
         case _:
             raise ValueError(f"Unknown backend: {backend}")

@@ -1,5 +1,8 @@
 import logging
 from typing import Dict, Any, Optional, TypedDict, List, Union
+from uuid import uuid4
+from datetime import datetime
+import dagger
 
 from anyio.streams.memory import MemoryObjectSendStream
 
@@ -9,10 +12,6 @@ from llm.utils import AsyncLLM, get_ultra_fast_llm_client, get_universal_llm_cli
 from api.fsm_tools import FSMToolProcessor, FSMStatus
 from api.snapshot_utils import snapshot_saver
 from core.statemachine import MachineCheckpoint
-from datetime import datetime
-from uuid import uuid4
-import dagger
-
 from api.agent_server.models import (
     AgentRequest,
     AgentSseEvent,
@@ -26,6 +25,7 @@ from api.agent_server.models import (
 )
 from api.agent_server.interface import AgentInterface
 from llm.llm_generators import generate_app_name, generate_commit_message
+from api.base_agent_session import BaseAgentSession
 
 logger = logging.getLogger(__name__)
 
@@ -354,3 +354,9 @@ class TrpcAgentSession(AgentInterface):
             data=event.model_dump(),
         )
         self._sse_counter += 1
+
+
+class TrpcAgentSession(BaseAgentSession):
+    def __init__(self, client: dagger.Client, application_id: str | None = None, trace_id: str | None = None, settings: Optional[Dict[str, Any]] = None):
+        """Initialize a new TRPC agent session"""
+        super().__init__(client, FSMApplication, application_id, trace_id, settings)
