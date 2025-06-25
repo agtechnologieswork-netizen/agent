@@ -143,19 +143,12 @@ async def run_e2e(prompt: str, standalone: bool, with_edit=True, template_id=Non
                     stop_docker_compose(temp_dir, container_names["project_name"])
 
 @pytest.mark.skipif(os.getenv("GEMINI_API_KEY") is None, reason="GEMINI_API_KEY is not set")
-@pytest.mark.parametrize("template_id", ["nicegui_agent", "trpc_agent"])
+@pytest.mark.parametrize("template_id", [
+    pytest.param("nicegui_agent", marks=pytest.mark.nicegui),
+    pytest.param("trpc_agent", marks=pytest.mark.trpc)
+])
 async def test_e2e_generation(template_id):
     await run_e2e(standalone=False, prompt=DEFAULT_APP_REQUEST, template_id=template_id)
-
-@pytest.mark.skipif(os.getenv("GEMINI_API_KEY") is None, reason="GEMINI_API_KEY is not set")
-@pytest.mark.nicegui
-async def test_e2e_generation_nicegui():
-    await run_e2e(standalone=False, prompt=DEFAULT_APP_REQUEST, template_id="nicegui_agent")
-
-@pytest.mark.skipif(os.getenv("GEMINI_API_KEY") is None, reason="GEMINI_API_KEY is not set")
-@pytest.mark.trpc
-async def test_e2e_generation_trpc():
-    await run_e2e(standalone=False, prompt=DEFAULT_APP_REQUEST, template_id="trpc_agent")
 
 def create_app(prompt):
     import coloredlogs
