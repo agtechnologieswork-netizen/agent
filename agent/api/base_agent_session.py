@@ -226,7 +226,7 @@ class BaseAgentSession(AgentInterface, ABC):
                             event_tx=event_tx,
                             status=AgentStatus.IDLE,
                             kind=MessageKind.REFINEMENT_REQUEST,
-                            content=refinement_request_message,
+                            content=[refinement_request_message],
                             agent_state=agent_state,
                             app_name=agent_state["metadata"]["app_name"],
                         )
@@ -240,7 +240,7 @@ class BaseAgentSession(AgentInterface, ABC):
                             event_tx=event_tx,
                             status=AgentStatus.IDLE,
                             kind=MessageKind.RUNTIME_ERROR,
-                            content=runtime_error_message,
+                            content=[runtime_error_message],
                         )
                     case FSMStatus.COMPLETED:
                         try:
@@ -270,7 +270,7 @@ class BaseAgentSession(AgentInterface, ABC):
                                     event_tx=event_tx,
                                     status=AgentStatus.IDLE,
                                     kind=MessageKind.STAGE_RESULT,
-                                    content=no_changes_message,
+                                    content=[no_changes_message],
                                     agent_state=agent_state,
                                     app_name=agent_state["metadata"]["app_name"],
                                 )
