@@ -90,7 +90,7 @@ class OllamaLLM:
                     input=tool_args,
                     id=tool_id
                 ))
-            elif isinstance(tool_call, dict) and tool_call.get("type") == "function":  # Dict format
+            elif isinstance(tool_call, dict) and "function" in tool_call:  # Dict format from Ollama API
                 func = tool_call.get("function", {})
                 content_blocks.append(common.ToolUse(
                     name=func.get("name", ""),
