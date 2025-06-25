@@ -8,7 +8,7 @@ import dagger
 from anyio.streams.memory import MemoryObjectSendStream
 
 from llm.common import ContentBlock, InternalMessage, TextRaw
-from llm.utils import AsyncLLM, get_llm_client
+from llm.utils import AsyncLLM, get_codegen_llm_client, get_vision_llm_client
 from api.fsm_tools import FSMToolProcessor, FSMStatus, FSMInterface
 from api.snapshot_utils import snapshot_saver
 from core.statemachine import MachineCheckpoint
@@ -51,7 +51,7 @@ class BaseAgentSession(AgentInterface, ABC):
         self.settings = settings or {}
         self.fsm_application_class = fsm_application_class
         self.processor_instance = FSMToolProcessor(client, fsm_application_class)
-        self.llm_client: AsyncLLM = get_llm_client()
+        self.llm_client: AsyncLLM = get_codegen_llm_client()
         self.model_params = {
             "max_tokens": 8192,
         }
@@ -166,8 +166,8 @@ class BaseAgentSession(AgentInterface, ABC):
             # Processing
             logger.info(f"Last user message: {fsm_message_history[-1].content}")
 
-            flash_lite_client = get_llm_client(model_name="gemini-flash-lite")
-            top_level_agent_llm = get_llm_client(model_name="gemini-flash")
+            flash_lite_client = get_vision_llm_client()
+            top_level_agent_llm = get_codegen_llm_client()
 
             while True:
                 new_messages, fsm_status, full_thread = await self.processor_instance.step(
