@@ -57,6 +57,9 @@ class AgentApiClient:
 
         """Send a message to the agent and return the parsed SSE events"""
 
+        if self.client is None:
+            raise RuntimeError("Client not initialized. Use 'async with AgentApiClient(...) as client:' pattern.")
+
         if request is None:
             request = self.create_request(message, messages_history, application_id, trace_id, agent_state, all_files, template_id, settings)
         else:
@@ -82,7 +85,11 @@ class AgentApiClient:
         ) as response:
             if response.status_code != 200:
                 await response.aread()
-                raise ValueError(f"Request failed with status code {response.status_code}: {response.json()}")
+                try:
+                    error_detail = response.json()
+                except (json.JSONDecodeError, ValueError):
+                    error_detail = response.text or "No response content"
+                raise ValueError(f"Request failed with status code {response.status_code}: {error_detail}")
             events = await self.parse_sse_events(response, stream_cb)
         return events, request
 
