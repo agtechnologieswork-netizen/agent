@@ -459,17 +459,6 @@ async def run_chatbot_client(
     """
     Async interactive Agent CLI chat.
     """
-    # Ensure environment variables from a local .env file are loaded so that
-    # variables like `BUILDER_TOKEN` are available to the client process. Without
-    # this, the token might be available to the spawned server (which loads the
-    # .env file itself) but not to the CLI process, causing 401 errors.
-    try:
-        from dotenv import load_dotenv  # type: ignore
-        load_dotenv()
-    except Exception:
-        # Loading .env is best-effort – continue if python-dotenv is not installed.
-        logger.debug("python-dotenv not available or failed to load .env file")
-
     # Make server process accessible globally
     global current_server_process
 
