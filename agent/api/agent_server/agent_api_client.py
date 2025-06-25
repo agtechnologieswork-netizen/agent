@@ -513,7 +513,7 @@ async def run_chatbot_client(
     # Keep track of diffs we've already applied to avoid duplicate applications
     applied_diffs: set[str] = set()
 
-    def print_event(event: AgentSseEvent) -> None:
+    def process_event(event: AgentSseEvent) -> None:
         logger.info(f"Got an event: {event.status} {getattr(event.message, 'kind', '')}")
 
         # --------------- Helper to actually apply a diff -----------------
@@ -1086,7 +1086,7 @@ async def run_chatbot_client(
                             settings=settings_dict,
                             template_id=template_id,
                             auth_token=auth_token,
-                            stream_cb=print_event,
+                            stream_cb=process_event,
                         )
                     else:
                         logger.info("Sending continuation")
@@ -1096,7 +1096,7 @@ async def run_chatbot_client(
                             content,
                             all_files=all_files_payload,  # Pass the files
                             settings=settings_dict,
-                            stream_cb=print_event,
+                            stream_cb=process_event,
                         )
                     # Ensure newline after streaming events
                     print()
