@@ -60,6 +60,10 @@ exclude = ["trpc_agent/template", "nicegui_agent/template"]
 
 [tool.pytest.ini_options]
 addopts = ["--ignore=nicegui_agent/template"]
+markers = [
+    "nicegui: marks tests for NiceGUI template",
+    "trpc: marks tests for tRPC template",
+]
 
 [dependency-groups]
 dev = [
