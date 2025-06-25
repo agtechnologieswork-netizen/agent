@@ -7,7 +7,7 @@ import dagger
 
 from anyio.streams.memory import MemoryObjectSendStream
 
-from llm.common import ContentBlock, InternalMessage, TextRaw
+from llm.common import ContentBlock, InternalMessage, TextRaw, ToolUse
 from llm.utils import AsyncLLM, get_llm_client
 from api.fsm_tools import FSMToolProcessor, FSMStatus, FSMInterface
 from api.snapshot_utils import snapshot_saver
@@ -94,6 +94,10 @@ class BaseAgentSession(AgentInterface, ABC):
     @staticmethod
     def filter_messages_for_user(messages: List[InternalMessage]) -> List[InternalMessage]:
         """Filter messages for user."""
+        # Never show tool use messages to the user, they are already reported in the callback
+        if any(isinstance(block, ToolUse) for m in messages for block in m.content):
+            return [] 
+        # Show other messages to the user if any
         return [m for m in messages if m.role == "assistant"]
 
     @staticmethod
