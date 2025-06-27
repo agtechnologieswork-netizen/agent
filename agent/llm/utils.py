@@ -74,6 +74,11 @@ def _guess_llm_backend(model_name: str) -> LLMBackend:
         # Default to localhost if no host is specified
         return "ollama"
     else:
+        # Check if PREFER_OLLAMA is set or OLLAMA_HOST is configured
+        # This allows using any Ollama model not in the predefined list
+        if os.getenv("PREFER_OLLAMA") or os.getenv("OLLAMA_HOST") or os.getenv("OLLAMA_API_BASE"):
+            logger.info(f"Using Ollama backend for custom model: {model_name}")
+            return "ollama"
         raise ValueError(f"Unknown model name: {model_name}")
 
 
@@ -126,9 +131,14 @@ def get_llm_client(
 
     # Otherwise create a new client
     if model_name not in MODELS_MAP:
-        raise ValueError(f"Unknown model name: {model_name}. Available models: {', '.join(ALL_MODEL_NAMES)}")
-    
-    chosen_model = MODELS_MAP[model_name][backend]
+        # Allow any model for Ollama backend
+        if backend == "ollama":
+            logger.info(f"Using custom Ollama model: {model_name}")
+            chosen_model = model_name
+        else:
+            raise ValueError(f"Unknown model name: {model_name}. Available models: {', '.join(ALL_MODEL_NAMES)}")
+    else:
+        chosen_model = MODELS_MAP[model_name][backend]
 
     match backend:
         case "bedrock" | "anthropic":
