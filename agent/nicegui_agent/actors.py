@@ -130,11 +130,13 @@ class NiceguiActor(BaseActor, LLMActor):
         workspace: Workspace,
         beam_width: int = 3,
         max_depth: int = 30,
+        system_prompt: str = playbooks.APPLICATION_SYSTEM_PROMPT,
     ):
         self.llm = llm
         self.workspace = workspace
         self.beam_width = beam_width
         self.max_depth = max_depth
+        self.system_prompt = system_prompt
         self.root = None
         logger.info(
             f"Initialized {self.__class__.__name__} with beam_width={beam_width}, max_depth={max_depth}"
@@ -187,7 +189,7 @@ class NiceguiActor(BaseActor, LLMActor):
             )
             nodes = await self.run_llm(
                 candidates,
-                system_prompt=playbooks.SYSTEM_PROMPT,
+                system_prompt=self.system_prompt,
                 tools=self.tools,
                 max_tokens=8192,
             )
@@ -207,7 +209,12 @@ class NiceguiActor(BaseActor, LLMActor):
     def select(self, node: Node[BaseData]) -> list[Node[BaseData]]:
         candidates = []
         all_children = node.get_all_children()
-        effective_beam_width = 1 if len(all_children) >= self.beam_width else self.beam_width
+        effective_beam_width = (
+            1 if len(all_children) >= self.beam_width else self.beam_width
+        )
+        logger.info(
+            f"Selecting candidates with effective beam width: {effective_beam_width}, total children: {len(all_children)}"
+        )
         for n in all_children:
             if n.is_leaf and n.depth <= self.max_depth:
                 if n.data.should_branch:

@@ -11,6 +11,7 @@ from core.base_node import Node
 from core.statemachine import MachineCheckpoint
 from core.workspace import Workspace
 from nicegui_agent.actors import NiceguiActor
+from nicegui_agent import playbooks
 import dagger
 
 # Set up logging
@@ -156,21 +157,20 @@ class FSMApplication:
             ctx: ApplicationContext, result: Node[BaseData]
         ) -> None:
             await result.data.workspace.exec_mut(
-                    [
-                        "uv",
-                        "export",
-                        "--no-hashes",
-                        "--format",
-                        "requirements-txt",
-                        "--output-file",
-                        "requirements.txt",
-                        "--no-dev"
-                    ]
-                )
+                [
+                    "uv",
+                    "export",
+                    "--no-hashes",
+                    "--format",
+                    "requirements-txt",
+                    "--output-file",
+                    "requirements.txt",
+                    "--no-dev",
+                ]
+            )
             reqs = await result.data.workspace.read_file("requirements.txt")
             if reqs:
                 ctx.files["requirements.txt"] = reqs
-
 
         llm = get_best_coding_llm_client()
         workspace = await Workspace.create(
@@ -201,46 +201,15 @@ class FSMApplication:
             workspace=workspace,
             beam_width=3,
             max_depth=50,
+            system_prompt=playbooks.DATA_MODEL_SYSTEM_PROMPT,
         )
         app_actor = NiceguiActor(
             llm=llm,
             workspace=workspace.clone(),
             beam_width=3,
             max_depth=50,
+            system_prompt=playbooks.APPLICATION_SYSTEM_PROMPT,
         )
-
-        # Define prompt functions for different phases
-        def data_model_prompt(ctx: ApplicationContext) -> tuple:
-            prompt = f"""You are building a NiceGUI application. This is PHASE 1: DATA MODEL GENERATION.
-
-Focus ONLY on creating the data models, schemas, and data structures for this application:
-{ctx.feedback_data or ctx.user_prompt}
-
-Requirements:
-1. Define all data models, classes, and type definitions
-2. Create any validation schemas
-3. Define database models if needed
-4. Create data transformation utilities
-5. DO NOT create UI components, event handlers, or application logic yet
-
-Output only the data model files (e.g., models.py, schemas.py, types.py)."""
-            return (ctx.files, prompt)
-
-        def application_prompt(ctx: ApplicationContext) -> tuple:
-            prompt = f"""You are building a NiceGUI application. This is PHASE 2: APPLICATION GENERATION.
-
-You have already defined the data models. Now implement the UI and application logic:
-{ctx.feedback_data or ctx.user_prompt}
-
-Requirements:
-1. Create UI components using NiceGUI
-2. Implement event handlers and user interactions
-3. Connect UI to the data models already defined
-4. Add business logic and state management
-5. USE the data models from the previous phase - do not redefine them
-
-Focus on creating a complete, functional application."""
-            return (ctx.files, prompt)
 
         # Define state machine states
         states = State[ApplicationContext, FSMEvent](
@@ -252,7 +221,10 @@ Focus on creating a complete, functional application."""
                 FSMState.DATA_MODEL_GENERATION: State(
                     invoke={
                         "src": data_actor,
-                        "input_fn": data_model_prompt,
+                        "input_fn": lambda ctx: (
+                            ctx.files,
+                            ctx.feedback_data or ctx.user_prompt,
+                        ),
                         "on_done": {
                             "target": FSMState.REVIEW_DATA_MODEL,
                             "actions": [update_node_files],
@@ -274,7 +246,7 @@ Focus on creating a complete, functional application."""
                         "src": data_actor,
                         "input_fn": lambda ctx: (
                             ctx.files,
-                            f"Update the data models based on this feedback: {ctx.feedback_data}",
+                            ctx.feedback_data,
                         ),
                         "on_done": {
                             "target": FSMState.REVIEW_DATA_MODEL,
@@ -289,7 +261,10 @@ Focus on creating a complete, functional application."""
                 FSMState.APPLICATION_GENERATION: State(
                     invoke={
                         "src": app_actor,
-                        "input_fn": application_prompt,
+                        "input_fn": lambda ctx: (
+                            ctx.files,
+                            ctx.feedback_data or ctx.user_prompt,
+                        ),
                         "on_done": {
                             "target": FSMState.REVIEW_APPLICATION,
                             "actions": [update_node_files, export_requirements],
