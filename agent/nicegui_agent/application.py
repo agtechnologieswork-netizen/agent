@@ -22,7 +22,10 @@ for package in ["urllib3", "httpx", "google_genai.models"]:
 
 
 class FSMState(str, enum.Enum):
-    APPLICATION = "application"
+    DATA_MODEL_GENERATION = "data_model_generation"
+    REVIEW_DATA_MODEL = "review_data_model"
+    DATA_MODEL_APPLY_FEEDBACK = "data_model_apply_feedback"
+    APPLICATION_GENERATION = "application_generation"
     REVIEW_APPLICATION = "review_application"
     APPLY_FEEDBACK = "apply_feedback"
     COMPLETE = "complete"
@@ -104,7 +107,8 @@ class FSMApplication:
     def base_execution_plan(cls) -> str:
         return "\n".join(
             [
-                "1. NiceGUI application development based on user requirements.",
+                "1. Data model generation - Define data structures, schemas, and models",
+                "2. Application generation - Implement UI components and application logic",
                 "",
                 "The result application will be based on Python and NiceGUI framework. The application can include various UI components, event handling, and state management.",
             ]
@@ -192,27 +196,100 @@ class FSMApplication:
             ],
         )
 
-        nicegui_actor = NiceguiActor(
+        data_actor = NiceguiActor(
             llm=llm,
             workspace=workspace,
             beam_width=3,
             max_depth=50,
         )
+        app_actor = NiceguiActor(
+            llm=llm,
+            workspace=workspace.clone(),
+            beam_width=3,
+            max_depth=50,
+        )
+
+        # Define prompt functions for different phases
+        def data_model_prompt(ctx: ApplicationContext) -> tuple:
+            prompt = f"""You are building a NiceGUI application. This is PHASE 1: DATA MODEL GENERATION.
+
+Focus ONLY on creating the data models, schemas, and data structures for this application:
+{ctx.feedback_data or ctx.user_prompt}
+
+Requirements:
+1. Define all data models, classes, and type definitions
+2. Create any validation schemas
+3. Define database models if needed
+4. Create data transformation utilities
+5. DO NOT create UI components, event handlers, or application logic yet
+
+Output only the data model files (e.g., models.py, schemas.py, types.py)."""
+            return (ctx.files, prompt)
+
+        def application_prompt(ctx: ApplicationContext) -> tuple:
+            prompt = f"""You are building a NiceGUI application. This is PHASE 2: APPLICATION GENERATION.
+
+You have already defined the data models. Now implement the UI and application logic:
+{ctx.feedback_data or ctx.user_prompt}
+
+Requirements:
+1. Create UI components using NiceGUI
+2. Implement event handlers and user interactions
+3. Connect UI to the data models already defined
+4. Add business logic and state management
+5. USE the data models from the previous phase - do not redefine them
+
+Focus on creating a complete, functional application."""
+            return (ctx.files, prompt)
 
         # Define state machine states
         states = State[ApplicationContext, FSMEvent](
             on={
-                FSMEvent("CONFIRM"): FSMState.APPLICATION,
+                FSMEvent("CONFIRM"): FSMState.DATA_MODEL_GENERATION,
                 FSMEvent("FEEDBACK"): FSMState.APPLY_FEEDBACK,
             },
             states={
-                FSMState.APPLICATION: State(
+                FSMState.DATA_MODEL_GENERATION: State(
                     invoke={
-                        "src": nicegui_actor,
+                        "src": data_actor,
+                        "input_fn": data_model_prompt,
+                        "on_done": {
+                            "target": FSMState.REVIEW_DATA_MODEL,
+                            "actions": [update_node_files],
+                        },
+                        "on_error": {
+                            "target": FSMState.FAILURE,
+                            "actions": [set_error],
+                        },
+                    },
+                ),
+                FSMState.REVIEW_DATA_MODEL: State(
+                    on={
+                        FSMEvent("CONFIRM"): FSMState.APPLICATION_GENERATION,
+                        FSMEvent("FEEDBACK"): FSMState.DATA_MODEL_APPLY_FEEDBACK,
+                    },
+                ),
+                FSMState.DATA_MODEL_APPLY_FEEDBACK: State(
+                    invoke={
+                        "src": data_actor,
                         "input_fn": lambda ctx: (
                             ctx.files,
-                            ctx.feedback_data or ctx.user_prompt,
+                            f"Update the data models based on this feedback: {ctx.feedback_data}",
                         ),
+                        "on_done": {
+                            "target": FSMState.REVIEW_DATA_MODEL,
+                            "actions": [update_node_files],
+                        },
+                        "on_error": {
+                            "target": FSMState.FAILURE,
+                            "actions": [set_error],
+                        },
+                    },
+                ),
+                FSMState.APPLICATION_GENERATION: State(
+                    invoke={
+                        "src": app_actor,
+                        "input_fn": application_prompt,
                         "on_done": {
                             "target": FSMState.REVIEW_APPLICATION,
                             "actions": [update_node_files, export_requirements],
@@ -231,14 +308,14 @@ class FSMApplication:
                 ),
                 FSMState.APPLY_FEEDBACK: State(
                     invoke={
-                        "src": nicegui_actor,
+                        "src": app_actor,
                         "input_fn": lambda ctx: (
                             ctx.files,
                             ctx.feedback_data,
                         ),
                         "on_done": {
                             "target": FSMState.COMPLETE,
-                            "actions": [update_node_files],
+                            "actions": [update_node_files, export_requirements],
                         },
                         "on_error": {
                             "target": FSMState.FAILURE,
@@ -290,6 +367,8 @@ class FSMApplication:
     @property
     def state_output(self) -> dict:
         match self.current_state:
+            case FSMState.REVIEW_DATA_MODEL:
+                return {"data_models": self.truncated_files}
             case FSMState.REVIEW_APPLICATION:
                 return {"application": self.truncated_files}
             case FSMState.COMPLETE:
@@ -306,7 +385,7 @@ class FSMApplication:
     def available_actions(self) -> dict[str, str]:
         actions = {}
         match self.current_state:
-            case FSMState.REVIEW_APPLICATION:
+            case FSMState.REVIEW_DATA_MODEL | FSMState.REVIEW_APPLICATION:
                 actions = {"confirm": "Accept current output and continue"}
                 logger.debug(
                     f"Review state detected: {self.current_state}, offering confirm action"

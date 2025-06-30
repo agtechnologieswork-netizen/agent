@@ -146,7 +146,7 @@ class FSMToolProcessor:
 
             # Prepare the result
             result = self.fsm_as_result()
-            logger.info("Started FSM session")
+            logger.info("First FSM stage completed successfully")
             return CommonToolResult(content=json.dumps(result, sort_keys=True))
 
         except Exception as e:
