@@ -25,6 +25,7 @@ class Task(BaseModel):
 
 - Define all data classes, enums, and type definitions
 - Create validation schemas using Pydantic
+- Prefer non-optional fields (with default values if reasonable) over Optional types
 - Define database models if needed (SQLAlchemy, etc.)
 - Create data transformation utilities
 - Include serialization/deserialization methods
