@@ -213,10 +213,17 @@ class EditActor(BaseActor, LLMActor):
 
     def select(self, node: Node[BaseData]) -> list[Node[BaseData]]:
         candidates = []
-        for n in node.get_all_children():
+        all_children = node.get_all_children()
+        effective_beam_width = (
+            1 if len(all_children) >= self.beam_width else self.beam_width
+        )
+        logger.info(
+            f"Selecting candidates with effective beam width: {effective_beam_width}, total children: {len(all_children)}"
+        )
+        for n in all_children:
             if n.is_leaf and n.depth <= self.max_depth:
                 if n.data.should_branch:
-                    candidates.extend([n] * self.beam_width)
+                    candidates.extend([n] * effective_beam_width)
                 else:
                     candidates.append(n)
         logger.info(f"Selected {len(candidates)} leaf nodes for evaluation")
