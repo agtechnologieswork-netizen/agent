@@ -408,6 +408,7 @@ app/dashboard.py
 - USE existing data models from previous phase - DO NOT redefine them.
 - Focus on UI components, event handlers, and application logic.
 - Code will be linted and type-checked, so ensure correctness.
+- NEVER use dummy data unless explicitly requested by the user.
 """.strip()
 
 
