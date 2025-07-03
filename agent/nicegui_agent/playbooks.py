@@ -4,6 +4,43 @@ PYTHON_RULES = """
 2. Always use absolute imports
 """
 
+TOOL_USAGE_RULES = """
+# File Management Tools
+
+Use the following tools to manage files:
+
+1. **read_file** - Read the content of an existing file
+   - Input: path (string)
+   - Returns: File content
+
+2. **write_file** - Create a new file or completely replace an existing file's content
+   - Input: path (string), content (string)
+   - Use this when creating new files or when making extensive changes
+
+3. **edit_file** - Make targeted changes to an existing file
+   - Input: path (string), search (string), replace (string)
+   - Use this for small, precise edits where you know the exact text to replace
+   - The search text must match exactly (including whitespace/indentation)
+   - Will fail if search text is not found or appears multiple times
+
+4. **delete_file** - Remove a file
+   - Input: path (string)
+
+5. **uv_add** - Install additional packages
+   - Input: packages (array of strings)
+
+6. **complete** - Mark the task as complete (runs tests and type checks)
+   - No inputs required
+
+# Tool Usage Guidelines
+
+- Always use tools to create or modify files - do not output file content in your responses
+- Use write_file for new files or complete rewrites
+- Use edit_file for small, targeted changes to existing files
+- Ensure proper indentation when using edit_file - the search string must match exactly
+- Code will be linted and type-checked, so ensure correctness
+"""
+
 DATA_MODEL_RULES = """
 # Data model
 
@@ -347,76 +384,11 @@ Don't be chatty, keep on solving the problem, not describing what you are doing.
 
 {DATA_MODEL_RULES}
 
-# Expected output format
+{TOOL_USAGE_RULES}
 
-* WHOLE format (creating or changing file completely)
+# Additional Notes for Data Modeling
 
-app/models.py
-```
-from sqlmodel import SQLModel, Field, Relationship
-from typing import Optional, List
-from enum import Enum
-from datetime import datetime
-
-class Priority(str, Enum):
-    LOW = "low"
-    MEDIUM = "medium"
-    HIGH = "high"
-
-# Persistent model (database table)
-class Task(SQLModel, table=True):
-    __tablename__ = "tasks"
-
-    id: Optional[int] = Field(default=None, primary_key=True)
-    title: str = Field(max_length=200)
-    description: str = Field(default="", max_length=1000)
-    priority: Priority = Field(default=Priority.MEDIUM)
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-    completed: bool = Field(default=False)
-    task_list_id: int = Field(foreign_key="task_lists.id")
-
-    task_list: "TaskList" = Relationship(back_populates="tasks")
-
-# Persistent model (database table)
-class TaskList(SQLModel, table=True):
-    __tablename__ = "task_lists"
-
-    id: Optional[int] = Field(default=None, primary_key=True)
-    name: str = Field(max_length=100)
-    owner_id: int = Field(foreign_key="users.id")
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-
-    tasks: List[Task] = Relationship(back_populates="task_list")
-
-# Non-persistent schema (for creating new tasks)
-class TaskCreate(SQLModel):
-    title: str = Field(max_length=200)
-    description: str = Field(default="", max_length=1000)
-    priority: Priority = Field(default=Priority.MEDIUM)
-    task_list_id: int
-```
-
-* SEARCH / REPLACE format (applying a single local change)
-
-app/models.py
-```
-<<<<<<< SEARCH
-class TaskCreate(SQLModel):
-    title: str = Field(max_length=200)
-    description: str = Field(default="", max_length=1000)
-=======
-class TaskCreate(SQLModel):
-    title: str = Field(max_length=200)
-    description: str = Field(default="", max_length=1000)
-    priority: Priority = Field(default=Priority.MEDIUM)
->>>>>>> REPLACE
-```
-
-- Each block starts with a complete file path followed by newline with content enclosed with pair of ```.
-- SEARCH / REPLACE requires precise matching indentation for both search and replace parts.
-- Only one SEARCH / REPLACE when the change is small and can be applied locally. Otherwise use WHOLE format.
-- Focus ONLY on data models, schemas, and data structures - DO NOT create UI components.
-- Code will be linted and type-checked, so ensure correctness.
+- Focus ONLY on data models, schemas, and data structures - DO NOT create UI components
 """.strip()
 
 APPLICATION_SYSTEM_PROMPT = f"""
@@ -427,76 +399,13 @@ Don't be chatty, keep on solving the problem, not describing what you are doing.
 
 {APPLICATION_RULES}
 
-# Expected output format
+{TOOL_USAGE_RULES}
 
-* WHOLE format (creating or changing file completely)
+# Additional Notes for Application Development
 
-app/task_manager.py
-```
-from nicegui import ui, app
-from sqlmodel import select
-from app.database import get_session
-from app.models import Task, TaskCreate, Priority
-from datetime import datetime
-
-def create():
-    @ui.page('/tasks')
-    async def page():
-        await ui.context.client.connected()
-
-        task_container = ui.column()
-
-        def add_task():
-            title = task_input.value
-            if title:
-                # Create task using non-persistent schema
-                task_data = TaskCreate(
-                    title=title,
-                    priority=Priority.MEDIUM,
-                    user_id=1  # Example user ID
-                )
-
-                # Save to database using persistent model
-                with get_session() as session:
-                    db_task = Task(**task_data.model_dump())
-                    session.add(db_task)
-                    session.commit()
-
-                refresh_tasks()
-                task_input.value = ''
-
-        def refresh_tasks():
-            task_container.clear()
-            with get_session() as session:
-                tasks = session.exec(select(Task)).all()
-                for task in tasks:
-                    with task_container:
-                        ui.card().with_columns(task.title, task.priority.value)
-
-        task_input = ui.input('Task title')
-        ui.button('Add Task', on_click=add_task)
-        refresh_tasks()
-```
-
-* SEARCH / REPLACE format (applying a single local change)
-
-app/dashboard.py
-```
-<<<<<<< SEARCH
-        ui.button('Show Tasks', on_click=lambda: ui.navigate.to('/basic-tasks'))
-=======
-        ui.button('Show Tasks', on_click=lambda: ui.navigate.to('/tasks'))
-        ui.button('Task Analytics', on_click=lambda: ui.navigate.to('/analytics'))
->>>>>>> REPLACE
-```
-
-- Each block starts with a complete file path followed by newline with content enclosed with pair of ```.
-- SEARCH / REPLACE requires precise matching indentation for both search and replace parts.
-- Only one SEARCH / REPLACE when the change is small and can be applied locally. Otherwise use WHOLE format.
-- USE existing data models from previous phase - DO NOT redefine them.
-- Focus on UI components, event handlers, and application logic.
-- Code will be linted and type-checked, so ensure correctness.
-- NEVER use dummy data unless explicitly requested by the user.
+- USE existing data models from previous phase - DO NOT redefine them
+- Focus on UI components, event handlers, and application logic
+- NEVER use dummy data unless explicitly requested by the user
 """.strip()
 
 

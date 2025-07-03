@@ -12,115 +12,6 @@ from nicegui_agent import playbooks
 logger = logging.getLogger(__name__)
 
 
-@dataclasses.dataclass
-class File:
-    path: str
-    content: str
-
-
-@dataclasses.dataclass
-class FileDiff:
-    path: str
-    search: str
-    replace: str
-
-
-def extract_files(content: str) -> list[File | FileDiff]:
-    file_pattern = re.compile(
-        r"(?P<filename>\S+)\n```.*\n(?P<content>(?s:.*?))```",
-    )
-    replace_pattern = re.compile(
-        r"<<<<<<< SEARCH.*\n(?P<search>(?s:.*?))=======.*\n(?P<replace>(?s:.*?))>>>>>>> REPLACE"
-    )
-    files = []
-    for match in file_pattern.finditer(content):
-        if diff := replace_pattern.search(match.group("content")):
-            files.append(
-                FileDiff(
-                    match.group("filename").strip(),
-                    diff.group("search").strip(),
-                    diff.group("replace").strip(),
-                )
-            )
-        else:
-            files.append(
-                File(
-                    match.group("filename").strip(),
-                    match.group("content").strip(),
-                )
-            )
-    return files
-
-
-async def run_write_files(node: Node[BaseData]) -> TextRaw | None:
-    errors = []
-    files_written = 0
-
-    for block in node.data.head().content:
-        if not (isinstance(block, TextRaw)):
-            continue
-        parsed_files = extract_files(block.text)
-        if not parsed_files:
-            continue
-        num_diffs = sum(1 for item in parsed_files if isinstance(item, FileDiff))
-        num_files = sum(1 for item in parsed_files if isinstance(item, File))
-        logger.info(f"Writing {num_files} files, applying {num_diffs} diffs")
-        for item in parsed_files:
-            try:
-                match item:
-                    case File(path, content):
-                        node.data.workspace.write_file(path, content)
-                        node.data.files.update({path: content})
-                        files_written += 1
-                        logger.debug(f"Written file: {path}")
-                    case FileDiff(path, search, replace):
-                        try:
-                            original = await node.data.workspace.read_file(path)
-                        except FileNotFoundError as e:
-                            raise ValueError(
-                                f"Diff '{path}' not applied. Search:\n{search}"
-                            ) from e
-                        match original.count(search):
-                            case 0:
-                                raise ValueError(
-                                    f"'{search}' not found in file '{path}'"
-                                )
-                            case 1:
-                                new_content = original.replace(search, replace)
-                                node.data.workspace.write_file(path, new_content)
-                                node.data.files.update({path: new_content})
-                                files_written += 1
-                                logger.debug(f"Written diff block: {path}")
-                            case num_hits:
-                                raise ValueError(
-                                    f"'{search}' found {num_hits} times in file '{path}'"
-                                )
-                    case unknown:
-                        logger.error(f"Unknown file type: {unknown}")
-            except ValueError as e:
-                error_msg = str(e)
-                logger.info(f"Error writing file {item.path}: {error_msg}")
-                errors.append(error_msg)
-            except FileNotFoundError as e:
-                error_msg = str(e)
-                logger.info(f"File not found error writing file {item.path}: {str(e)}")
-                errors.append(error_msg)
-            except PermissionError as e:
-                error_msg = str(e)
-                logger.info(f"Permission error writing file {item.path}: {error_msg}")
-                errors.append(error_msg)
-
-    if files_written > 0:
-        logger.debug(f"Written {files_written} files to workspace")
-
-    if errors:
-        errors.append(
-            f"Only those files should be written: {node.data.workspace.allowed}"
-        )
-
-    return TextRaw("\n".join(errors)) if errors else None
-
-
 class NiceguiActor(BaseActor, LLMActor):
     root: Node[BaseData] | None = None
 
@@ -239,6 +130,31 @@ class NiceguiActor(BaseActor, LLMActor):
                 },
             },
             {
+                "name": "write_file",
+                "description": "Write content to a file",
+                "input_schema": {
+                    "type": "object",
+                    "properties": {
+                        "path": {"type": "string"},
+                        "content": {"type": "string"},
+                    },
+                    "required": ["path", "content"],
+                },
+            },
+            {
+                "name": "edit_file",
+                "description": "Edit a file by searching and replacing text",
+                "input_schema": {
+                    "type": "object",
+                    "properties": {
+                        "path": {"type": "string"},
+                        "search": {"type": "string"},
+                        "replace": {"type": "string"},
+                    },
+                    "required": ["path", "search", "replace"],
+                },
+            },
+            {
                 "name": "delete_file",
                 "description": "Delete a file",
                 "input_schema": {
@@ -287,6 +203,59 @@ class NiceguiActor(BaseActor, LLMActor):
                             block.input["path"]
                         )  # pyright: ignore[reportIndexIssue]
                         result.append(ToolUseResult.from_tool_use(block, tool_content))
+                    case "write_file":
+                        path = block.input["path"]  # pyright: ignore[reportIndexIssue]
+                        content = block.input["content"]  # pyright: ignore[reportIndexIssue]
+                        try:
+                            node.data.workspace.write_file(path, content)
+                            node.data.files.update({path: content})
+                            result.append(ToolUseResult.from_tool_use(block, "success"))
+                            logger.debug(f"Written file: {path}")
+                        except FileNotFoundError as e:
+                            error_msg = f"Directory not found for file '{path}': {str(e)}"
+                            logger.info(f"File not found error writing file {path}: {str(e)}")
+                            result.append(ToolUseResult.from_tool_use(block, error_msg, is_error=True))
+                        except PermissionError as e:
+                            error_msg = f"Permission denied writing file '{path}': {str(e)}"
+                            logger.info(f"Permission error writing file {path}: {str(e)}")
+                            result.append(ToolUseResult.from_tool_use(block, error_msg, is_error=True))
+                        except ValueError as e:
+                            error_msg = str(e)
+                            logger.info(f"Value error writing file {path}: {error_msg}")
+                            result.append(ToolUseResult.from_tool_use(block, error_msg, is_error=True))
+                    case "edit_file":
+                        path = block.input["path"]  # pyright: ignore[reportIndexIssue]
+                        search = block.input["search"]  # pyright: ignore[reportIndexIssue]
+                        replace = block.input["replace"]  # pyright: ignore[reportIndexIssue]
+                        try:
+                            original = await node.data.workspace.read_file(path)
+                            match original.count(search):
+                                case 0:
+                                    raise ValueError(
+                                        f"Search text not found in file '{path}'. Search:\n{search}"
+                                    )
+                                case 1:
+                                    new_content = original.replace(search, replace)
+                                    node.data.workspace.write_file(path, new_content)
+                                    node.data.files.update({path: new_content})
+                                    result.append(ToolUseResult.from_tool_use(block, "success"))
+                                    logger.debug(f"Applied edit to file: {path}")
+                                case num_hits:
+                                    raise ValueError(
+                                        f"Search text found {num_hits} times in file '{path}' (expected exactly 1). Search:\n{search}"
+                                    )
+                        except FileNotFoundError as e:
+                            error_msg = f"File '{path}' not found for editing: {str(e)}"
+                            logger.info(f"File not found error editing file {path}: {str(e)}")
+                            result.append(ToolUseResult.from_tool_use(block, error_msg, is_error=True))
+                        except PermissionError as e:
+                            error_msg = f"Permission denied editing file '{path}': {str(e)}"
+                            logger.info(f"Permission error editing file {path}: {str(e)}")
+                            result.append(ToolUseResult.from_tool_use(block, error_msg, is_error=True))
+                        except ValueError as e:
+                            error_msg = str(e)
+                            logger.info(f"Value error editing file {path}: {error_msg}")
+                            result.append(ToolUseResult.from_tool_use(block, error_msg, is_error=True))
                     case "delete_file":
                         node.data.workspace.rm(block.input["path"])  # pyright: ignore[reportIndexIssue]
                         node.data.files.update({block.input["path"]: None})  # pyright: ignore[reportIndexIssue]
@@ -344,11 +313,9 @@ class NiceguiActor(BaseActor, LLMActor):
         return result, is_completed
 
     async def eval_node(self, node: Node[BaseData], user_prompt: str) -> bool:
-        files_errors = await run_write_files(node)
         tool_calls, is_completed = await self.run_tools(node, user_prompt)
-        err_content = tool_calls + ([files_errors] if files_errors else [])
-        if err_content:
-            node.data.messages.append(Message(role="user", content=err_content))
+        if tool_calls:
+            node.data.messages.append(Message(role="user", content=tool_calls))
         else:
             content = [TextRaw(text="Continue or mark completed.")]
             node.data.messages.append(Message(role="user", content=content))
