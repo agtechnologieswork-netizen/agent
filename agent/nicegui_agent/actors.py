@@ -330,10 +330,13 @@ class NiceguiActor(BaseActor, LLMActor):
                     case unknown:
                         raise ValueError(f"Unknown tool: {unknown}")
             except FileNotFoundError as e:
+                logger.info(f"File not found: {e}")
                 result.append(ToolUseResult.from_tool_use(block, str(e), is_error=True))
             except PermissionError as e:
+                logger.info(f"Permission error: {e}")
                 result.append(ToolUseResult.from_tool_use(block, str(e), is_error=True))
             except ValueError as e:
+                logger.info(f"Value error: {e}")
                 result.append(ToolUseResult.from_tool_use(block, str(e), is_error=True))
             except Exception as e:
                 logger.error(f"Unknown error: {e}")

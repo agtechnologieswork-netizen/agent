@@ -7,9 +7,9 @@ PYTHON_RULES = """
 DATA_MODEL_RULES = """
 # Data model
 
-Keep data models organized in separate files:
-- app/models.py for SQLModel ORM models (persistent data with automatic migrations)
-- app/schemas.py for additional Pydantic models if needed (validation and serialization)
+Keep data models organized in app/models.py using SQLModel for both:
+- Persistent models (with table=True) - stored in database
+- Non-persistent schemas (without table=True) - for validation, serialization, and temporary data
 
 app/models.py
 ```
@@ -17,6 +17,7 @@ from sqlmodel import SQLModel, Field, Relationship
 from datetime import datetime
 from typing import Optional, List
 
+# Persistent models (stored in database)
 class User(SQLModel, table=True):
     __tablename__ = "users"
 
@@ -24,7 +25,7 @@ class User(SQLModel, table=True):
     name: str = Field(max_length=100)
     email: str = Field(unique=True, max_length=255)
     is_active: bool = Field(default=True)
-    created_at: Optional[datetime] = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=datetime.utcnow)
 
     tasks: List["Task"] = Relationship(back_populates="user")
 
@@ -35,23 +36,25 @@ class Task(SQLModel, table=True):
     title: str = Field(max_length=200)
     description: str = Field(default="", max_length=1000)
     completed: bool = Field(default=False)
-    user_id: Optional[int] = Field(default=None, foreign_key="users.id")
-    created_at: Optional[datetime] = Field(default_factory=datetime.utcnow)
+    user_id: int = Field(foreign_key="users.id")
+    created_at: datetime = Field(default_factory=datetime.utcnow)
 
-    user: Optional[User] = Relationship(back_populates="tasks")
-```
+    user: User = Relationship(back_populates="tasks")
 
-app/schemas.py (optional - only if you need additional validation models that are not directly tied to database persistence, e.g. for API endpoints, forms, temporary UI elements)
-```
-from pydantic import BaseModel, Field
-from typing import Optional
+# Non-persistent schemas (for validation, forms, API requests/responses)
+class TaskCreate(SQLModel):
+    title: str = Field(max_length=200)
+    description: str = Field(default="", max_length=1000)
+    user_id: int
 
-class CreateNewTaskForm(BaseModel):
-    title: str = Field(..., max_length=200)
-    description: Optional[str] = Field(default="", max_length=1000)
-    completed: bool = Field(default=False)
-    user_id: Optional[int] = Field(default=None, description="ID of the user who owns the task")
+class TaskUpdate(SQLModel):
+    title: Optional[str] = Field(default=None, max_length=200)
+    description: Optional[str] = Field(default=None, max_length=1000)
+    completed: Optional[bool] = Field(default=None)
 
+class UserCreate(SQLModel):
+    name: str = Field(max_length=100)
+    email: str = Field(max_length=255)
 ```
 
 # Database connection setup
@@ -72,20 +75,22 @@ def create_tables():
     SQLModel.metadata.create_all(ENGINE)
 
 def get_session():
-    with Session(ENGINE) as session:
-        yield session
+    return Session(ENGINE)
 ```
 
 # Data structures and schemas
 
-- Define SQLModel classes in app/models.py for database persistence
-- SQLModel combines Pydantic validation with SQLAlchemy ORM functionality
-- Use Field() for column constraints and relationships
-- Use Relationship() for foreign key relationships
+- Define all SQLModel classes in app/models.py
+- Use table=True for persistent database models
+- Omit table=True for non-persistent schemas (validation, forms, API)
+- SQLModel provides both Pydantic validation and SQLAlchemy ORM functionality
+- Use Field() for constraints, validation, and relationships
+- Use Relationship() for foreign key relationships (only in table models)
 - Call create_tables() on application startup to create/update schema
 - SQLModel handles migrations automatically through create_all()
 - DO NOT create UI components or event handlers in data model files
-- Use Optional[int] for auto-incrementing primary keys
+- Only use Optional[T] for auto-incrementing primary keys or truly optional fields
+- Prefer explicit types for better type safety (avoid unnecessary Optional)
 - Use datetime.utcnow as default_factory for timestamps
 """
 
@@ -336,6 +341,7 @@ async def test_csv_upload(user: User) -> None:
 
 DATA_MODEL_SYSTEM_PROMPT = f"""
 You are a software engineer specializing in data modeling. Your task is to design and implement data models, schemas, and data structures for a NiceGUI application. Strictly follow provided rules.
+Don't be chatty, keep on solving the problem, not describing what you are doing.
 
 {PYTHON_RULES}
 
@@ -347,49 +353,62 @@ You are a software engineer specializing in data modeling. Your task is to desig
 
 app/models.py
 ```
-from pydantic import BaseModel
+from sqlmodel import SQLModel, Field, Relationship
 from typing import Optional, List
 from enum import Enum
 from datetime import datetime
 
-class Priority(Enum):
+class Priority(str, Enum):
     LOW = "low"
     MEDIUM = "medium"
     HIGH = "high"
 
-class Task(BaseModel):
-    id: int
-    title: str
-    description: Optional[str] = None
-    priority: Priority = Priority.MEDIUM
-    created_at: datetime
-    completed: bool = False
+# Persistent model (database table)
+class Task(SQLModel, table=True):
+    __tablename__ = "tasks"
 
-class TaskList(BaseModel):
-    name: str
-    tasks: List[Task] = []
-    owner_id: int
+    id: Optional[int] = Field(default=None, primary_key=True)
+    title: str = Field(max_length=200)
+    description: str = Field(default="", max_length=1000)
+    priority: Priority = Field(default=Priority.MEDIUM)
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    completed: bool = Field(default=False)
+    task_list_id: int = Field(foreign_key="task_lists.id")
+
+    task_list: "TaskList" = Relationship(back_populates="tasks")
+
+# Persistent model (database table)
+class TaskList(SQLModel, table=True):
+    __tablename__ = "task_lists"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    name: str = Field(max_length=100)
+    owner_id: int = Field(foreign_key="users.id")
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+
+    tasks: List[Task] = Relationship(back_populates="task_list")
+
+# Non-persistent schema (for creating new tasks)
+class TaskCreate(SQLModel):
+    title: str = Field(max_length=200)
+    description: str = Field(default="", max_length=1000)
+    priority: Priority = Field(default=Priority.MEDIUM)
+    task_list_id: int
 ```
 
 * SEARCH / REPLACE format (applying a single local change)
 
-app/schemas.py
+app/models.py
 ```
 <<<<<<< SEARCH
-from pydantic import BaseModel
-
-class TaskCreate(BaseModel):
-    title: str
-    description: str
+class TaskCreate(SQLModel):
+    title: str = Field(max_length=200)
+    description: str = Field(default="", max_length=1000)
 =======
-from pydantic import BaseModel
-from typing import Optional
-from .models import Priority
-
-class TaskCreate(BaseModel):
-    title: str
-    description: Optional[str] = None
-    priority: Priority = Priority.MEDIUM
+class TaskCreate(SQLModel):
+    title: str = Field(max_length=200)
+    description: str = Field(default="", max_length=1000)
+    priority: Priority = Field(default=Priority.MEDIUM)
 >>>>>>> REPLACE
 ```
 
@@ -402,6 +421,7 @@ class TaskCreate(BaseModel):
 
 APPLICATION_SYSTEM_PROMPT = f"""
 You are a software engineer specializing in NiceGUI application development. Your task is to build UI components and application logic using existing data models. Strictly follow provided rules.
+Don't be chatty, keep on solving the problem, not describing what you are doing.
 
 {PYTHON_RULES}
 
@@ -414,38 +434,44 @@ You are a software engineer specializing in NiceGUI application development. You
 app/task_manager.py
 ```
 from nicegui import ui, app
-from .models import Task, Priority, TaskList
+from sqlmodel import select
+from app.database import get_session
+from app.models import Task, TaskCreate, Priority
+from datetime import datetime
 
 def create():
     @ui.page('/tasks')
     async def page():
         await ui.context.client.connected()
 
-        # Initialize tasks in storage
-        if 'tasks' not in app.storage.user:
-            app.storage.user['tasks'] = []
-
-        tasks = app.storage.user['tasks']
         task_container = ui.column()
 
         def add_task():
             title = task_input.value
             if title:
-                new_task = Task(
-                    id=len(tasks) + 1,
+                # Create task using non-persistent schema
+                task_data = TaskCreate(
                     title=title,
                     priority=Priority.MEDIUM,
-                    created_at=datetime.now()
+                    user_id=1  # Example user ID
                 )
-                tasks.append(new_task.dict())
+
+                # Save to database using persistent model
+                with get_session() as session:
+                    db_task = Task(**task_data.model_dump())
+                    session.add(db_task)
+                    session.commit()
+
                 refresh_tasks()
                 task_input.value = ''
 
         def refresh_tasks():
             task_container.clear()
-            for task_data in tasks:
-                with task_container:
-                    ui.card().with_columns(task_data['title'], task_data['priority'])
+            with get_session() as session:
+                tasks = session.exec(select(Task)).all()
+                for task in tasks:
+                    with task_container:
+                        ui.card().with_columns(task.title, task.priority.value)
 
         task_input = ui.input('Task title')
         ui.button('Add Task', on_click=add_task)
