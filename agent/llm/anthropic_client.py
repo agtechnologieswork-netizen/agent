@@ -31,7 +31,8 @@ retry_rate_limits = retry(
     stop=stop_after_attempt(5),
     wait=wait_exponential_jitter(initial=1, max=5),
     retry=is_rate_limit_error,
-    before_sleep=before_sleep_log(logger, logging.WARNING)
+    before_sleep=before_sleep_log(logger, logging.WARNING),
+    retry_error_callback=lambda retry_state: logger.warning(f"Retry failed: {retry_state.outcome.exception()}")
 )
 
 
@@ -89,14 +90,8 @@ class AnthropicLLM(common.AsyncLLM):
 
     @retry_rate_limits
     async def _create_message_with_retry(self, call_args: AnthropicParams) -> common.Completion:
-        try:
-            completion = await self.client.messages.create(**call_args)
-            return self._completion_from(completion)
-        except anthropic.APIStatusError as exc:
-            if exc.status_code < 413:
-                # non-retryable error, raise with better message
-                raise RuntimeError(f"Anthropic API error: {exc.status_code} {exc.message}") from exc
-            raise  # let tenacity handle retryable errors
+        completion = await self.client.messages.create(**call_args)
+        return self._completion_from(completion)
 
     @staticmethod
     def _completion_from(completion: Message) -> common.Completion:

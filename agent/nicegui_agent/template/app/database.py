@@ -12,3 +12,8 @@ def create_tables():
 
 def get_session():
     return Session(ENGINE)
+
+def reset_db():
+    """Wipe all tables in the database. Use with caution - for testing only!"""
+    SQLModel.metadata.drop_all(ENGINE)
+    SQLModel.metadata.create_all(ENGINE)

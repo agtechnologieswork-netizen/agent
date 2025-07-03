@@ -2,6 +2,14 @@ PYTHON_RULES = """
 # Universal Python rules
 1. `uv` is used for dependency management
 2. Always use absolute imports
+3. Prefer modern libraies (e.g. `httpx` over `requests`) and modern Python features (e.g. `match` over `if`)
+4. Use type hints for all functions and methods, and strictly follow them
+5. ALWAYS handle None cases - check if value is None before passing to functions
+6. For numeric operations with Decimal, use explicit conversion: Decimal('0') not 0
+7. Avoid boolean comparisons like `== True`, use truthiness instead: `if value:` not `if value == True:`
+8. In tests, use `assert validate_func()` not `assert validate_func() == True`
+9. For negative assertions in tests, use `assert not validate_func()` not `assert validate_func() == False`
+10. When working with nullable function parameters, always check for None: `def func(param: str | None) -> bool:`
 """
 
 TOOL_USAGE_RULES = """
@@ -39,6 +47,9 @@ Use the following tools to manage files:
 - Use edit_file for small, targeted changes to existing files
 - Ensure proper indentation when using edit_file - the search string must match exactly
 - Code will be linted and type-checked, so ensure correctness
+- Use multiple tools in a single step if needed.
+- Run tests and linting BEFORE using complete() to catch errors early
+- If tests fail, analyze the specific error message - don't guess at fixes
 """
 
 DATA_MODEL_RULES = """
@@ -46,17 +57,17 @@ DATA_MODEL_RULES = """
 
 Keep data models organized in app/models.py using SQLModel for both:
 - Persistent models (with table=True) - stored in database
-- Non-persistent schemas (without table=True) - for validation, serialization, and temporary data
+- Non-persistent schemas (with table=False) - for validation, serialization, and temporary data
 
 app/models.py
 ```
-from sqlmodel import SQLModel, Field, Relationship
+from sqlmodel import SQLModel, Field, Relationship, JSON, Column
 from datetime import datetime
-from typing import Optional, List
+from typing import Optional, List, Dict, Any
 
 # Persistent models (stored in database)
 class User(SQLModel, table=True):
-    __tablename__ = "users"
+    __tablename__ = "users"  # IMPORTANT: Use string literal, not declared_attr
 
     id: Optional[int] = Field(default=None, primary_key=True)
     name: str = Field(max_length=100)
@@ -67,7 +78,7 @@ class User(SQLModel, table=True):
     tasks: List["Task"] = Relationship(back_populates="user")
 
 class Task(SQLModel, table=True):
-    __tablename__ = "tasks"
+    __tablename__ = "tasks"  # IMPORTANT: Use string literal, not declared_attr
 
     id: Optional[int] = Field(default=None, primary_key=True)
     title: str = Field(max_length=200)
@@ -78,18 +89,25 @@ class Task(SQLModel, table=True):
 
     user: User = Relationship(back_populates="tasks")
 
+# For JSON fields in SQLModel, use sa_column with Column(JSON)
+class ConfigModel(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    settings: Dict[str, Any] = Field(default={}, sa_column=Column(JSON))
+    tags: List[str] = Field(default=[], sa_column=Column(JSON))
+
 # Non-persistent schemas (for validation, forms, API requests/responses)
-class TaskCreate(SQLModel):
+class TaskCreate(SQLModel, table=False):
+
     title: str = Field(max_length=200)
     description: str = Field(default="", max_length=1000)
     user_id: int
 
-class TaskUpdate(SQLModel):
+class TaskUpdate(SQLModel, table=False):
     title: Optional[str] = Field(default=None, max_length=200)
     description: Optional[str] = Field(default=None, max_length=1000)
     completed: Optional[bool] = Field(default=None)
 
-class UserCreate(SQLModel):
+class UserCreate(SQLModel, table=False):
     name: str = Field(max_length=100)
     email: str = Field(max_length=255)
 ```
@@ -101,7 +119,7 @@ Template app/database.py has required base for database connection and table cre
 app/database.py
 ```
 import os
-from sqlmodel import SQLModel, create_engine, Session
+from sqlmodel import SQLModel, create_engine, Session, desc, asc  # Import SQL functions
 from app.models import *  # Import all models to ensure they're registered
 
 DATABASE_URL = os.environ.get("APP_DATABASE_URL", "postgresql://postgres:postgres@postgres:5432/postgres")
@@ -113,6 +131,10 @@ def create_tables():
 
 def get_session():
     return Session(ENGINE)
+
+def reset_db():
+    SQLModel.metadata.drop_all(ENGINE)
+    SQLModel.metadata.create_all(ENGINE)
 ```
 
 # Data structures and schemas
@@ -129,6 +151,12 @@ def get_session():
 - Only use Optional[T] for auto-incrementing primary keys or truly optional fields
 - Prefer explicit types for better type safety (avoid unnecessary Optional)
 - Use datetime.utcnow as default_factory for timestamps
+- IMPORTANT: For sorting by date fields, use desc(Model.field) not Model.field.desc()
+- Import desc, asc from sqlmodel when needed for ordering
+- For Decimal fields, always use Decimal('0') not 0 for default values
+- For JSON/List/Dict fields in database models, use sa_column=Column(JSON)
+- When working with __tablename__, type checkers may complain - you can use # type: ignore if needed
+- Return List[Model] explicitly from queries: return list(session.exec(statement).all())
 """
 
 APPLICATION_RULES = """
@@ -201,6 +229,51 @@ app.storage.user: Stored server-side, associated with a unique identifier in bro
 app.storage.general: Stored server-side, shared storage accessible to all users. Use for application-wide data like announcements or shared state.
 
 app.storage.browser: Stored directly as browser session cookie, shared among all browser tabs for the same user. Limited by cookie size constraints. app.storage.user is generally preferred for better security and larger storage capacity.
+
+# Common NiceGUI Component Pitfalls (AVOID THESE!)
+
+1. **ui.date() - DO NOT pass both positional and keyword 'value' arguments**
+   - WRONG: `ui.date('Date', value=date.today())`  # This causes "multiple values for argument 'value'"
+   - CORRECT: `ui.date(value=date.today())`
+   - For date values, use `.isoformat()` when setting: `date_input.set_value(date.today().isoformat())`
+   
+2. **ui.button() - No 'size' parameter exists**
+   - WRONG: `ui.button('Click', size='sm')`
+   - CORRECT: `ui.button('Click').classes('text-sm')`  # Use CSS classes for styling
+
+3. **Lambda functions with nullable values**
+   - WRONG: `on_click=lambda: delete_item(item.id)`  # item.id might be None
+   - CORRECT: `on_click=lambda item_id=item.id: delete_item(item_id) if item_id else None`
+   - For event handlers: `on_click=lambda e, item_id=item.id: delete_item(item_id)`
+
+4. **Dialogs - Use proper async context manager**
+   - WRONG: `async with ui.dialog('Title') as dialog:`
+   - CORRECT: `with ui.dialog() as dialog, ui.card():`
+   - Dialog creation pattern:
+   ```python
+   with ui.dialog() as dialog, ui.card():
+       ui.label('Message')
+       with ui.row():
+           ui.button('Yes', on_click=lambda: dialog.submit('Yes'))
+           ui.button('No', on_click=lambda: dialog.submit('No'))
+   result = await dialog
+   ```
+
+5. **Test interactions with NiceGUI elements**
+   - Finding elements: `list(user.find(ui.date).elements)[0]`
+   - Setting values in tests: For ui.number inputs, access actual element
+   - Use `.elements.pop()` for single elements: `user.find(ui.upload).elements.pop()`
+
+6. **Startup module registration**
+   - Always import and call module.create() in startup.py:
+   ```python
+   from app.database import create_tables
+   import app.my_module
+   
+   def startup() -> None:
+       create_tables()
+       app.my_module.create()
+   ```
 
 # Binding properties
 
@@ -373,6 +446,56 @@ async def test_csv_upload(user: User) -> None:
         {'name': 'Bob', 'age': '28'},
     ]
 ```
+
+If a test requires an entity stored in the database, ensure to create it in the test setup.
+
+```
+from app.database import reset_db  # use to clear database and create fresh state
+
+@pytest.fixture()
+def new_db():
+    reset_db()
+    yield
+    reset_db()
+
+
+def test_task_creation(new_db):
+    ...
+```
+
+### Common test patterns and gotchas
+
+1. **Testing form inputs** - Direct manipulation in tests can be tricky
+   - Consider testing the end result by adding data via service instead
+   - Or use element manipulation carefully:
+   ```python
+   # For text input
+   user.find('Food Name').type('Apple')
+   
+   # For number inputs - access the actual element
+   number_elements = list(user.find(ui.number).elements)
+   if number_elements:
+       number_elements[0].set_value(123.45)
+   ```
+
+2. **Testing date changes**
+   - Use `.isoformat()` when setting date values
+   - May need to manually trigger refresh after date change:
+   ```python
+   date_input = list(user.find(ui.date).elements)[0]
+   date_input.set_value(yesterday.isoformat())
+   user.find('Refresh').click()  # Trigger manual refresh
+   ```
+
+3. **Testing element visibility**
+   - Use `await user.should_not_see(ui.component_type)` for negative assertions
+   - Some UI updates may need explicit waits or refreshes
+
+4. **Testing file uploads**
+   - Always use `.elements.pop()` to get single upload element
+   - Handle exceptions in upload tests gracefully
+
+NEVER use mock data in tests unless explicitly requested by the user.
 """
 
 

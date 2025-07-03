@@ -157,6 +157,7 @@ class FSMApplication:
         async def run_final_steps(
             ctx: ApplicationContext, result: Node[BaseData]
         ) -> None:
+            logger.info("Running final steps after application generation")
             await result.data.workspace.exec_mut(
                 [
                     "uv",
@@ -173,15 +174,35 @@ class FSMApplication:
             if reqs:
                 ctx.files["requirements.txt"] = reqs
 
-            await result.data.workspace.exec_mut([
-                "uv",
-                "run",
-                "ruff",
-                "check",
-                ".",
-                "--fix",
-            ])
+            # apply ruff lint fixes
+            await result.data.workspace.exec_mut(
+                [
+                    "uv",
+                    "run",
+                    "ruff",
+                    "check",
+                    ".",
+                    "--fix",
+                ]
+            )
 
+            # apply ruff formatting
+            await result.data.workspace.exec_mut(
+                [
+                    "uv",
+                    "run",
+                    "ruff",
+                    "format",
+                    ".",
+                ]
+            )
+
+            # read all files again after modifications and update context
+            for file in ctx.files.keys():
+                if file.endswith(".py"):
+                    content = await result.data.workspace.read_file(file)
+                    if content is not None:
+                        ctx.files[file] = content
 
         llm = get_best_coding_llm_client()
         workspace = await Workspace.create(
@@ -219,7 +240,7 @@ class FSMApplication:
             llm=llm,
             workspace=workspace.clone(),
             beam_width=3,
-            max_depth=50,
+            max_depth=100,  # can be larger given every file change is a separate tool call,
             system_prompt=playbooks.APPLICATION_SYSTEM_PROMPT,
         )
 

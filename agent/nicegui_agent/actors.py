@@ -100,15 +100,15 @@ class NiceguiActor(BaseActor, LLMActor):
     def select(self, node: Node[BaseData]) -> list[Node[BaseData]]:
         candidates = []
         all_children = node.get_all_children()
-        effective_beam_width = (
-            1 if len(all_children) >= self.beam_width else self.beam_width
-        )
-        logger.info(
-            f"Selecting candidates with effective beam width: {effective_beam_width}, total children: {len(all_children)}"
-        )
         for n in all_children:
             if n.is_leaf and n.depth <= self.max_depth:
-                if n.data.should_branch:
+                if n.data.should_branch and 0:  # temporary disable branching
+                    effective_beam_width = (
+                        1 if len(all_children) > (n.depth + 1) else self.beam_width
+                    )  # meaning we already branched once
+                    logger.info(
+                        f"Selecting candidates with effective beam width: {effective_beam_width}, current depth: {n.depth}/{self.max_depth}"
+                    )
                     candidates.extend([n] * effective_beam_width)
                 else:
                     candidates.append(n)
@@ -193,9 +193,20 @@ class NiceguiActor(BaseActor, LLMActor):
         result, is_completed = [], False
         for block in node.data.head().content:
             if not isinstance(block, ToolUse):
+                print(block.text)
                 continue
             try:
-                logger.info(f"Running tool {block.name} with input {block.input}")
+
+                def _short_dict_repr(d: dict) -> str:
+                    return ", ".join(
+                        f"{k}: {v if len(v) < 100 else v[:50] + '...'}"
+                        for k, v in d.items()
+                        if isinstance(v, str)
+                    )
+
+                logger.info(
+                    f"Running tool {block.name} with input {_short_dict_repr(block.input)}"
+                )  # pyright: ignore
 
                 match block.name:
                     case "read_file":
@@ -212,21 +223,52 @@ class NiceguiActor(BaseActor, LLMActor):
                             result.append(ToolUseResult.from_tool_use(block, "success"))
                             logger.debug(f"Written file: {path}")
                         except FileNotFoundError as e:
-                            error_msg = f"Directory not found for file '{path}': {str(e)}"
-                            logger.info(f"File not found error writing file {path}: {str(e)}")
-                            result.append(ToolUseResult.from_tool_use(block, error_msg, is_error=True))
+                            error_msg = (
+                                f"Directory not found for file '{path}': {str(e)}"
+                            )
+                            logger.info(
+                                f"File not found error writing file {path}: {str(e)}"
+                            )
+                            result.append(
+                                ToolUseResult.from_tool_use(
+                                    block, error_msg, is_error=True
+                                )
+                            )
                         except PermissionError as e:
-                            error_msg = f"Permission denied writing file '{path}': {str(e)}"
-                            logger.info(f"Permission error writing file {path}: {str(e)}")
-                            result.append(ToolUseResult.from_tool_use(block, error_msg, is_error=True))
+                            error_msg = (
+                                f"Permission denied writing file '{path}': {str(e)}"
+                            )
+                            logger.info(
+                                f"Permission error writing file {path}: {str(e)}"
+                            )
+                            result.append(
+                                ToolUseResult.from_tool_use(
+                                    block, error_msg, is_error=True
+                                )
+                            )
                         except ValueError as e:
                             error_msg = str(e)
                             logger.info(f"Value error writing file {path}: {error_msg}")
-                            result.append(ToolUseResult.from_tool_use(block, error_msg, is_error=True))
+                            result.append(
+                                ToolUseResult.from_tool_use(
+                                    block, error_msg, is_error=True
+                                )
+                            )
                     case "edit_file":
                         path = block.input["path"]  # pyright: ignore[reportIndexIssue]
                         search = block.input["search"]  # pyright: ignore[reportIndexIssue]
                         replace = block.input["replace"]  # pyright: ignore[reportIndexIssue]
+
+
+                        from datetime import datetime
+                        now = datetime.now().strftime("%Y%m%d_%H%M%S")
+
+                        with open(f'/tmp/logs/fix_{now}.txt', 'w') as f:
+                            f.write(f"Editing file: {path}\n")
+                            f.write(f"Search: {search}\n")
+                            f.write(f"Replace: {replace}\n")
+
+
                         try:
                             original = await node.data.workspace.read_file(path)
                             match original.count(search):
@@ -238,7 +280,9 @@ class NiceguiActor(BaseActor, LLMActor):
                                     new_content = original.replace(search, replace)
                                     node.data.workspace.write_file(path, new_content)
                                     node.data.files.update({path: new_content})
-                                    result.append(ToolUseResult.from_tool_use(block, "success"))
+                                    result.append(
+                                        ToolUseResult.from_tool_use(block, "success")
+                                    )
                                     logger.debug(f"Applied edit to file: {path}")
                                 case num_hits:
                                     raise ValueError(
@@ -246,16 +290,34 @@ class NiceguiActor(BaseActor, LLMActor):
                                     )
                         except FileNotFoundError as e:
                             error_msg = f"File '{path}' not found for editing: {str(e)}"
-                            logger.info(f"File not found error editing file {path}: {str(e)}")
-                            result.append(ToolUseResult.from_tool_use(block, error_msg, is_error=True))
+                            logger.info(
+                                f"File not found error editing file {path}: {str(e)}"
+                            )
+                            result.append(
+                                ToolUseResult.from_tool_use(
+                                    block, error_msg, is_error=True
+                                )
+                            )
                         except PermissionError as e:
-                            error_msg = f"Permission denied editing file '{path}': {str(e)}"
-                            logger.info(f"Permission error editing file {path}: {str(e)}")
-                            result.append(ToolUseResult.from_tool_use(block, error_msg, is_error=True))
+                            error_msg = (
+                                f"Permission denied editing file '{path}': {str(e)}"
+                            )
+                            logger.info(
+                                f"Permission error editing file {path}: {str(e)}"
+                            )
+                            result.append(
+                                ToolUseResult.from_tool_use(
+                                    block, error_msg, is_error=True
+                                )
+                            )
                         except ValueError as e:
                             error_msg = str(e)
                             logger.info(f"Value error editing file {path}: {error_msg}")
-                            result.append(ToolUseResult.from_tool_use(block, error_msg, is_error=True))
+                            result.append(
+                                ToolUseResult.from_tool_use(
+                                    block, error_msg, is_error=True
+                                )
+                            )
                     case "delete_file":
                         node.data.workspace.rm(block.input["path"])  # pyright: ignore[reportIndexIssue]
                         node.data.files.update({block.input["path"]: None})  # pyright: ignore[reportIndexIssue]
@@ -288,6 +350,14 @@ class NiceguiActor(BaseActor, LLMActor):
                                 "Can not complete without writing any changes."
                             )
                         check_err = await self.run_checks(node, user_prompt)
+
+                        from datetime import datetime
+                        now = datetime.now().strftime("%Y%m%d_%H%M%S")
+
+                        if check_err:
+                            with open(f'/tmp/logs/err_{now}.txt', 'w') as f:
+                                f.write(check_err)
+
                         if check_err:
                             logger.info(f"Failed to complete: {check_err}")
                         result.append(
