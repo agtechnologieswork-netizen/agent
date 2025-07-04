@@ -113,7 +113,6 @@ class EditActor(FileOperationsActor):
         logger.info(f"Selected {len(candidates)} leaf nodes for evaluation")
         return candidates
 
-
     async def run_checks(self, node: Node[BaseData], user_prompt: str) -> str | None:
         await notify_if_callback(self.event_callback, "🔍 Validating changes...", "validation start")
 

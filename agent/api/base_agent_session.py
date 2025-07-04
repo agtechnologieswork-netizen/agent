@@ -125,7 +125,7 @@ class BaseAgentSession(AgentInterface, ABC):
                 await self.send_event(
                     event_tx=event_tx,
                     status=AgentStatus.RUNNING,
-                    kind=MessageKind.STAGE_RESULT,
+                    kind=MessageKind.WIP_UPDATE,
                     content=message,
                     agent_state=None,
                     unified_diff=None,

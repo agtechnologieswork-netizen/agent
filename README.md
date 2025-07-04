@@ -31,6 +31,8 @@ This agent doesn't generate entire applications at once. Instead, it breaks down
 
 Each task is validated independently using ESLint, TypeScript compilation, test execution, and runtime logs before being accepted.
 
+More details on the architecture can be found in the [blog on our design decisions](https://www.app.build/blog/design-decisions).
+
 ## Repository structure
 
 This is the **agent** repository containing the core code generation engine and runtime environment. The CLI and platform code are available in the [platform repository](https://github.com/appdotbuild/platform).

@@ -30,6 +30,7 @@ class MessageKind(str, Enum):
     REFINEMENT_REQUEST = "RefinementRequest"  # no tool was used, meaning the agent is asking for more information
     REVIEW_RESULT = "ReviewResult"  # generation completed successfully
     KEEP_ALIVE = "KeepAlive"  # empty event to keep the connection alive
+    WIP_UPDATE = "WipUpdate"  # work in progress update, used to send intermediate results
 
 
 class UserMessage(BaseModel):
