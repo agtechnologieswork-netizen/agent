@@ -11,8 +11,9 @@ import hashlib
 import logging
 from abc import ABC, abstractmethod
 from llm.common import Tool, ToolUse, ToolUseResult, TextRaw
+from log import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 @dataclasses.dataclass
