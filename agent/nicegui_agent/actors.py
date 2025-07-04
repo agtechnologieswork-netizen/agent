@@ -6,7 +6,7 @@ import anyio
 from core.base_node import Node
 from core.workspace import Workspace
 from core.actors import BaseData, BaseActor, LLMActor
-from llm.common import AsyncLLM, Message, TextRaw, Tool, ToolUse, ToolUseResult
+from llm.common import AsyncLLM, Message, TextRaw, Tool, ToolUse, ToolUseResult, ThinkingBlock
 from nicegui_agent import playbooks
 
 logger = logging.getLogger(__name__)
@@ -193,7 +193,11 @@ class NiceguiActor(BaseActor, LLMActor):
         result, is_completed = [], False
         for block in node.data.head().content:
             if not isinstance(block, ToolUse):
-                print(block.text)
+                match block:
+                    case TextRaw(text=text):
+                        logger.info(f"LLM output: {text}")
+                    case _:
+                        pass
                 continue
             try:
 
@@ -205,14 +209,14 @@ class NiceguiActor(BaseActor, LLMActor):
                     )
 
                 logger.info(
-                    f"Running tool {block.name} with input {_short_dict_repr(block.input)}"
-                )  # pyright: ignore
+                    f"Running tool {block.name} with input {_short_dict_repr(block.input) if isinstance(block.input, dict) else str(block.input)}"
+                )
 
                 match block.name:
                     case "read_file":
                         tool_content = await node.data.workspace.read_file(
-                            block.input["path"]
-                        )  # pyright: ignore[reportIndexIssue]
+                            block.input["path"]  # pyright: ignore[reportIndexIssue]
+                        )
                         result.append(ToolUseResult.from_tool_use(block, tool_content))
                     case "write_file":
                         path = block.input["path"]  # pyright: ignore[reportIndexIssue]
@@ -258,16 +262,6 @@ class NiceguiActor(BaseActor, LLMActor):
                         path = block.input["path"]  # pyright: ignore[reportIndexIssue]
                         search = block.input["search"]  # pyright: ignore[reportIndexIssue]
                         replace = block.input["replace"]  # pyright: ignore[reportIndexIssue]
-
-
-                        from datetime import datetime
-                        now = datetime.now().strftime("%Y%m%d_%H%M%S")
-
-                        with open(f'/tmp/logs/fix_{now}.txt', 'w') as f:
-                            f.write(f"Editing file: {path}\n")
-                            f.write(f"Search: {search}\n")
-                            f.write(f"Replace: {replace}\n")
-
 
                         try:
                             original = await node.data.workspace.read_file(path)
@@ -350,13 +344,6 @@ class NiceguiActor(BaseActor, LLMActor):
                                 "Can not complete without writing any changes."
                             )
                         check_err = await self.run_checks(node, user_prompt)
-
-                        from datetime import datetime
-                        now = datetime.now().strftime("%Y%m%d_%H%M%S")
-
-                        if check_err:
-                            with open(f'/tmp/logs/err_{now}.txt', 'w') as f:
-                                f.write(check_err)
 
                         if check_err:
                             logger.info(f"Failed to complete: {check_err}")
