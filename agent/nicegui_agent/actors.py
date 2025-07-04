@@ -20,9 +20,18 @@ class NiceguiActor(FileOperationsActor):
         beam_width: int = 3,
         max_depth: int = 30,
         system_prompt: str = playbooks.APPLICATION_SYSTEM_PROMPT,
+        files_protected: list[str] = None,
+        files_allowed: list[str] = None,
     ):
         super().__init__(llm, workspace, beam_width, max_depth)
         self.system_prompt = system_prompt
+        self.files_protected = files_protected or [
+            "pyproject.toml",
+            "main.py",
+            "tests/conftest.py",
+            "tests/test_sqlmodel_smoke.py",
+        ]
+        self.files_allowed = files_allowed  or ["app/", "tests/"]
 
     async def execute(
         self,
@@ -225,19 +234,6 @@ class NiceguiActor(FileOperationsActor):
         if all_errors:
             return all_errors.strip()
         return None
-
-    @property
-    def files_allowed(self) -> list[str]:
-        return ["app/", "tests/"]
-
-    @property
-    def files_protected(self) -> list[str]:
-        return [
-            "pyproject.toml",
-            "main.py",
-            "tests/conftest.py",
-            "tests/test_sqlmodel_smoke.py",
-        ]
 
     async def get_repo_files(
         self, workspace: Workspace, files: dict[str, str]

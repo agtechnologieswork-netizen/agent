@@ -230,10 +230,11 @@ class FSMApplication:
 
         data_actor = NiceguiActor(
             llm=llm,
-            workspace=workspace,
+            workspace=workspace.clone(),
             beam_width=3,
             max_depth=50,
             system_prompt=playbooks.DATA_MODEL_SYSTEM_PROMPT,
+            files_allowed=["app/models.py"],
         )
         # ToDo: propagate crucial template files to DATA_MODEL_SYSTEM_PROMPT so they're cached
         app_actor = NiceguiActor(
@@ -255,12 +256,12 @@ class FSMApplication:
                     invoke={
                         "src": data_actor,
                         "input_fn": lambda ctx: (
-                            ctx.files,
+                            {k:v for k, v in ctx.files.items() if k != "requirements.txt"},
                             ctx.feedback_data or ctx.user_prompt,
                         ),
                         "on_done": {
                             "target": FSMState.REVIEW_DATA_MODEL,
-                            "actions": [update_node_files],
+                            "actions": [update_node_files, run_final_steps],
                         },
                         "on_error": {
                             "target": FSMState.FAILURE,
@@ -278,12 +279,12 @@ class FSMApplication:
                     invoke={
                         "src": data_actor,
                         "input_fn": lambda ctx: (
-                            ctx.files,
+                            {k:v for k, v in ctx.files.items() if k != "requirements.txt"},
                             ctx.feedback_data,
                         ),
                         "on_done": {
                             "target": FSMState.REVIEW_DATA_MODEL,
-                            "actions": [update_node_files],
+                            "actions": [update_node_files, run_final_steps],
                         },
                         "on_error": {
                             "target": FSMState.FAILURE,
@@ -295,7 +296,7 @@ class FSMApplication:
                     invoke={
                         "src": app_actor,
                         "input_fn": lambda ctx: (
-                            ctx.files,
+                            {k:v for k, v in ctx.files.items() if k != "requirements.txt"},
                             ctx.feedback_data or ctx.user_prompt,
                         ),
                         "on_done": {
@@ -318,7 +319,7 @@ class FSMApplication:
                     invoke={
                         "src": app_actor,
                         "input_fn": lambda ctx: (
-                            ctx.files,
+                            {k:v for k, v in ctx.files.items() if k != "requirements.txt"},
                             ctx.feedback_data,
                         ),
                         "on_done": {

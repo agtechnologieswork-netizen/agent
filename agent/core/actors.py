@@ -8,7 +8,6 @@ from llm.common import AsyncLLM, Message
 from llm.utils import loop_completion
 from core.workspace import Workspace
 import hashlib
-import logging
 from abc import ABC, abstractmethod
 from llm.common import Tool, ToolUse, ToolUseResult, TextRaw
 from log import get_logger

@@ -25,9 +25,7 @@ BOOLEAN_COMPARISON_RULES = """
 
 SQLMODEL_TYPE_RULES = """
 # SQLModel Type Ignore Rules
-1. Add `# type: ignore[assignment]` for __tablename__ declarations in SQLModel classes
-2. When type checkers complain about SQLModel patterns, add targeted `# type: ignore` comments
-3. Document why type ignore is needed: `# type: ignore[assignment]  # SQLModel pattern`
+1. Add `# type: ignore[assignment]` for __tablename__ declarations in SQLModel classes as it is a common error
 """
 
 LAMBDA_FUNCTION_RULES = """
@@ -112,7 +110,7 @@ from typing import Optional, List, Dict, Any
 
 # Persistent models (stored in database)
 class User(SQLModel, table=True):
-    __tablename__ = "users"  # type: ignore[assignment]  # SQLModel pattern
+    __tablename__ = "users"  # type: ignore[assignment]
 
     id: Optional[int] = Field(default=None, primary_key=True)
     name: str = Field(max_length=100)
@@ -123,7 +121,7 @@ class User(SQLModel, table=True):
     tasks: List["Task"] = Relationship(back_populates="user")
 
 class Task(SQLModel, table=True):
-    __tablename__ = "tasks"  # type: ignore[assignment]  # SQLModel pattern
+    __tablename__ = "tasks"  # type: ignore[assignment]
 
     id: Optional[int] = Field(default=None, primary_key=True)
     title: str = Field(max_length=200)
@@ -215,10 +213,12 @@ def reset_db():
   result = session.exec(select(func.count(Model.id))).first()
   total = result if result is not None else 0
   ```
-- Before using foreign key IDs, assert they are not None:
+- Before using foreign key IDs, ensure they are not None:
   ```python
-  assert language.id is not None
-  session_record = StudySession(language_id=language.id, ...)
+  if language.id is not None
+      session_record = StudySession(language_id=language.id, ...)
+  else:
+      raise ValueError("Language ID cannot be None")
   ```
 
 ## Date Field Handling
@@ -680,7 +680,8 @@ Don't be chatty, keep on solving the problem, not describing what you are doing.
 
 # Additional Notes for Data Modeling
 
-- Focus ONLY on data models, schemas, and data structures - DO NOT create UI components
+- Focus ONLY on data models and structures - DO NOT create UI components or application logic.
+- You don't need to add tests for data models as well.
 """.strip()
 
 APPLICATION_SYSTEM_PROMPT = f"""
