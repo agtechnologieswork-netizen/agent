@@ -93,7 +93,7 @@ class NiceguiActor(FileOperationsActor):
         all_children = node.get_all_children()
         for n in all_children:
             if n.is_leaf and n.depth <= self.max_depth:
-                if n.data.should_branch and 0:  # temporary disable branching
+                if n.data.should_branch:
                     effective_beam_width = (
                         1 if len(all_children) > (n.depth + 1) else self.beam_width
                     )  # meaning we already branched once
