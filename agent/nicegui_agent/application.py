@@ -228,6 +228,9 @@ class FSMApplication:
             ],
         )
 
+        # Extract event_callback from settings if provided
+        event_callback = settings.pop("event_callback", None) if settings else None
+        
         data_actor = NiceguiActor(
             llm=llm,
             workspace=workspace.clone(),
@@ -235,6 +238,7 @@ class FSMApplication:
             max_depth=50,
             system_prompt=playbooks.DATA_MODEL_SYSTEM_PROMPT,
             files_allowed=["app/models.py"],
+            event_callback=event_callback,
         )
         # ToDo: propagate crucial template files to DATA_MODEL_SYSTEM_PROMPT so they're cached
         app_actor = NiceguiActor(
@@ -243,6 +247,7 @@ class FSMApplication:
             beam_width=3,
             max_depth=100,  # can be larger given every file change is a separate tool call,
             system_prompt=playbooks.APPLICATION_SYSTEM_PROMPT,
+            event_callback=event_callback,
         )
 
         # Define state machine states

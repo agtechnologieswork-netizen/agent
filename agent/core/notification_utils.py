@@ -58,7 +58,7 @@ def get_file_emoji(file_path: str) -> str:
     Returns:
         Emoji string for the file type
     """
-    if file_path.endswith('.ts') or file_path.endswith('.tsx'):
+    if file_path.endswith('.ts') or file_path.endswith('.tsx') or file_path.endswith(".py"):
         return "📝"
     elif file_path.endswith('.css'):
         return "🎨"

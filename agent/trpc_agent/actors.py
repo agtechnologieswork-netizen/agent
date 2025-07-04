@@ -13,7 +13,7 @@ from trpc_agent.playwright import PlaywrightRunner, drizzle_push
 from core.workspace import ExecResult
 
 from trpc_agent.utils import run_write_files, run_tsc_compile, run_frontend_build, run_tests
-from trpc_agent.notification_utils import notify_if_callback
+from core.notification_utils import notify_if_callback
 
 logger = logging.getLogger(__name__)
 

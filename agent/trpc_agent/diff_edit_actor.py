@@ -7,7 +7,7 @@ from llm.common import AsyncLLM, Message, TextRaw
 from trpc_agent import playbooks
 from trpc_agent.actors import run_tests, run_tsc_compile, run_frontend_build
 from trpc_agent.playwright import PlaywrightRunner
-from trpc_agent.notification_utils import notify_if_callback
+from core.notification_utils import notify_if_callback
 
 logger = logging.getLogger(__name__)
 
@@ -114,8 +114,6 @@ class EditActor(FileOperationsActor):
         return candidates
 
 
-
-
     async def run_checks(self, node: Node[BaseData], user_prompt: str) -> str | None:
         await notify_if_callback(self.event_callback, "🔍 Validating changes...", "validation start")
 
@@ -194,4 +192,3 @@ class EditActor(FileOperationsActor):
         repo_files.update(files.keys())
         repo_files.update(await workspace.ls("client/src/components/ui"))
         return list(repo_files)
-

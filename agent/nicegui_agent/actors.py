@@ -1,11 +1,13 @@
 import jinja2
 import logging
 import anyio
+from typing import Callable, Awaitable
 from core.base_node import Node
 from core.workspace import Workspace
 from core.actors import BaseData, FileOperationsActor
 from llm.common import AsyncLLM, Message, TextRaw, Tool, ToolUse, ToolUseResult
 from nicegui_agent import playbooks
+from core.notification_utils import notify_if_callback, notify_stage
 
 logger = logging.getLogger(__name__)
 
@@ -22,9 +24,11 @@ class NiceguiActor(FileOperationsActor):
         system_prompt: str = playbooks.APPLICATION_SYSTEM_PROMPT,
         files_protected: list[str] = None,
         files_allowed: list[str] = None,
+        event_callback: Callable[[str], Awaitable[None]] | None = None,
     ):
         super().__init__(llm, workspace, beam_width, max_depth)
         self.system_prompt = system_prompt
+        self.event_callback = event_callback
         self.files_protected = files_protected or [
             "pyproject.toml",
             "main.py",
@@ -38,6 +42,8 @@ class NiceguiActor(FileOperationsActor):
         files: dict[str, str],
         user_prompt: str,
     ) -> Node[BaseData]:
+        await notify_stage(self.event_callback, "🚀 Starting NiceGUI application generation", "in_progress")
+        
         workspace = self.workspace.clone()
         logger.info(
             f"Start {self.__class__.__name__} execution with files: {files.keys()}"
@@ -75,6 +81,8 @@ class NiceguiActor(FileOperationsActor):
                 logger.info("No candidates to evaluate, search terminated")
                 break
 
+            await notify_if_callback(self.event_callback, f"🔄 Working on implementation (iteration {iteration})...", "iteration progress")
+            
             logger.info(
                 f"Iteration {iteration}: Running LLM on {len(candidates)} candidates"
             )
@@ -90,10 +98,12 @@ class NiceguiActor(FileOperationsActor):
                 logger.info(f"Evaluating node {i + 1}/{len(nodes)}")
                 if await self.eval_node(new_node, user_prompt):
                     logger.info(f"Found solution at depth {new_node.depth}")
+                    await notify_stage(self.event_callback, "✅ NiceGUI application generated successfully", "completed")
                     solution = new_node
                     break
         if solution is None:
             logger.error(f"{self.__class__.__name__} failed to find a solution")
+            await notify_stage(self.event_callback, "❌ NiceGUI application generation failed", "failed")
             raise ValueError("No solutions found")
         return solution
 
@@ -199,6 +209,8 @@ class NiceguiActor(FileOperationsActor):
         return None
 
     async def run_checks(self, node: Node[BaseData], user_prompt: str) -> str | None:
+        await notify_stage(self.event_callback, "🔍 Running validation checks", "in_progress")
+        
         all_errors = ""
         results = {}
 
@@ -232,7 +244,10 @@ class NiceguiActor(FileOperationsActor):
             all_errors += f"SQLModel errors:\n{sqlmodel_result}\n"
 
         if all_errors:
+            await notify_stage(self.event_callback, "❌ Validation checks failed - fixing issues", "failed")
             return all_errors.strip()
+        
+        await notify_stage(self.event_callback, "✅ All validation checks passed", "completed")
         return None
 
     async def get_repo_files(

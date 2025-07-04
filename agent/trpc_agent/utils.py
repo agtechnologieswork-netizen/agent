@@ -5,7 +5,7 @@ from core.base_node import Node
 from core.workspace import ExecResult
 from core.actors import BaseData
 from llm.common import TextRaw
-from trpc_agent.notification_utils import notify_files_processed
+from core.notification_utils import notify_files_processed
 
 logger = logging.getLogger(__name__)
 
