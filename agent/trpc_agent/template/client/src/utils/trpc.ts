@@ -4,7 +4,13 @@ import superjson from 'superjson';
 
 export const trpc = createTRPCClient<AppRouter>({
   links: [
-    httpBatchLink({ url: '/api', transformer: superjson }),
+    httpBatchLink({ url: 'http://localhost:2022/', transformer: superjson, fetch: (url, options) => {
+      return fetch(url, {
+        ...options,
+        credentials: 'include',
+      });
+    },
+}),
     loggerLink({
           enabled: (opts) =>
             (typeof window !== 'undefined') ||

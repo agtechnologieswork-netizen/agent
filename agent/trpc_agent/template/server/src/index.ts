@@ -5,13 +5,7 @@ import cors from 'cors';
 import superjson from 'superjson';
 import { StackServerApp } from '@stackframe/react';
 
-const stackServerApp = new StackServerApp({
-  projectId: process.env['STACK_PROJECT_ID'],
-  secretServerKey: process.env['STACK_SECRET_SERVER_KEY'],
-  tokenStore: "cookie",
-});
-
-const t = initTRPC.create({
+const t = initTRPC.context<{ req: any; res: any }>().create({
   transformer: superjson,
 });
 
@@ -19,8 +13,19 @@ const publicProcedure = t.procedure;
 const router = t.router;
 
 const appRouter = router({
-  healthcheck: publicProcedure.query(() => {
-    return { status: 'ok', timestamp: new Date().toISOString(), currentUser: stackServerApp.getUser() };
+  healthcheck: publicProcedure.query(async ({ ctx }) => {
+    const stackServerApp = new StackServerApp({
+      projectId: process.env['STACK_PROJECT_ID'],
+      secretServerKey: process.env['STACK_SECRET_SERVER_KEY'],
+      tokenStore: "memory",
+      redirectMethod: ctx.req?.headers,
+    });
+    
+    const cookies = ctx.req?.headers.cookie;
+    
+    console.log("user", await stackServerApp.getUser());
+
+    return { status: 'ok', timestamp: new Date().toISOString(), currentUser: await stackServerApp.getUser() };
   }),
 });
 
@@ -30,12 +35,16 @@ async function start() {
   const port = process.env['SERVER_PORT'] || 2022;
   const server = createHTTPServer({
     middleware: (req, res, next) => {
-      cors()(req, res, next);
+      cors({
+        origin: 'http://localhost:5173',
+        credentials: true,
+      })(req, res, next);
     },
     router: appRouter,
-    createContext() {
-      return {};
+    createContext({ req, res }) {
+      return { req, res };
     },
+    basePath: '/',
   });
   server.listen(port);
   console.log(`TRPC server listening at port: ${port}`);
