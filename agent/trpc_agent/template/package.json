@@ -13,7 +13,7 @@
     "dev:all": "bun run dev:server & bun run dev:client"
   },
   "dependencies": {
-    "@stackframe/react": "^2.8.11",
+    "@stackframe/react": "2.8.17",
     "app-build": ".",
     "react-router-dom": "^7.6.0"
   },

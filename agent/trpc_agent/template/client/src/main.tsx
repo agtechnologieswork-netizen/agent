@@ -5,7 +5,7 @@ import { StackHandler, StackProvider, StackTheme } from "@stackframe/react";
 import { Suspense } from "react";
 import { BrowserRouter, Route, Routes, useLocation } from "react-router-dom";
 import App from './App.tsx'
-
+import { UserPage } from './UserPage.tsx';
 import { stackClientApp } from './neon-auth.tsx'
 
 function HandlerRoutes() {
@@ -24,6 +24,7 @@ createRoot(document.getElementById('root')!).render(
           <StackTheme>
             <Routes>
               <Route path="/handler/*" element={<HandlerRoutes />} />
+              <Route path="/user" element={<UserPage />} />
               <Route path="/" element={<App />} />
             </Routes>
           </StackTheme>
