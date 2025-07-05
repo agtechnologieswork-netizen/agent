@@ -3,6 +3,13 @@ import { createHTTPServer } from '@trpc/server/adapters/standalone';
 import 'dotenv/config';
 import cors from 'cors';
 import superjson from 'superjson';
+import { StackServerApp } from '@stackframe/react';
+
+const stackServerApp = new StackServerApp({
+  projectId: process.env['STACK_PROJECT_ID'],
+  secretServerKey: process.env['STACK_SECRET_SERVER_KEY'],
+  tokenStore: "cookie",
+});
 
 const t = initTRPC.create({
   transformer: superjson,
@@ -13,7 +20,7 @@ const router = t.router;
 
 const appRouter = router({
   healthcheck: publicProcedure.query(() => {
-    return { status: 'ok', timestamp: new Date().toISOString() };
+    return { status: 'ok', timestamp: new Date().toISOString(), currentUser: stackServerApp.getUser() };
   }),
 });
 
