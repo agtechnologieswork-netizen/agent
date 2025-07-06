@@ -9,7 +9,6 @@ from llm.utils import get_best_coding_llm_client
 from core.actors import BaseData
 from core.base_node import Node
 from core.statemachine import MachineCheckpoint
-from core.workspace import Workspace
 from laravel_agent.actors import LaravelActor
 from laravel_agent import playbooks
 from laravel_agent.utils import create_workspace
