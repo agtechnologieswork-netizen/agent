@@ -230,7 +230,7 @@ class FSMApplication:
 
         # Extract event_callback from settings if provided
         event_callback = settings.pop("event_callback", None) if settings else None
-        
+
         data_actor = NiceguiActor(
             llm=llm,
             workspace=workspace.clone(),
@@ -447,9 +447,9 @@ class FSMApplication:
             )
             # If no snapshot, create an empty initial commit
             start = (
-                start.with_exec(["touch", "README.md"])
+                start
                 .with_exec(["git", "add", "."])
-                .with_exec(["git", "commit", "-m", "'initial'"])
+                .with_exec(["git", "commit", "-m", "'initial'", "--allow-empty"])
             )
 
         # Add template files (they will appear in diff if not in snapshot)

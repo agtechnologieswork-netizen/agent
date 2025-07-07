@@ -43,7 +43,7 @@ class NiceguiActor(FileOperationsActor):
         user_prompt: str,
     ) -> Node[BaseData]:
         await notify_stage(self.event_callback, "🚀 Starting NiceGUI application generation", "in_progress")
-        
+
         workspace = self.workspace.clone()
         logger.info(
             f"Start {self.__class__.__name__} execution with files: {files.keys()}"
@@ -81,8 +81,8 @@ class NiceguiActor(FileOperationsActor):
                 logger.info("No candidates to evaluate, search terminated")
                 break
 
-            await notify_if_callback(self.event_callback, f"🔄 Working on implementation (iteration {iteration})...", "iteration progress")
-            
+            await notify_if_callback(self.event_callback, f"🔄 Working on implementation (step {iteration})...", "iteration progress")
+
             logger.info(
                 f"Iteration {iteration}: Running LLM on {len(candidates)} candidates"
             )
@@ -210,7 +210,7 @@ class NiceguiActor(FileOperationsActor):
 
     async def run_checks(self, node: Node[BaseData], user_prompt: str) -> str | None:
         await notify_stage(self.event_callback, "🔍 Running validation checks", "in_progress")
-        
+
         all_errors = ""
         results = {}
 
@@ -246,7 +246,7 @@ class NiceguiActor(FileOperationsActor):
         if all_errors:
             await notify_stage(self.event_callback, "❌ Validation checks failed - fixing issues", "failed")
             return all_errors.strip()
-        
+
         await notify_stage(self.event_callback, "✅ All validation checks passed", "completed")
         return None
 
