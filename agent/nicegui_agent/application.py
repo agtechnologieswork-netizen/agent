@@ -261,7 +261,11 @@ class FSMApplication:
                     invoke={
                         "src": data_actor,
                         "input_fn": lambda ctx: (
-                            {k:v for k, v in ctx.files.items() if k != "requirements.txt"},
+                            {
+                                k: v
+                                for k, v in ctx.files.items()
+                                if k != "requirements.txt"
+                            },
                             ctx.feedback_data or ctx.user_prompt,
                         ),
                         "on_done": {
@@ -284,7 +288,11 @@ class FSMApplication:
                     invoke={
                         "src": data_actor,
                         "input_fn": lambda ctx: (
-                            {k:v for k, v in ctx.files.items() if k != "requirements.txt"},
+                            {
+                                k: v
+                                for k, v in ctx.files.items()
+                                if k != "requirements.txt"
+                            },
                             ctx.feedback_data,
                         ),
                         "on_done": {
@@ -301,7 +309,11 @@ class FSMApplication:
                     invoke={
                         "src": app_actor,
                         "input_fn": lambda ctx: (
-                            {k:v for k, v in ctx.files.items() if k != "requirements.txt"},
+                            {
+                                k: v
+                                for k, v in ctx.files.items()
+                                if k != "requirements.txt"
+                            },
                             ctx.feedback_data or ctx.user_prompt,
                         ),
                         "on_done": {
@@ -324,7 +336,11 @@ class FSMApplication:
                     invoke={
                         "src": app_actor,
                         "input_fn": lambda ctx: (
-                            {k:v for k, v in ctx.files.items() if k != "requirements.txt"},
+                            {
+                                k: v
+                                for k, v in ctx.files.items()
+                                if k != "requirements.txt"
+                            },
                             ctx.feedback_data,
                         ),
                         "on_done": {
@@ -446,10 +462,8 @@ class FSMApplication:
                 "SERVER get_diff_with: Snapshot is empty. Diff will be against template + FSM context files."
             )
             # If no snapshot, create an empty initial commit
-            start = (
-                start
-                .with_exec(["git", "add", "."])
-                .with_exec(["git", "commit", "-m", "'initial'", "--allow-empty"])
+            start = start.with_exec(["git", "add", "."]).with_exec(
+                ["git", "commit", "-m", "'initial'", "--allow-empty"]
             )
 
         # Add template files (they will appear in diff if not in snapshot)
