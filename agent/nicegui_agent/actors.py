@@ -1,6 +1,7 @@
 import jinja2
 import logging
 import anyio
+import uuid
 from typing import Callable, Awaitable
 from core.base_node import Node
 from core.workspace import Workspace
@@ -22,8 +23,8 @@ class NiceguiActor(FileOperationsActor):
         beam_width: int = 3,
         max_depth: int = 30,
         system_prompt: str = playbooks.APPLICATION_SYSTEM_PROMPT,
-        files_protected: list[str] = None,
-        files_allowed: list[str] = None,
+        files_protected: list[str] | None = None,
+        files_allowed: list[str] | None = None,
         event_callback: Callable[[str], Awaitable[None]] | None = None,
     ):
         super().__init__(llm, workspace, beam_width, max_depth)
@@ -154,7 +155,7 @@ class NiceguiActor(FileOperationsActor):
                 )
                 if exec_res.exit_code != 0:
                     return ToolUseResult.from_tool_use(
-                        ToolUse(id="", name=tool_name, input=tool_input),
+                        ToolUse(id=uuid.uuid4().hex, name=tool_name, input=tool_input),
                         f"Failed to add packages: {exec_res.stderr}",
                         is_error=True,
                     )
@@ -167,7 +168,7 @@ class NiceguiActor(FileOperationsActor):
                         }
                     )
                     return ToolUseResult.from_tool_use(
-                        ToolUse(id="", name=tool_name, input=tool_input), "success"
+                        ToolUse(id=uuid.uuid4().hex, name=tool_name, input=tool_input), "success"
                     )
             case _:
                 return await super().handle_custom_tool(tool_name, tool_input, node)
