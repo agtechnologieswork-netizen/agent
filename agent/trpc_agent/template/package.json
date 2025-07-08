@@ -15,10 +15,10 @@
   "dependencies": {
     "@stackframe/react": "2.8.17",
     "app-build": ".",
-    "react-router-dom": "^7.6.0"
+    "react-router-dom": "7.6.0"
   },
   "devDependencies": {
-    "@playwright/test": "^1.52.0",
-    "@types/node": "^22.15.14"
+    "@playwright/test": "1.52.0",
+    "@types/node": "22.15.14"
   }
 }

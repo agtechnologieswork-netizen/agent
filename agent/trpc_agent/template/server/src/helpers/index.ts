@@ -16,4 +16,3 @@ export const createDB = async () => {
   );
   await db.execute(migrationStatements.join('\n'));
 };
-3
