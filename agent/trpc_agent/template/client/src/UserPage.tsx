@@ -17,8 +17,6 @@ export function UserPage() {
     fetchData();
   }, []);
 
-  console.log(user);
-
   return (
     <div className="w-screen h-auto">
       <AccountSettings />

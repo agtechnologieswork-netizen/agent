@@ -11,6 +11,10 @@ export function getStackServerApp(requestContext: { headers: Headers }) {
 }
 
 export async function getCurrentUser(requestContext: { headers: Headers }) {
-  const stackServerApp = getStackServerApp(requestContext);
-  return await stackServerApp.getUser();
+    try {
+    const stackServerApp = getStackServerApp(requestContext);
+    return await stackServerApp.getUser();
+  } catch (error) {
+    return null;
+  }
 }
