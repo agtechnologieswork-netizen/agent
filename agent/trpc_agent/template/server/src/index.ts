@@ -42,13 +42,17 @@ async function start() {
 
   let middleware;
   if (process.env.NODE_ENV !== "production") {
-    middleware = (req: any, res: any, next: any) => {
+    middleware = (
+      req: Parameters<ReturnType<typeof cors>>[0],
+      res: Parameters<ReturnType<typeof cors>>[1],
+      next: Parameters<ReturnType<typeof cors>>[2]
+    ) => {
       cors({
         origin: "http://localhost:5173",
         credentials: true,
       })(req, res, next);
     };
-  };
+  }
 
   const server = createHTTPServer({
     middleware,
