@@ -12,25 +12,27 @@ const t = initTRPC.context<{ req: any; res: any }>().create({
 const publicProcedure = t.procedure;
 const router = t.router;
 
+function getStackServerApp(requestContext: { headers: Headers }) {
+  return new StackServerApp({
+    projectId: process.env["STACK_PROJECT_ID"],
+    secretServerKey: process.env["STACK_SECRET_SERVER_KEY"],
+    tokenStore: {
+      headers: new Headers(requestContext.headers),
+    },
+  });
+}
+
+async function getCurrentUser(requestContext: { headers: Headers }) {
+  const stackServerApp = getStackServerApp(requestContext);
+  return await stackServerApp.getUser();
+}
+
 const appRouter = router({
   healthcheck: publicProcedure.query(async ({ ctx }) => {
-    const stackServerApp = new StackServerApp({
-      projectId: process.env["STACK_PROJECT_ID"],
-      secretServerKey: process.env["STACK_SECRET_SERVER_KEY"],
-
-      // Since we receive the cookies in the request, we need to initiate the
-      // token store from the request's context. If we were not using tRPC,
-      // we could just set `tokenStore` to `ctx.req` and it would work out of the
-      // box, but this request object is a little bit different.
-      tokenStore: {
-        headers: new Headers(ctx.req.headers),
-      },
-    });
-
     return {
       status: "ok",
       timestamp: new Date().toISOString(),
-      currentUser: await stackServerApp.getUser(),
+      currentUser: await getCurrentUser(ctx.req),
     };
   }),
 });
