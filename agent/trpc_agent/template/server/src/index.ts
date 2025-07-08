@@ -3,7 +3,7 @@ import { createHTTPServer } from "@trpc/server/adapters/standalone";
 import "dotenv/config";
 import cors from "cors";
 import superjson from "superjson";
-import { StackServerApp } from "@stackframe/react";
+import { getCurrentUser } from "./helpers/auth";
 
 const t = initTRPC.context<{ req: any; res: any }>().create({
   transformer: superjson,
@@ -11,21 +11,6 @@ const t = initTRPC.context<{ req: any; res: any }>().create({
 
 const publicProcedure = t.procedure;
 const router = t.router;
-
-function getStackServerApp(requestContext: { headers: Headers }) {
-  return new StackServerApp({
-    projectId: process.env["STACK_PROJECT_ID"],
-    secretServerKey: process.env["STACK_SECRET_SERVER_KEY"],
-    tokenStore: {
-      headers: new Headers(requestContext.headers),
-    },
-  });
-}
-
-async function getCurrentUser(requestContext: { headers: Headers }) {
-  const stackServerApp = getStackServerApp(requestContext);
-  return await stackServerApp.getUser();
-}
 
 const appRouter = router({
   healthcheck: publicProcedure.query(async ({ ctx }) => {
