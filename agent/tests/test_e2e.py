@@ -130,6 +130,7 @@ async def run_e2e(prompt: str, standalone: bool, with_edit=True, template_id=Non
                     )
 
                     if not container_healthy:
+                        breakpoint()
                         raise RuntimeError("Containers did not become healthy within the timeout period")
 
                     if standalone:

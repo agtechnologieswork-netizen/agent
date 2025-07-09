@@ -1,7 +1,6 @@
 import jinja2
 import logging
 import anyio
-import uuid
 from typing import Callable, Awaitable
 from core.base_node import Node
 from core.workspace import Workspace
@@ -9,6 +8,7 @@ from core.actors import BaseData, FileOperationsActor
 from llm.common import AsyncLLM, Message, TextRaw, Tool, ToolUse, ToolUseResult
 from nicegui_agent import playbooks
 from core.notification_utils import notify_if_callback, notify_stage
+from integrations.dbrx import DatabricksClient
 
 logger = logging.getLogger(__name__)
 
@@ -22,14 +22,23 @@ class NiceguiActor(FileOperationsActor):
         workspace: Workspace,
         beam_width: int = 3,
         max_depth: int = 30,
-        system_prompt: str = playbooks.APPLICATION_SYSTEM_PROMPT,
+        system_prompt: str = playbooks.get_data_model_system_prompt(),
         files_protected: list[str] | None = None,
         files_allowed: list[str] | None = None,
         event_callback: Callable[[str], Awaitable[None]] | None = None,
+        databricks_host: str | None = None,
+        databricks_token: str | None = None,
     ):
         super().__init__(llm, workspace, beam_width, max_depth)
         self.system_prompt = system_prompt
         self.event_callback = event_callback
+
+        if databricks_host and databricks_token:
+            self.databricks_client = DatabricksClient()
+            logger.info("Databricks client initialized")
+        else:
+            self.databricks_client = None
+            logger.info("Databricks client not initialized - no credentials provided")
         self.files_protected = files_protected or [
             "pyproject.toml",
             "main.py",
@@ -129,7 +138,7 @@ class NiceguiActor(FileOperationsActor):
     @property
     def additional_tools(self) -> list[Tool]:
         """NiceGUI-specific tools."""
-        return [
+        tools = [
             {
                 "name": "uv_add",
                 "description": "Install additional packages",
@@ -143,10 +152,56 @@ class NiceguiActor(FileOperationsActor):
             },
         ]
 
+        if self.databricks_client:
+            tools.extend([
+                {
+                    "name": "databricks_list_tables",
+                    "description": "List tables in Unity Catalog with optional filtering. Use '*' as wildcard for catalog/schema.",
+                    "input_schema": {
+                        "type": "object",
+                        "properties": {
+                            "catalog": {"type": "string", "description": "Catalog name or '*' for all catalogs", "default": "*"},
+                            "schema": {"type": "string", "description": "Schema name or '*' for all schemas", "default": "*"},
+                            "exclude_inaccessible": {"type": "boolean", "description": "Skip tables user cannot access", "default": True},
+                        },
+                        "required": [],
+                    },
+                },
+                {
+                    "name": "databricks_describe_table",
+                    "description": "Get comprehensive table details including metadata, columns, sample data, and row count",
+                    "input_schema": {
+                        "type": "object",
+                        "properties": {
+                            "table_full_name": {"type": "string", "description": "Full table name in format 'catalog.schema.table'"},
+                            "sample_size": {"type": "integer", "description": "Number of sample rows to retrieve", "default": 10},
+                        },
+                        "required": ["table_full_name"],
+                    },
+                },
+                {
+                    "name": "databricks_execute_query",
+                    "description": "Execute a SELECT query on Databricks and get results. Only SELECT queries are allowed for safety.",
+                    "input_schema": {
+                        "type": "object",
+                        "properties": {
+                            "query": {"type": "string", "description": "SQL SELECT query to execute"},
+                            "timeout": {"type": "string", "description": "Query timeout (e.g., '60s', '5m')", "default": "60s"},
+                        },
+                        "required": ["query"],
+                    },
+                },
+            ])
+
+        return tools
+
     async def handle_custom_tool(
-        self, tool_name: str, tool_input: dict, node: Node[BaseData]
+        self, tool_use: ToolUse, node: Node[BaseData]
     ) -> ToolUseResult:
         """Handle NiceGUI-specific custom tools."""
+        tool_name = tool_use.name
+        tool_input = tool_use.input
+        assert isinstance(tool_input, dict), f"Tool input must be dict, got {type(tool_input)}"
         match tool_name:
             case "uv_add":
                 packages = tool_input["packages"]  # pyright: ignore[reportIndexIssue]
@@ -155,7 +210,7 @@ class NiceguiActor(FileOperationsActor):
                 )
                 if exec_res.exit_code != 0:
                     return ToolUseResult.from_tool_use(
-                        ToolUse(id=uuid.uuid4().hex, name=tool_name, input=tool_input),
+                        tool_use,
                         f"Failed to add packages: {exec_res.stderr}",
                         is_error=True,
                     )
@@ -168,10 +223,179 @@ class NiceguiActor(FileOperationsActor):
                         }
                     )
                     return ToolUseResult.from_tool_use(
-                        ToolUse(id=uuid.uuid4().hex, name=tool_name, input=tool_input), "success"
+                        tool_use, "success"
                     )
+
+            case "databricks_list_tables":
+                if not self.databricks_client:
+                    return ToolUseResult.from_tool_use(
+                        tool_use,
+                        "Databricks credentials not provided. Set databricks_host and databricks_token in constructor.",
+                        is_error=True,
+                    )
+
+                try:
+                    catalog = tool_input.get("catalog", "*")  # pyright: ignore[reportIndexIssue]
+                    schema = tool_input.get("schema", "*")  # pyright: ignore[reportIndexIssue]
+                    exclude_inaccessible = tool_input.get("exclude_inaccessible", True)  # pyright: ignore[reportIndexIssue]
+
+                    tables = self.databricks_client.list_tables(
+                        catalog=catalog,
+                        schema=schema,
+                        exclude_inaccessible=exclude_inaccessible
+                    )
+
+                    if not tables:
+                        result = f"No accessible tables found with catalog='{catalog}', schema='{schema}'"
+                    else:
+                        result_lines = [f"Found {len(tables)} accessible tables:"]
+                        for table in tables:
+                            table_line = f"- {table.full_name} ({table.table_type})"
+                            if table.comment:
+                                table_line += f" - {table.comment}"
+                            result_lines.append(table_line)
+                        result = "\n".join(result_lines)
+
+                    return ToolUseResult.from_tool_use(
+                        tool_use,
+                        result
+                    )
+
+                except Exception as e:
+                    return ToolUseResult.from_tool_use(
+                        tool_use,
+                        f"Failed to list tables: {str(e)}",
+                        is_error=True,
+                    )
+
+            case "databricks_describe_table":
+                if not self.databricks_client:
+                    return ToolUseResult.from_tool_use(
+                        tool_use,
+                        "Databricks credentials not provided. Set databricks_host and databricks_token in constructor.",
+                        is_error=True,
+                    )
+
+                try:
+                    table_full_name = tool_input["table_full_name"]  # pyright: ignore[reportIndexIssue]
+                    sample_size = tool_input.get("sample_size", 10)  # pyright: ignore[reportIndexIssue]
+
+                    table_details = self.databricks_client.get_table_details(
+                        table_full_name=table_full_name,
+                        sample_size=sample_size
+                    )
+
+                    # Format comprehensive table information
+                    result_lines = [
+                        f"Table: {table_details.metadata.full_name}",
+                        f"Catalog: {table_details.metadata.catalog}",
+                        f"Schema: {table_details.metadata.schema}",
+                        f"Name: {table_details.metadata.name}",
+                        f"Table Type: {table_details.metadata.table_type}",
+                        f"Data Source Format: {table_details.metadata.data_source_format}",
+                    ]
+
+                    if table_details.metadata.comment:
+                        result_lines.append(f"Comment: {table_details.metadata.comment}")
+
+                    if table_details.metadata.owner:
+                        result_lines.append(f"Owner: {table_details.metadata.owner}")
+
+                    if table_details.row_count is not None:
+                        result_lines.append(f"Row Count: {table_details.row_count:,}")
+
+                    if table_details.metadata.storage_location:
+                        result_lines.append(f"Storage Location: {table_details.metadata.storage_location}")
+
+                    # Add column information
+                    if table_details.columns:
+                        result_lines.append(f"\nColumns ({len(table_details.columns)}):")
+                        for col in table_details.columns:
+                            col_info = f"  - {col.name}: {col.data_type}"
+                            if col.comment:
+                                col_info += f" ({col.comment})"
+                            result_lines.append(col_info)
+
+                    # Add sample data if available
+                    if table_details.sample_data is not None and len(table_details.sample_data) > 0:
+                        result_lines.append(f"\nSample Data ({len(table_details.sample_data)} rows):")
+                        # Convert sample data to string representation
+                        sample_str = str(table_details.sample_data)
+                        result_lines.append(sample_str)
+
+                    result = "\n".join(result_lines)
+
+                    return ToolUseResult.from_tool_use(
+                        tool_use,
+                        result
+                    )
+
+                except Exception as e:
+                    return ToolUseResult.from_tool_use(
+                        tool_use,
+                        f"Failed to describe table: {str(e)}",
+                        is_error=True,
+                    )
+
+            case "databricks_execute_query":
+                if not self.databricks_client:
+                    return ToolUseResult.from_tool_use(
+                        tool_use,
+                        "Databricks credentials not provided. Set databricks_host and databricks_token in constructor.",
+                        is_error=True,
+                    )
+
+                try:
+                    query = tool_input["query"]  # pyright: ignore[reportIndexIssue]
+                    timeout = tool_input.get("timeout", "60s")  # pyright: ignore[reportIndexIssue]
+
+                    df = self.databricks_client.execute_query(
+                        query=query,
+                        timeout=timeout
+                    )
+
+                    # format the results
+                    if len(df) == 0:
+                        result = "Query executed successfully but returned no results."
+                    else:
+                        result_lines = [
+                            f"Query returned {len(df)} rows with {len(df.columns)} columns:",
+                            "",
+                            "Columns: " + ", ".join(df.columns),
+                            "",
+                            "Results:"
+                        ]
+
+                        # convert DataFrame to a readable string format
+                        # limit to first 100 rows for readability
+                        display_df = df.head(100) if len(df) > 100 else df
+                        result_lines.append(str(display_df))
+
+                        if len(df) > 100:
+                            result_lines.append(f"\n... showing first 100 of {len(df)} total rows")
+
+                        result = "\n".join(result_lines)
+
+                    return ToolUseResult.from_tool_use(
+                        tool_use,
+                        result
+                    )
+
+                except ValueError as e:
+                    return ToolUseResult.from_tool_use(
+                        tool_use,
+                        f"Invalid query: {str(e)}",
+                        is_error=True,
+                    )
+                except Exception as e:
+                    return ToolUseResult.from_tool_use(
+                        tool_use,
+                        f"Failed to execute query: {str(e)}",
+                        is_error=True,
+                    )
+
             case _:
-                return await super().handle_custom_tool(tool_name, tool_input, node)
+                return await super().handle_custom_tool(tool_use, node)
 
     async def run_type_checks(self, node: Node[BaseData]) -> str | None:
         type_check_result = await node.data.workspace.exec(

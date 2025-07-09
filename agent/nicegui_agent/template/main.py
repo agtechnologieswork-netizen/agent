@@ -1,6 +1,13 @@
+import logging
 import os
 from app.startup import startup
 from nicegui import app, ui
+
+# configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
 
 app.on_startup(startup)
 ui.run(
