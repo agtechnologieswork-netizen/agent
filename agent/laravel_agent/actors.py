@@ -209,8 +209,29 @@ class LaravelActor(FileOperationsActor):
     ) -> list[str]:
         repo_files = set(files.keys())
         # TODO: Implement proper context gathering
-        for file_path in await workspace.ls("./resources/js/pages"):
-            repo_files.add(f"resources/js/pages/{file_path}")
-        for file_path in await workspace.ls("./app/Http/Controllers/Auth"):
-            repo_files.add(f"app/Http/Controllers/Auth/{file_path}")
+        # Check and list directories that may exist in a Laravel project
+        directories_to_check = [
+            "./resources/js/pages",
+            "./app/Http/Controllers/Auth",
+            "./resources/js/Pages",  # Inertia.js convention (capital P)
+            "./app/Http/Controllers",
+            "./resources/views",
+            "./routes"
+        ]
+        
+        for dir_path in directories_to_check:
+            try:
+                dir_files = await workspace.ls(dir_path)
+                for file_path in dir_files:
+                    # Remove leading ./ from dir_path if present
+                    clean_dir = dir_path.lstrip("./")
+                    repo_files.add(f"{clean_dir}/{file_path}")
+            except FileNotFoundError:
+                # Directory doesn't exist, skip it
+                logger.debug(f"Directory {dir_path} not found, skipping")
+                continue
+            except Exception as e:
+                logger.warning(f"Error listing directory {dir_path}: {e}")
+                continue
+                
         return sorted(list(repo_files))

@@ -41,7 +41,13 @@ async def create_workspace(client: dagger.Client, context: dagger.Directory, pro
         client
         .container()
         .from_("php:8.2-fpm-alpine")
-        .with_exec(["apk", "add", "--no-cache", *_BASE_PACKAGES])
+        # Install packages in smaller groups to avoid I/O errors
+        .with_exec(["apk", "update"])
+        .with_exec(["apk", "add", "--no-cache", "nginx", "supervisor"])
+        .with_exec(["apk", "add", "--no-cache", "postgresql-dev", "oniguruma-dev", "libzip-dev"])
+        .with_exec(["apk", "add", "--no-cache", "freetype-dev", "libjpeg-turbo-dev", "libpng-dev"])
+        .with_exec(["apk", "add", "--no-cache", "curl-dev", "libxml2-dev"])
+        .with_exec(["apk", "add", "--no-cache", "nodejs", "npm"])
         .with_exec(["docker-php-ext-configure", "gd", "--with-freetype", "--with-jpeg"])
         .with_exec(["docker-php-ext-install", *_DOCKER_EXT_PACKAGES])
         .with_file("/usr/bin/composer", client.container().from_("composer:2").file("/usr/bin/composer"))
