@@ -322,7 +322,9 @@ class FSMApplication:
         )
 
         # Start with empty directory and git init
-        start = self.client.container().from_("alpine/git").with_workdir("/app")
+        from laravel_agent.docker_registry_workaround import patch_image_references
+        git_image = patch_image_references("alpine/git")
+        start = self.client.container().from_(git_image).with_workdir("/app")
         start = start.with_exec(["git", "init"]).with_exec(
             ["git", "config", "--global", "user.email", "agent@appbuild.com"]
         )

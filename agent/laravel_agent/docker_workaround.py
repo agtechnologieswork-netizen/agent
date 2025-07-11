@@ -76,4 +76,17 @@ def fix_docker_timeout():
     # Step 2: Pre-pull images locally
     pull_images_locally()
     
+    # Step 3: Set up local registry if enabled
+    if os.getenv('USE_LOCAL_REGISTRY', 'true').lower() == 'true':
+        try:
+            from laravel_agent.docker_registry_workaround import setup_local_images
+            logger.info("Setting up local Docker registry for Dagger...")
+            local_images = setup_local_images()
+            logger.info(f"Local registry set up with {len(local_images)} images")
+            # Enable local registry usage
+            os.environ['USE_LOCAL_REGISTRY'] = 'true'
+        except Exception as e:
+            logger.warning(f"Failed to set up local registry: {e}")
+            logger.warning("Falling back to direct Docker Hub access")
+    
     logger.info("Docker timeout workaround applied!")
