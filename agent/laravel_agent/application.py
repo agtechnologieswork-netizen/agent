@@ -114,7 +114,12 @@ class FSMApplication:
 
     @classmethod
     def template_path(cls) -> str:
-        return "./laravel_agent/template"
+        import os
+        # Get the absolute path to avoid relative path issues
+        current_file = os.path.abspath(__file__)
+        parent_dir = os.path.dirname(current_file)
+        template_path = os.path.join(parent_dir, "template")
+        return template_path
 
     @classmethod
     async def start_fsm(
