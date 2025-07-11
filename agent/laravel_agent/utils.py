@@ -2,7 +2,6 @@ import uuid
 import dagger
 from core.workspace import Workspace, ExecResult
 from core.postgres_utils import create_postgres_service, pg_health_check_cmd
-from laravel_agent.docker_registry_workaround import patch_image_references
 
 _BASE_PACKAGES = [
     "nginx",
@@ -43,14 +42,10 @@ async def create_workspace(client: dagger.Client, context: dagger.Directory, pro
     if allowed is None:
         allowed = []
     
-    # Use local registry if available
-    php_image = patch_image_references("php:8.2-fpm-alpine")
-    composer_image = patch_image_references("composer:2")
-    
     ctr = (
         client
         .container()
-        .from_(php_image)
+        .from_("php:8.2-fpm-alpine")
         # Install packages in smaller groups to avoid I/O errors
         .with_exec(["apk", "update"])
         .with_exec(["apk", "add", "--no-cache", "nginx", "supervisor"])
@@ -60,7 +55,7 @@ async def create_workspace(client: dagger.Client, context: dagger.Directory, pro
         .with_exec(["apk", "add", "--no-cache", "nodejs", "npm"])
         .with_exec(["docker-php-ext-configure", "gd", "--with-freetype", "--with-jpeg"])
         .with_exec(["docker-php-ext-install", *_DOCKER_EXT_PACKAGES])
-        .with_file("/usr/bin/composer", client.container().from_(composer_image).file("/usr/bin/composer"))
+        .with_file("/usr/bin/composer", client.container().from_("composer:2").file("/usr/bin/composer"))
     )
     ctr = (
         ctr

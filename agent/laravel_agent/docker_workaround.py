@@ -57,8 +57,6 @@ def configure_dagger_for_local_images():
         # Network timeout settings
         'COMPOSE_HTTP_TIMEOUT': '600',
         'DOCKER_CLIENT_TIMEOUT': '600',
-        # Allow insecure registries for local development
-        '_EXPERIMENTAL_DAGGER_RUNNER_HOST': 'docker-container://dagger-engine-v0.18.9?docker-host-http-insecure-registries=127.0.0.1:5555',
     }
     
     for key, value in env_vars.items():
@@ -78,17 +76,17 @@ def fix_docker_timeout():
     # Step 2: Pre-pull images locally
     pull_images_locally()
     
-    # Step 3: Set up local registry if enabled
-    if os.getenv('USE_LOCAL_REGISTRY', 'true').lower() == 'true':
+    # Step 3: Warm Dagger cache if enabled
+    if os.getenv('WARM_DAGGER_CACHE', 'true').lower() == 'true':
         try:
-            from laravel_agent.docker_registry_workaround import setup_local_images
-            logger.info("Setting up local Docker registry for Dagger...")
-            local_images = setup_local_images()
-            logger.info(f"Local registry set up with {len(local_images)} images")
-            # Enable local registry usage
-            os.environ['USE_LOCAL_REGISTRY'] = 'true'
+            from laravel_agent.dagger_cache_warmer import ensure_dagger_cache
+            import asyncio
+            logger.info("Warming Dagger cache with required images...")
+            results = asyncio.run(ensure_dagger_cache())
+            success_count = sum(1 for success in results.values() if success)
+            logger.info(f"Dagger cache warmed with {success_count}/{len(results)} images")
         except Exception as e:
-            logger.warning(f"Failed to set up local registry: {e}")
-            logger.warning("Falling back to direct Docker Hub access")
+            logger.warning(f"Failed to warm Dagger cache: {e}")
+            logger.warning("Dagger will pull images on demand")
     
     logger.info("Docker timeout workaround applied!")
