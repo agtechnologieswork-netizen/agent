@@ -176,7 +176,16 @@ class FSMApplication:
             beam_width=3,
             max_depth=50,
             system_prompt=playbooks.APPLICATION_SYSTEM_PROMPT,
-            files_allowed=["resources/js/pages/", "app/Http/Controllers/Auth/"],
+            files_allowed=[
+                "resources/js/pages/",
+                "resources/js/components/",
+                "app/Http/Controllers/",
+                "app/Models/",
+                "routes/",
+                "resources/views/",
+                "database/migrations/",
+                "app/Providers/"
+            ],
             event_callback=event_callback,
         )
 
