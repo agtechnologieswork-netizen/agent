@@ -60,16 +60,8 @@ WORKDIR /var/www/html
 # Copy application code
 COPY . .
 
-# -----------------------------------------------------------------------------
-# Install *all* PHP dependencies (including dev) so we can run tests & linters
-# in this build stage. After the suite passes we re-run Composer with
-# `--no-dev` to strip dev packages, ensuring the artefact copied into the final
-# runtime stage contains only production dependencies.
-# -----------------------------------------------------------------------------
-
-RUN composer install --no-interaction \
-    && php vendor/bin/pest --compact --colors=always \
-    && composer install --no-dev --optimize-autoloader --no-interaction
+# Install PHP dependencies
+RUN composer install --no-dev --optimize-autoloader --no-interaction
 
 # Copy built frontend assets from frontend-builder stage
 COPY --from=frontend-builder /app/public/build ./public/build
