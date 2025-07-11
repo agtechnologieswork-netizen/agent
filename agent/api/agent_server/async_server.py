@@ -152,7 +152,20 @@ async def run_agent[T: AgentInterface](
 ) -> AsyncGenerator[str, None]:
     logger.info(f"Running agent for session {request.application_id}:{request.trace_id}")
 
-    async with dagger.Connection(dagger.Config(log_output=open(os.devnull, "w"))) as client:
+    import tempfile
+    import os
+    
+    # Configure Dagger logging based on environment variable
+    dagger_config = {}
+    if os.getenv('DAGGER_VERBOSE'):
+        # Create a temporary file for Dagger logs
+        dagger_log_file = tempfile.NamedTemporaryFile(mode='w+', suffix='_dagger_server.log', delete=False)
+        logger.info(f"Dagger server logs will be written to: {dagger_log_file.name}")
+        dagger_config['log_output'] = dagger_log_file
+    else:
+        dagger_config['log_output'] = open(os.devnull, "w")
+    
+    async with dagger.Connection(dagger.Config(**dagger_config)) as client:
         # Establish Dagger connection for the agent's execution context
         agent = session_manager.get_or_create_session(client, request, agent_class, *args, **kwargs)
 

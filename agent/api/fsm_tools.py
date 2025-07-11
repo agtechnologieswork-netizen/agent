@@ -412,6 +412,7 @@ async def main(initial_prompt: str = "A simple greeting app that says hello in f
     Initializes an FSM tool processor and interacts with top-level agent.
     """
     import os
+    import tempfile
     import dagger
     from trpc_agent.application import FSMApplication
     from llm.utils import get_universal_llm_client
@@ -419,8 +420,17 @@ async def main(initial_prompt: str = "A simple greeting app that says hello in f
     client = get_universal_llm_client()
     model_params = {"max_tokens": 8192 }
 
+    # Configure Dagger logging based on environment variable
+    dagger_config = {}
+    if os.getenv('DAGGER_VERBOSE'):
+        # Create a temporary file for Dagger logs
+        dagger_log_file = tempfile.NamedTemporaryFile(mode='w+', suffix='_dagger_fsm_tools.log', delete=False)
+        logger.info(f"Dagger FSM tools logs will be written to: {dagger_log_file.name}")
+        dagger_config['log_output'] = dagger_log_file
+    else:
+        dagger_config['log_output'] = open(os.devnull, "w")
 
-    async with dagger.Connection(dagger.Config(log_output=open(os.devnull, "w"))) as dagger_client:
+    async with dagger.Connection(dagger.Config(**dagger_config)) as dagger_client:
         # Create processor without FSM instance - it will be created in start_fsm tool
         processor = FSMToolProcessor(dagger_client, FSMApplication)
         logger.info("FSM tools initialized successfully")
