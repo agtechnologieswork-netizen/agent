@@ -155,6 +155,10 @@ async def run_agent[T: AgentInterface](
     import tempfile
     import os
     
+    # Apply Docker timeout workaround
+    from laravel_agent.docker_workaround import fix_docker_timeout
+    fix_docker_timeout()
+    
     # Configure Dagger logging based on environment variable
     dagger_config = {}
     if os.getenv('DAGGER_VERBOSE'):
