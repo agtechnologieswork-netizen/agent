@@ -69,9 +69,25 @@ async def create_workspace(client: dagger.Client, context: dagger.Directory, pro
     )
 
 async def run_tests(ctr: dagger.Container) -> ExecResult:
-    return await ExecResult.from_ctr(
-        ctr.with_exec(["npm", "run", "build"]).with_exec(["composer", "test"])
-    )
+    """Run the project test-suite inside the given container.
+
+    We wrap the execution in a try / except block so that any
+    `dagger.TransportError` or `dagger.QueryError` raised by the
+    underlying engine is converted into a *failed* `ExecResult` rather
+    than bubbling up and breaking the surrounding `anyio.TaskGroup`.
+    This prevents opaque
+    "unhandled errors in a TaskGroup (1 sub-exception)" messages from
+    propagating to higher-level code.
+    """
+
+    try:
+        return await ExecResult.from_ctr(
+            ctr.with_exec(["npm", "run", "build"]).with_exec(["composer", "test"])
+        )
+    except (dagger.TransportError, dagger.QueryError) as exc:
+        # Map transport issues to a non-zero ExecResult so callers can
+        # surface the error context without crashing the task-group.
+        return ExecResult(exit_code=1, stdout="", stderr=str(exc))
 
 async def run_migrations(client: dagger.Client, ctr: dagger.Container, postgresdb: dagger.Service | None = None):
     if postgresdb is None:
@@ -89,4 +105,11 @@ async def run_migrations(client: dagger.Client, ctr: dagger.Container, postgresd
         .with_exec(pg_health_check_cmd())
         .with_exec(["php", "/var/www/html/artisan", "migrate", "--force"])
     )
-    return await ExecResult.from_ctr(push_ctr)
+
+    try:
+        return await ExecResult.from_ctr(push_ctr)
+    except (dagger.TransportError, dagger.QueryError) as exc:
+        # Similar to the test helper above, convert transport failures
+        # into a regular ExecResult so that callers receive a concrete
+        # error payload instead of an uncaught exception.
+        return ExecResult(exit_code=1, stdout="", stderr=str(exc))
