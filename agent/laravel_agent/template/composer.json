@@ -76,7 +76,7 @@
         ],
         "test": [
             "@php artisan config:clear --ansi",
-            "@php vendor/bin/pest --compact --colors=always"
+            "@php artisan test"
         ]
     },
     "extra": {
