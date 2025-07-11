@@ -16,9 +16,9 @@ from contextlib import contextmanager
 logger = logging.getLogger(__name__)
 
 REGISTRY_PORT = 5555
-REGISTRY_HOST = f"localhost:{REGISTRY_PORT}"
+REGISTRY_HOST = f"127.0.0.1:{REGISTRY_PORT}"
 
-def is_port_open(host="localhost", port=REGISTRY_PORT):
+def is_port_open(host="127.0.0.1", port=REGISTRY_PORT):
     """Check if a port is open"""
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
         sock.settimeout(1)
@@ -49,7 +49,8 @@ def local_registry():
             [
                 "docker", "run", "-d",
                 "--name", container_name,
-                "-p", f"{REGISTRY_PORT}:5000",
+                "-p", f"0.0.0.0:{REGISTRY_PORT}:5000",
+                "-e", "REGISTRY_HTTP_ADDR=0.0.0.0:5000",
                 "registry:2"
             ],
             check=True,

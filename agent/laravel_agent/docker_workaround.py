@@ -57,6 +57,8 @@ def configure_dagger_for_local_images():
         # Network timeout settings
         'COMPOSE_HTTP_TIMEOUT': '600',
         'DOCKER_CLIENT_TIMEOUT': '600',
+        # Allow insecure registries for local development
+        '_EXPERIMENTAL_DAGGER_RUNNER_HOST': 'docker-container://dagger-engine-v0.18.9?docker-host-http-insecure-registries=127.0.0.1:5555',
     }
     
     for key, value in env_vars.items():
