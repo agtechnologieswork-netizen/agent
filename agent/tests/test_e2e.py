@@ -100,6 +100,7 @@ async def run_e2e(prompt: str, standalone: bool, with_edit=True, template_id=Non
                 template_paths = {
                     "nicegui_agent": "nicegui_agent/template",
                     "trpc_agent": "trpc_agent/template",
+                    "laravel_agent": "laravel_agent/template",
                     None: "trpc_agent/template"  # default
                 }
 
@@ -164,6 +165,13 @@ async def test_e2e_generation_nicegui(template_id):
     pytest.param("trpc_agent", marks=pytest.mark.trpc)
 ])
 async def test_e2e_generation_trpc(template_id):
+    await run_e2e(standalone=False, prompt=DEFAULT_APP_REQUEST, template_id=template_id)
+
+@pytest.mark.skipif(requires_llm_provider(), reason=requires_llm_provider_reason)
+@pytest.mark.parametrize("template_id", [
+    pytest.param("laravel_agent", marks=pytest.mark.laravel)
+])
+async def test_e2e_generation_laravel(template_id):
     await run_e2e(standalone=False, prompt=DEFAULT_APP_REQUEST, template_id=template_id)
 
 
