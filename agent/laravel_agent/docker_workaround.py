@@ -76,26 +76,9 @@ def fix_docker_timeout():
     # Step 2: Pre-pull images locally
     pull_images_locally()
     
-    # Step 3: Warm Dagger cache if enabled
-    if os.getenv('WARM_DAGGER_CACHE', 'true').lower() == 'true':
-        try:
-            from laravel_agent.dagger_cache_warmer import warm_dagger_cache
-            import dagger
-            import asyncio
-            
-            logger.info("Warming Dagger cache with required images...")
-            
-            async def warm_cache():
-                # Ensure OTEL is disabled for Dagger connection
-                os.environ['OTEL_SDK_DISABLED'] = 'true'
-                async with dagger.Connection() as client:
-                    return await warm_dagger_cache(client)
-            
-            results = asyncio.run(warm_cache())
-            success_count = sum(1 for success in results.values() if success)
-            logger.info(f"Dagger cache warmed with {success_count}/{len(results)} images")
-        except Exception as e:
-            logger.warning(f"Failed to warm Dagger cache: {e}")
-            logger.warning("Dagger will pull images on demand")
+    # Step 3: Skip Dagger cache warming - let Dagger use local images on demand
+    # Since images are already pulled locally by Docker, Dagger will find them
+    # This avoids async complexity and potential event loop issues
+    logger.info("Docker images pre-pulled locally - Dagger will use them on demand")
     
     logger.info("Docker timeout workaround applied!")

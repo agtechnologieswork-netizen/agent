@@ -26,6 +26,10 @@ os.environ["OTEL_TRACES_EXPORTER"] = "none"
 os.environ["OTEL_METRICS_EXPORTER"] = "none"
 os.environ["OTEL_LOGS_EXPORTER"] = "none"
 
+# Apply Docker timeout workaround before any async operations
+from laravel_agent.docker_workaround import fix_docker_timeout
+fix_docker_timeout()
+
 import dagger
 import json
 from brotli_asgi import BrotliMiddleware
@@ -154,10 +158,6 @@ async def run_agent[T: AgentInterface](
 
     import tempfile
     import os
-    
-    # Apply Docker timeout workaround
-    from laravel_agent.docker_workaround import fix_docker_timeout
-    fix_docker_timeout()
     
     # Configure Dagger logging based on environment variable
     dagger_config = {}
