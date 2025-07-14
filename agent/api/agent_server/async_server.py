@@ -11,30 +11,19 @@ Refer to `architecture.puml` for a visual overview.
 """
 from typing import AsyncGenerator
 from contextlib import asynccontextmanager
-
+import os
 import anyio
+import dagger
+import json
+import uvicorn
 from fastapi import FastAPI, HTTPException, Depends
 from fastapi.responses import StreamingResponse
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from laravel_agent.agent_session import LaravelAgentSession
-import uvicorn
 from fire import Fire
-import os
-# Disable dagger telemetry
-os.environ["DO_NOT_TRACK"] = "1"
-os.environ["OTEL_TRACES_EXPORTER"] = "none"
-os.environ["OTEL_METRICS_EXPORTER"] = "none"
-os.environ["OTEL_LOGS_EXPORTER"] = "none"
-
-# Apply Docker timeout workaround before any async operations
-from laravel_agent.docker_workaround import fix_docker_timeout
-fix_docker_timeout()
-
-import dagger
-import json
 from brotli_asgi import BrotliMiddleware
 from dotenv import load_dotenv
 
+from laravel_agent.agent_session import LaravelAgentSession
 from api.agent_server.models import (
     AgentRequest,
     AgentSseEvent,
@@ -49,8 +38,13 @@ from trpc_agent.agent_session import TrpcAgentSession
 from nicegui_agent.agent_session import NiceguiAgentSession
 from api.agent_server.template_diff_impl import TemplateDiffAgentImplementation
 from api.config import CONFIG
-
 from log import get_logger, configure_uvicorn_logging, set_trace_id, clear_trace_id
+
+# Disable dagger telemetry
+os.environ["DO_NOT_TRACK"] = "1"
+os.environ["OTEL_TRACES_EXPORTER"] = "none"
+os.environ["OTEL_METRICS_EXPORTER"] = "none"
+os.environ["OTEL_LOGS_EXPORTER"] = "none"
 
 logger = get_logger(__name__)
 

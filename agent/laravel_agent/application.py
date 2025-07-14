@@ -114,7 +114,6 @@ class FSMApplication:
 
     @classmethod
     def template_path(cls) -> str:
-        import os
         # Get the absolute path to avoid relative path issues
         current_file = os.path.abspath(__file__)
         parent_dir = os.path.dirname(current_file)
@@ -385,11 +384,6 @@ class FSMApplication:
 
 async def main(user_prompt="Add header to welcome page that says Hello World"):
     import tempfile
-    import os
-    
-    # Apply Docker timeout workaround
-    from laravel_agent.docker_workaround import fix_docker_timeout
-    fix_docker_timeout()
     
     # Configure Dagger logging based on environment variable
     dagger_config = {}
