@@ -98,7 +98,6 @@ async def wait_for_healthy_containers(
     except DockerException as e:
         logger.error(f"Failed to connect to Docker daemon: {e}")
         logger.error("Please ensure Docker Desktop is running")
-        logger.error("If using Colima, set DOCKER_HOST=unix://$HOME/.colima/docker.sock")
         return False
     
     start_time = anyio.current_time()
