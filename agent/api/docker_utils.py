@@ -3,7 +3,7 @@ import subprocess
 import random
 import string
 import docker
-from docker.errors import NotFound
+from docker.errors import NotFound, DockerException
 import anyio
 from typing import Dict, List, Optional, Tuple
 from log import get_logger
@@ -93,7 +93,14 @@ async def wait_for_healthy_containers(
     timeout: int = 30,
     interval: int = 1
 ) -> bool:
-    docker_cli = docker.from_env()
+    try:
+        docker_cli = docker.from_env()
+    except DockerException as e:
+        logger.error(f"Failed to connect to Docker daemon: {e}")
+        logger.error("Please ensure Docker Desktop is running")
+        logger.error("If using Colima, set DOCKER_HOST=unix://$HOME/.colima/docker.sock")
+        return False
+    
     start_time = anyio.current_time()
 
     try:
