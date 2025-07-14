@@ -79,10 +79,19 @@ def fix_docker_timeout():
     # Step 3: Warm Dagger cache if enabled
     if os.getenv('WARM_DAGGER_CACHE', 'true').lower() == 'true':
         try:
-            from laravel_agent.dagger_cache_warmer import ensure_dagger_cache
+            from laravel_agent.dagger_cache_warmer import warm_dagger_cache
+            import dagger
             import asyncio
+            
             logger.info("Warming Dagger cache with required images...")
-            results = asyncio.run(ensure_dagger_cache())
+            
+            async def warm_cache():
+                # Ensure OTEL is disabled for Dagger connection
+                os.environ['OTEL_SDK_DISABLED'] = 'true'
+                async with dagger.Connection() as client:
+                    return await warm_dagger_cache(client)
+            
+            results = asyncio.run(warm_cache())
             success_count = sum(1 for success in results.values() if success)
             logger.info(f"Dagger cache warmed with {success_count}/{len(results)} images")
         except Exception as e:
