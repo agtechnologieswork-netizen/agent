@@ -4,10 +4,10 @@
 import json
 import sys
 from pathlib import Path
-from typing import Dict, List, Any, Optional
+from typing import Dict, List, Any
 from datetime import datetime
 import re
-from collections import defaultdict
+
 
 def format_content(content, format="display"):
     """Format message content for display"""
@@ -17,7 +17,11 @@ def format_content(content, format="display"):
     # handle list content directly
     if isinstance(content, list):
         # check if this is a simple text message
-        if len(content) == 1 and isinstance(content[0], dict) and content[0].get("type") == "text":
+        if (
+            len(content) == 1
+            and isinstance(content[0], dict)
+            and content[0].get("type") == "text"
+        ):
             return content[0].get("text", "")
 
         # handle mixed content
@@ -52,13 +56,14 @@ def format_content(content, format="display"):
             parsed = json.loads(content)
             if isinstance(parsed, list):
                 return format_content(parsed, format)
-        except:
+        except json.JSONDecodeError:
             pass
 
     content_str = str(content)
     if format == "preview":
         return content_str[:100] + "..." if len(content_str) > 100 else content_str
     return content_str
+
 
 def extract_nodes(data: Dict[str, Any]) -> List[Dict]:
     """Extract all nodes with messages from the data"""
@@ -77,6 +82,7 @@ def extract_nodes(data: Dict[str, Any]) -> List[Dict]:
                     nodes.append(node)
 
     return nodes
+
 
 def build_conversation_chains(nodes: List[Dict]) -> List[List[Dict]]:
     """Build conversation chains from leaf to root"""
@@ -102,6 +108,7 @@ def build_conversation_chains(nodes: List[Dict]) -> List[List[Dict]]:
             chains.append(chain)
 
     return chains
+
 
 def get_chain_summary(chain: List[Dict]) -> Dict:
     """Get summary info about a chain"""
@@ -141,8 +148,9 @@ def get_chain_summary(chain: List[Dict]) -> Dict:
         "assistant_messages": assistant_messages,
         "tools_used": list(tools_used),
         "first_message": first_message,
-        "last_message": last_message
+        "last_message": last_message,
     }
+
 
 def display_chain_list(chains: List[List[Dict]]):
     """Display list of available chains"""
@@ -152,28 +160,37 @@ def display_chain_list(chains: List[List[Dict]]):
     for i, chain in enumerate(chains, 1):
         summary = get_chain_summary(chain)
 
-        print(f"\n{i}. Chain {i} ({summary['length']} nodes, {summary['total_messages']} messages)")
+        print(
+            f"\n{i}. Chain {i} ({summary['length']} nodes, {summary['total_messages']} messages)"
+        )
 
-        if summary['first_message']:
-            role = summary['first_message'].get('role', 'unknown')
-            preview = format_content(summary['first_message'].get('content', ''), 'preview')
+        if summary["first_message"]:
+            role = summary["first_message"].get("role", "unknown")
+            preview = format_content(
+                summary["first_message"].get("content", ""), "preview"
+            )
             print(f"   Start: [{role}] {preview}")
 
-        if summary['tools_used']:
-            print(f"   Tools: {', '.join(summary['tools_used'][:3])}" +
-                  ("..." if len(summary['tools_used']) > 3 else ""))
+        if summary["tools_used"]:
+            print(
+                f"   Tools: {', '.join(summary['tools_used'][:3])}"
+                + ("..." if len(summary["tools_used"]) > 3 else "")
+            )
 
-        print(f"   Messages: {summary['user_messages']} user, {summary['assistant_messages']} assistant")
+        print(
+            f"   Messages: {summary['user_messages']} user, {summary['assistant_messages']} assistant"
+        )
+
 
 def display_conversation(chain: List[Dict], chain_num: int):
     """Display a single conversation with nice formatting"""
-    print(f"\n{'='*80}")
+    print(f"\n{'=' * 80}")
     print(f"CONVERSATION {chain_num}")
-    print(f"{'='*80}")
+    print(f"{'=' * 80}")
 
     summary = get_chain_summary(chain)
     print(f"📊 {summary['length']} nodes • {summary['total_messages']} messages")
-    if summary['tools_used']:
+    if summary["tools_used"]:
         print(f"🔧 Tools: {', '.join(summary['tools_used'])}")
     print()
 
@@ -201,7 +218,7 @@ def display_conversation(chain: List[Dict], chain_num: int):
                 try:
                     dt = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
                     time_str = dt.strftime("%H:%M:%S")
-                except:
+                except ValueError:
                     pass
 
             print(f"{message_count}. {role_display} {time_str}")
@@ -211,13 +228,14 @@ def display_conversation(chain: List[Dict], chain_num: int):
             print(content)
             print()
 
+
 def display_summary(chains: List[List[Dict]]):
     """Display summary statistics"""
     print("\n📊 SUMMARY STATISTICS")
     print("=" * 50)
 
     total_nodes = sum(len(chain) for chain in chains)
-    total_messages = sum(get_chain_summary(chain)['total_messages'] for chain in chains)
+    total_messages = sum(get_chain_summary(chain)["total_messages"] for chain in chains)
 
     print(f"Total chains: {len(chains)}")
     print(f"Total nodes: {total_nodes}")
@@ -233,10 +251,11 @@ def display_summary(chains: List[List[Dict]]):
     all_tools = set()
     for chain in chains:
         summary = get_chain_summary(chain)
-        all_tools.update(summary['tools_used'])
+        all_tools.update(summary["tools_used"])
 
     if all_tools:
         print(f"Tools used: {', '.join(sorted(all_tools))}")
+
 
 def main():
     if len(sys.argv) != 2:
@@ -251,7 +270,7 @@ def main():
         sys.exit(1)
 
     try:
-        with open(file_path, 'r') as f:
+        with open(file_path, "r") as f:
             data = json.load(f)
 
         nodes = extract_nodes(data)
@@ -262,8 +281,8 @@ def main():
         for i, chain in enumerate(chains, 1):
             display_conversation(chain, i)
             if i < len(chains):
-                print("\n" + "="*100)
-                print("="*100)
+                print("\n" + "=" * 100)
+                print("=" * 100)
                 print()
 
     except json.JSONDecodeError as e:
@@ -272,6 +291,7 @@ def main():
     except Exception as e:
         print(f"❌ Error: {e}")
         sys.exit(1)
+
 
 if __name__ == "__main__":
     main()
