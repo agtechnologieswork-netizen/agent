@@ -9,6 +9,14 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 
+
+@app.get('/health')
+async def health():
+    return {"status": "healthy", "service": "nicegui-app"}
+
+# suppress sqlalchemy engine logs below warning level
+logging.getLogger('sqlalchemy.engine.Engine').setLevel(logging.WARNING)
+
 app.on_startup(startup)
 ui.run(
     host="0.0.0.0",

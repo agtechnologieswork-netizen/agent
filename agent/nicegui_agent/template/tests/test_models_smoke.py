@@ -29,15 +29,15 @@ def test_sqlmodel_smoke():
         assert table_name in db_tables, f"Table '{table_name}' not found in database"
 
 
-DATABRICKS_URL = os.environ.get("DATABRICKS_URL")
+DATABRICKS_HOST = os.environ.get("DATABRICKS_HOST")
 DATABRICKS_TOKEN = os.environ.get("DATABRICKS_TOKEN")
 
 @pytest.mark.sqlmodel
-@pytest.mark.skipif(not DATABRICKS_URL or not DATABRICKS_TOKEN, reason="Databricks credentials not set")
+@pytest.mark.skipif(not DATABRICKS_HOST or not DATABRICKS_TOKEN, reason="Databricks credentials not set")
 def test_databricks_models():
     for model_name in dir(models):
         model = getattr(models, model_name)
-        if issubclass(model, DatabricksModel):
+        if issubclass(model, DatabricksModel) and model_name != "DatabricksModel":
             data = model.fetch()
 
             assert len(data) > 0, f"No data found for model {model_name}"

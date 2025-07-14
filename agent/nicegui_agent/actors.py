@@ -44,6 +44,7 @@ class NiceguiActor(FileOperationsActor):
             "main.py",
             "tests/conftest.py",
             "tests/test_sqlmodel_smoke.py",
+
         ]
         self.files_allowed = files_allowed  or ["app/", "tests/"]
 
@@ -160,7 +161,8 @@ class NiceguiActor(FileOperationsActor):
                     "input_schema": {
                         "type": "object",
                         "properties": {
-                            "catalog": {"type": "string", "description": "Catalog name or '*' for all catalogs", "default": "*"},
+                            "catalog": {"type": "string", "description": "Catalog name", "default": "samples"},
+                            # it has support for '*' as wildcard, but we should not use - too slow!
                             "schema": {"type": "string", "description": "Schema name or '*' for all schemas", "default": "*"},
                             "exclude_inaccessible": {"type": "boolean", "description": "Skip tables user cannot access", "default": True},
                         },
@@ -186,7 +188,7 @@ class NiceguiActor(FileOperationsActor):
                         "type": "object",
                         "properties": {
                             "query": {"type": "string", "description": "SQL SELECT query to execute"},
-                            "timeout": {"type": "string", "description": "Query timeout (e.g., '60s', '5m')", "default": "60s"},
+                            "timeout": {"type": "integer", "description": "Query timeout (must be between 5 and 50 or 0 for no timeout)", "default": 45},
                         },
                         "required": ["query"],
                     },
@@ -347,13 +349,12 @@ class NiceguiActor(FileOperationsActor):
 
                 try:
                     query = tool_input["query"]  # pyright: ignore[reportIndexIssue]
-                    timeout = tool_input.get("timeout", "60s")  # pyright: ignore[reportIndexIssue]
+                    timeout = tool_input.get("timeout", 45)  # pyright: ignore[reportIndexIssue]
 
                     df = self.databricks_client.execute_query(
                         query=query,
                         timeout=timeout
                     )
-
                     # format the results
                     if len(df) == 0:
                         result = "Query executed successfully but returned no results."
@@ -382,12 +383,14 @@ class NiceguiActor(FileOperationsActor):
                     )
 
                 except ValueError as e:
+                    logger.warning(f"Invalid query: {str(e)}")
                     return ToolUseResult.from_tool_use(
                         tool_use,
                         f"Invalid query: {str(e)}",
                         is_error=True,
                     )
                 except Exception as e:
+                    logger.warning(f"Failed to execute query: {str(e)}")
                     return ToolUseResult.from_tool_use(
                         tool_use,
                         f"Failed to execute query: {str(e)}",
@@ -454,6 +457,7 @@ class NiceguiActor(FileOperationsActor):
             tg.start_soon(run_and_store, "type_check", self.run_type_checks(node))
             tg.start_soon(run_and_store, "tests", self.run_tests(node))
             tg.start_soon(run_and_store, "sqlmodel", self.run_sqlmodel_checks(node))
+            tg.start_soon(run_and_store, "mocked_files", self.check_for_mocked_files(node))
 
         if lint_result := results.get("lint"):
             logger.info(f"Lint checks failed: {lint_result}")
@@ -467,6 +471,9 @@ class NiceguiActor(FileOperationsActor):
         if sqlmodel_result := results.get("sqlmodel"):
             logger.info(f"SQLModel checks failed: {sqlmodel_result}")
             all_errors += f"SQLModel errors:\n{sqlmodel_result}\n"
+        if mocked_files_result := results.get("mocked_files"):
+            logger.info(f"Mocked files found: {mocked_files_result}")
+            all_errors += f"Error! Disallowed mocked files found:\n{mocked_files_result}\n"
 
         if all_errors:
             await notify_stage(self.event_callback, "❌ Validation checks failed - fixing issues", "failed")
@@ -474,6 +481,17 @@ class NiceguiActor(FileOperationsActor):
 
         await notify_stage(self.event_callback, "✅ All validation checks passed", "completed")
         return None
+
+    async def check_for_mocked_files(
+        self, node: Node[BaseData]
+    ) -> str | None:
+        res = await node.data.workspace.exec(
+            ["sh", "-c", "grep -r -l -E '(mock|simulated|stub)' app/ tests/ 2>/dev/null | sed 's/^/file /' | sed 's/$/ contains mock/' || true"]
+        )
+        if res.stdout:
+            return res.stdout.strip()
+        return None
+
 
     async def get_repo_files(
         self, workspace: Workspace, files: dict[str, str]

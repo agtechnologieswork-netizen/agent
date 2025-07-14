@@ -411,7 +411,7 @@ class FileOperationsActor(BaseActor, LLMActor, ABC):
         if tool_calls:
             node.data.messages.append(Message(role="user", content=tool_calls))
         else:
-            content = [TextRaw(text="Continue or mark completed.")]
+            content = [TextRaw(text="Continue or mark completed via tool.")]
             node.data.messages.append(Message(role="user", content=content))
         return is_completed
 

@@ -1,7 +1,7 @@
 
 from typing import List, Dict, Any, ClassVar, Sequence, TypeVar
 from databricks.sdk import WorkspaceClient
-from databricks.sdk.service.sql import StatementState
+from databricks.sdk.service.sql import StatementState, State
 
 from pydantic import BaseModel
 
@@ -13,16 +13,17 @@ def execute_databricks_query(query: str) -> List[Dict[str, Any]]:
     client = WorkspaceClient()
 
     # use warehouse to execute query
-    warehouses = list(client.warehouses.list())
-    if not warehouses:
-        raise RuntimeError("No SQL warehouses available for query")
+    running_warehouses = [x for x in client.warehouses.list() if x.state == State.RUNNING]
+    if not running_warehouses:
+        warehouse = list(client.warehouses.list())[0]
+    else:
+        warehouse = running_warehouses[0]
 
-    warehouse_id = warehouses[0].id
-    if warehouse_id is None:
+    if warehouse.id is None:
         raise RuntimeError("Warehouse ID is None")
 
     execution = client.statement_execution.execute_statement(
-        warehouse_id=warehouse_id,
+        warehouse_id=warehouse.id,
         statement=query,
         wait_timeout="30s"
     )
@@ -59,4 +60,4 @@ class DatabricksModel(BaseModel):
 
     @classmethod
     def fetch(cls: type[T], **params) -> Sequence[T]:
-        raise NotImplementedError("Subclasses must implement fetch() method")
+        raise NotImplementedError(f"Must implement fetch() method, but {cls.__name__} does not have it.")

@@ -3,7 +3,7 @@ CORE_PYTHON_RULES = """
 # Universal Python rules
 1. `uv` is used for dependency management
 2. Always use absolute imports
-3. Prefer modern libraies (e.g. `httpx` over `requests`) and modern Python features (e.g. `match` over `if`)
+3. Prefer modern libraies (e.g. `httpx` over `requests`, `polars` over `pandas`) and modern Python features (e.g. `match` over `if`)
 4. Use type hints for all functions and methods, and strictly follow them
 5. For numeric operations with Decimal, use explicit conversion: Decimal('0') not 0
 """
@@ -128,10 +128,10 @@ class WeatherExtremes(DatabricksModel):
 8. Consider query performance and add appropriate limits
 9. Use reasonable default values for parameters in fetch methods with limits, so the default fetch does not take too long
 10. For quick results, fetch aggregated data from Databricks and store it in a PostgreSQL database
+11. CRITICAL: Before creating a new DatabricksModel, make sure the query returns expected results.
 """
 
 def get_databricks_rules(use_databricks: bool = False) -> str:
-    """Return databricks rules if use_databricks is True, empty string otherwise"""
     return DATABRICKS_RULES if use_databricks else ""
 
 PYTHON_RULES = f"""
@@ -803,9 +803,8 @@ Don't be chatty, keep on solving the problem, not describing what you are doing.
 
 # Additional Notes for Data Modeling
 
-- Focus ONLY on data models and structures - DO NOT create UI components or application logic.
-- Write comprehensive tests for data models when they contain business logic or complex validation
-- Simple data models without logic may not require dedicated tests
+- Focus ONLY on data models and structures - DO NOT create UI components, services or application logic.
+- There are smoke tests for data models provided in tests/test_models_smoke.py, your models should pass them. No need to write additional tests.
 """.strip()
 
 
