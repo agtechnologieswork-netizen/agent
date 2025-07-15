@@ -7,7 +7,7 @@ import dagger
 
 from anyio.streams.memory import MemoryObjectSendStream
 
-from llm.common import ContentBlock, InternalMessage, TextRaw
+from llm.common import ContentBlock, InternalMessage, TextRaw, ToolUseResult
 from llm.utils import get_ultra_fast_llm_client, get_universal_llm_client
 from api.fsm_tools import FSMToolProcessor, FSMStatus, FSMInterface
 from api.snapshot_utils import snapshot_saver
@@ -261,7 +261,22 @@ class BaseAgentSession(AgentInterface, ABC):
                             assert self.processor_instance.fsm_app is not None
                             logger.info("FSM is completed")
 
-                            final_diff = await self.processor_instance.fsm_app.get_diff_with(snapshot_files)
+                            # Check if we should generate a diff
+                            # Skip diff if no tools were called (just LLM response)
+                            should_generate_diff = any(
+                                msg.role == "user" and any(
+                                    hasattr(block, 'tool_use_id') or 
+                                    isinstance(block, ToolUseResult)
+                                    for block in msg.content
+                                )
+                                for msg in (thread or [])
+                            )
+
+                            if should_generate_diff:
+                                final_diff = await self.processor_instance.fsm_app.get_diff_with(snapshot_files)
+                            else:
+                                logger.info("No tools called in this interaction, skipping diff generation")
+                                final_diff = None
 
                             logger.info(
                                 "Sending completion event with diff (length: %d) for state %s",
