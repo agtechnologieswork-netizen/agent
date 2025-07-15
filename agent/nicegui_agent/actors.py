@@ -1,7 +1,6 @@
 import jinja2
 import logging
 import anyio
-import uuid
 from typing import Callable, Awaitable
 from core.base_node import Node
 from core.workspace import Workspace
@@ -144,9 +143,12 @@ class NiceguiActor(FileOperationsActor):
         ]
 
     async def handle_custom_tool(
-        self, tool_name: str, tool_input: dict, node: Node[BaseData]
+        self, tool_use: ToolUse, node: Node[BaseData]
     ) -> ToolUseResult:
         """Handle NiceGUI-specific custom tools."""
+        tool_name = tool_use.name
+        tool_input = tool_use.input
+        assert isinstance(tool_input, dict), f"Tool input must be dict, got {type(tool_input)}"
         match tool_name:
             case "uv_add":
                 packages = tool_input["packages"]  # pyright: ignore[reportIndexIssue]
@@ -155,7 +157,7 @@ class NiceguiActor(FileOperationsActor):
                 )
                 if exec_res.exit_code != 0:
                     return ToolUseResult.from_tool_use(
-                        ToolUse(id=uuid.uuid4().hex, name=tool_name, input=tool_input),
+                        tool_use,
                         f"Failed to add packages: {exec_res.stderr}",
                         is_error=True,
                     )
@@ -168,10 +170,10 @@ class NiceguiActor(FileOperationsActor):
                         }
                     )
                     return ToolUseResult.from_tool_use(
-                        ToolUse(id=uuid.uuid4().hex, name=tool_name, input=tool_input), "success"
+                        tool_use, "success"
                     )
             case _:
-                return await super().handle_custom_tool(tool_name, tool_input, node)
+                return await super().handle_custom_tool(tool_use, node)
 
     async def run_type_checks(self, node: Node[BaseData]) -> str | None:
         type_check_result = await node.data.workspace.exec(
