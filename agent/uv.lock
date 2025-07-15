@@ -605,7 +605,7 @@ requires-dist = [
     { name = "boto3", specifier = ">=1.37.18" },
     { name = "brotli-asgi", specifier = ">=1.4.0" },
     { name = "dagger-io", specifier = ">=0.18.9" },
-    { name = "databricks-sdk", specifier = ">=0.18.0" },
+    { name = "databricks-sdk", specifier = ">=0.57.0" },
     { name = "fastapi", specifier = ">=0.115.12" },
     { name = "fire", specifier = ">=0.7.0" },
     { name = "google-genai", specifier = ">=1.18.0" },

@@ -114,7 +114,7 @@ class DatabricksClient:
 
                     # Skip tables with missing required fields
                     if not all([table.name, table.full_name, catalog_name, schema_name]):
-                        logger.debug(f"Skipping table with missing required fields")
+                        logger.debug("Skipping table with missing required fields")
                         continue
 
                     tables.append(TableMetadata(
