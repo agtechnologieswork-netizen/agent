@@ -230,10 +230,10 @@ class FileOperationsActor(BaseActor, LLMActor, ABC):
         )
 
     async def handle_custom_tool(
-        self, tool_name: str, tool_input: dict, node: Node[BaseData]
+        self, tool_use: ToolUse, node: Node[BaseData]
     ) -> ToolUseResult:
         """Handle custom tools specific to subclasses. Override in subclasses."""
-        raise ValueError(f"Unknown tool: {tool_name}")
+        raise ValueError(f"Unknown tool: {tool_use.name}")
 
     async def run_tools(
         self, node: Node[BaseData], user_prompt: str
@@ -382,7 +382,7 @@ class FileOperationsActor(BaseActor, LLMActor, ABC):
                         # Handle custom tools via subclass
                         if isinstance(block.input, dict):
                             custom_result = await self.handle_custom_tool(
-                                block.name, block.input, node
+                                block, node
                             )
                             result.append(custom_result)
                         else:

@@ -146,12 +146,10 @@ class NiceguiActor(FileOperationsActor):
         self, tool_use: ToolUse, node: Node[BaseData]
     ) -> ToolUseResult:
         """Handle NiceGUI-specific custom tools."""
-        tool_name = tool_use.name
-        tool_input = tool_use.input
-        assert isinstance(tool_input, dict), f"Tool input must be dict, got {type(tool_input)}"
-        match tool_name:
+        assert isinstance(tool_use.input, dict), f"Tool input must be dict, got {type(tool_use.input)}"
+        match tool_use.name:
             case "uv_add":
-                packages = tool_input["packages"]  # pyright: ignore[reportIndexIssue]
+                packages = tool_use.input["packages"]  # pyright: ignore[reportIndexIssue]
                 exec_res = await node.data.workspace.exec_mut(
                     ["uv", "add", " ".join(packages)]
                 )
