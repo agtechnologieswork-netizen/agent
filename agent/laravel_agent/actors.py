@@ -5,9 +5,10 @@ from typing import Callable, Awaitable
 from core.base_node import Node
 from core.workspace import Workspace
 from core.actors import BaseData, FileOperationsActor
-from llm.common import AsyncLLM, Message, TextRaw
+from llm.common import AsyncLLM, Message, TextRaw, ToolUse, ToolUseResult
 from laravel_agent import playbooks
 from laravel_agent.utils import run_migrations, run_tests
+from laravel_agent.playbooks import validate_migration_syntax, MIGRATION_SYNTAX_EXAMPLE
 from core.notification_utils import notify_if_callback, notify_stage
 
 logger = logging.getLogger(__name__)
@@ -252,6 +253,22 @@ class LaravelActor(FileOperationsActor):
         return None
 
     async def run_migrations_checks(self, node: Node[BaseData]) -> str | None:
+        # First, validate all migration files have correct syntax
+        migration_errors = []
+        
+        # Check all files in the node's workspace for migrations
+        for file_path, content in node.data.files.items():
+            if "/migrations/" in file_path and file_path.endswith(".php") and content is not None:
+                if not validate_migration_syntax(content):
+                    migration_errors.append(
+                        f"Invalid syntax in {file_path}: The opening brace after 'extends Migration' must be on a new line."
+                    )
+        
+        # If there are syntax errors, return them without trying to run migrations
+        if migration_errors:
+            return "Migration syntax errors found:\n" + "\n".join(migration_errors)
+        
+        # If syntax is valid, run the migrations
         migrations_result = await run_migrations(node.data.workspace.client, node.data.workspace.ctr)
         if migrations_result.exit_code != 0:
             return f"{migrations_result.stdout}\n{migrations_result.stderr}"
@@ -345,3 +362,45 @@ class LaravelActor(FileOperationsActor):
                 continue
                 
         return sorted(list(repo_files))
+    
+    async def run_tools(
+        self, node: Node[BaseData], user_prompt: str
+    ) -> tuple[list[ToolUseResult], bool]:
+        """Execute tools for a given node with Laravel-specific validation."""
+        # First, call the parent implementation
+        result, is_completed = await super().run_tools(node, user_prompt)
+        
+        # Then, check if any migration files were written/edited and validate them
+        for i, block in enumerate(node.data.head().content):
+            if isinstance(block, ToolUse) and block.name in ["write_file", "edit_file"]:
+                path = block.input.get("path", "")  # pyright: ignore[reportAttributeAccessIssue]
+                if "/migrations/" in path and path.endswith(".php"):
+                    # Find the corresponding result
+                    tool_result = None
+                    for j, res in enumerate(result):
+                        if res.tool_use.id == block.id:
+                            tool_result = res
+                            break
+                    
+                    # If the operation was successful, validate the migration syntax
+                    if tool_result and not tool_result.tool_result.is_error:
+                        try:
+                            # Read the current file content
+                            file_content = await node.data.workspace.read_file(path)
+                            if not validate_migration_syntax(file_content):
+                                error_msg = (
+                                    f"Invalid Laravel migration syntax in {path}. "
+                                    "The opening brace after 'extends Migration' must be on a new line.\n\n"
+                                    "Use this pattern:\n"
+                                    f"{MIGRATION_SYNTAX_EXAMPLE}"
+                                )
+                                logger.warning(f"Migration validation failed for {path}")
+                                # Replace the success result with an error
+                                result[j] = ToolUseResult.from_tool_use(block, error_msg, is_error=True)
+                                # Also remove the file from node.data.files if it was added
+                                if path in node.data.files:
+                                    del node.data.files[path]
+                        except Exception as e:
+                            logger.error(f"Error validating migration {path}: {e}")
+        
+        return result, is_completed

@@ -105,6 +105,23 @@ return new class extends Migration
 };
 """
 
+MIGRATION_SYNTAX_EXAMPLE = """return new class extends Migration
+{
+    public function up(): void
+    {
+        Schema::create('table_name', function (Blueprint $table) {
+            $table->id();
+            $table->string('column_name');
+            $table->timestamps();
+        });
+    }
+
+    public function down(): void
+    {
+        Schema::dropIfExists('table_name');
+    }
+};"""
+
 
 def validate_migration_syntax(file_content: str) -> bool:
     """Validate Laravel migration has correct anonymous class syntax"""
