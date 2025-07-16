@@ -176,7 +176,7 @@ class FSMApplication:
             beam_width=3,
             max_depth=50,
             system_prompt=playbooks.APPLICATION_SYSTEM_PROMPT,
-            files_allowed=["resources/js/pages/", "app/Http/Controllers/Auth/"],
+            # files_allowed will use the default from actors.py
             event_callback=event_callback,
         )
 
