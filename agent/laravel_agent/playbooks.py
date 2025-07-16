@@ -81,17 +81,23 @@ CRITICAL: The opening brace after extends Migration MUST be on a new line.
 
 # Handling Lint and Test Errors
 
-When you encounter PHP lint errors:
-- For "single_blank_line_at_eof" - ensure files end with exactly one blank line
-- For "no_unused_imports" - remove any unused import statements
-- Run "composer lint" to check and "composer lint -- --fix" would auto-fix most issues
-- Focus on fixing the actual issues rather than repeatedly trying the same approach
+PHP lint errors are handled intelligently:
+- Common noisy formatting rules are disabled during development:
+  - "single_blank_line_at_eof" 
+  - "no_unused_imports"
+  - "no_whitespace_in_blank_line"
+- These disabled rules will be automatically fixed in the final cleanup step
+- Focus on real code issues that PHPStan and Pint report, not formatting
+- The output shows both PHPStan (static analysis) and Pint (code style) results
 
-When tests fail without specific output:
-- The error usually means PHPUnit tests failed or npm build failed
+When tests fail:
+- The system will provide detailed output showing what failed
+- NPM build failures will be clearly marked with "NPM Build Failed"
+- PHPUnit test failures will show verbose output with specific test names and errors
 - Check that all required models, controllers, and routes are properly implemented
 - Ensure database seeders and factories match the models
 - Verify that API endpoints return expected responses
+- The test runner will automatically retry with more verbosity if initial output is unclear
 
 # Additional Notes for Application Development
 

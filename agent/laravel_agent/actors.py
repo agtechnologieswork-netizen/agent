@@ -301,8 +301,8 @@ class LaravelActor(FileOperationsActor):
             logger.info(f"TypeScript lint checks failed: {ts_lint_result}")
             all_errors += f"TypeScript lint errors:\n{ts_lint_result}\n"
         if php_lint_result := results.get("php_lint"):
-            logger.info(f"PHP lint checks failed: {php_lint_result}")
-            all_errors += f"PHP lint errors:\n{php_lint_result}\n"
+            logger.info(f"PHP lint checks failed: {php_lint_result[:200]}...")
+            all_errors += f"{php_lint_result}\n"
         if ts_type_check_result := results.get("ts_type_check"):
             logger.info(f"TypeScript type checks failed: {ts_type_check_result}")
             all_errors += f"TypeScript type errors:\n{ts_type_check_result}\n"
