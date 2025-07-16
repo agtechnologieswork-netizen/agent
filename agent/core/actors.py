@@ -238,7 +238,7 @@ class FileOperationsActor(BaseActor, LLMActor, ABC):
         """Handle custom tools specific to subclasses. Override in subclasses."""
         raise ValueError(f"Unknown tool: {tool_use.name}")
 
-    async def compact_error_message(self, error_msg: str, max_length: int = 2048) -> str:
+    async def compact_error_message(self, error_msg: str, max_length: int = 4096) -> str:
         if len(error_msg) <= max_length:
             return error_msg
 
