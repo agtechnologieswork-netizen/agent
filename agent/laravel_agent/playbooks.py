@@ -79,9 +79,25 @@ CRITICAL: The opening brace after extends Migration MUST be on a new line.
 - Use write_file for new migrations to ensure correct formatting
 - For existing migrations with syntax errors, use write_file to replace the entire content
 
+# Handling Lint and Test Errors
+
+When you encounter PHP lint errors:
+- For "single_blank_line_at_eof" - ensure files end with exactly one blank line
+- For "no_unused_imports" - remove any unused import statements
+- Run "composer lint" to check and "composer lint -- --fix" would auto-fix most issues
+- Focus on fixing the actual issues rather than repeatedly trying the same approach
+
+When tests fail without specific output:
+- The error usually means PHPUnit tests failed or npm build failed
+- Check that all required models, controllers, and routes are properly implemented
+- Ensure database seeders and factories match the models
+- Verify that API endpoints return expected responses
+
 # Additional Notes for Application Development
 
 - NEVER use dummy data unless explicitly requested by the user
+- When approaching max depth (30), prioritize fixing critical errors over minor linting issues
+- If stuck in a loop, try a different approach rather than repeating the same fix
 """.strip()
 
 
