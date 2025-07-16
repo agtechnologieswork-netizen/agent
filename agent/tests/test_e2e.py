@@ -136,7 +136,7 @@ async def run_e2e(prompt: str, standalone: bool, with_edit=True, template_id=Non
                             container_names["app_container_name"],
                         ],
                         ["db", "app"],
-                        timeout=30,
+                        timeout=60,
                         interval=1
                     )
 
