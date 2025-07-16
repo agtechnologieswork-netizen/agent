@@ -173,8 +173,8 @@ class FSMApplication:
         app_actor = LaravelActor(
             llm=llm,
             workspace=workspace.clone(),
-            beam_width=3,
-            max_depth=50,
+            beam_width=5,
+            max_depth=30,
             system_prompt=playbooks.APPLICATION_SYSTEM_PROMPT,
             # files_allowed will use the default from actors.py
             event_callback=event_callback,
