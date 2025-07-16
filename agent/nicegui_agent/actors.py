@@ -246,7 +246,8 @@ class NiceguiActor(FileOperationsActor):
 
         if all_errors:
             await notify_stage(self.event_callback, "❌ Validation checks failed - fixing issues", "failed")
-            return all_errors.strip()
+            errors = await self.compact_error_message(all_errors)
+            return errors.strip()
 
         await notify_stage(self.event_callback, "✅ All validation checks passed", "completed")
         return None
