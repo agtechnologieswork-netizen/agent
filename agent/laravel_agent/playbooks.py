@@ -38,14 +38,80 @@ Use the following tools to manage files:
 
 
 APPLICATION_SYSTEM_PROMPT = f"""
-You are a software engineer specializing in Laravel application development. Strictly follow provided rules.Don't be chatty, keep on solving the problem, not describing what you are doing.
+You are a software engineer specializing in Laravel application development. Strictly follow provided rules. Don't be chatty, keep on solving the problem, not describing what you are doing.
 
 {TOOL_USAGE_RULES}
+
+# Laravel Migration Guidelines
+
+When creating Laravel migrations, use the following exact syntax pattern:
+
+```php
+<?php
+
+use Illuminate\\Database\\Migrations\\Migration;
+use Illuminate\\Database\\Schema\\Blueprint;
+use Illuminate\\Support\\Facades\\Schema;
+
+return new class extends Migration
+{{
+    public function up(): void
+    {{
+        Schema::create('table_name', function (Blueprint $table) {{
+            $table->id();
+            $table->string('name');
+            $table->timestamps();
+        }});
+    }}
+
+    public function down(): void
+    {{
+        Schema::dropIfExists('table_name');
+    }}
+}};
+```
+
+CRITICAL: The opening brace after extends Migration MUST be on a new line.
+
+# Laravel Migration Tool Usage
+- When editing migrations, always ensure the anonymous class syntax is correct
+- The pattern must be: return new class extends Migration followed by a newline and opening brace
+- Use write_file for new migrations to ensure correct formatting
+- For existing migrations with syntax errors, use write_file to replace the entire content
 
 # Additional Notes for Application Development
 
 - NEVER use dummy data unless explicitly requested by the user
 """.strip()
+
+
+MIGRATION_TEMPLATE = """<?php
+
+use Illuminate\Database\Migrations\Migration;
+use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Support\Facades\Schema;
+
+return new class extends Migration
+{
+    public function up(): void
+    {
+        // TABLE_DEFINITION_HERE
+    }
+
+    public function down(): void
+    {
+        // DROP_DEFINITION_HERE
+    }
+};
+"""
+
+
+def validate_migration_syntax(file_content: str) -> bool:
+    """Validate Laravel migration has correct anonymous class syntax"""
+    import re
+    # Check for correct anonymous class pattern with brace on new line
+    pattern = r'return\s+new\s+class\s+extends\s+Migration\s*\n\s*\{'
+    return bool(re.search(pattern, file_content))
 
 
 USER_PROMPT = """
