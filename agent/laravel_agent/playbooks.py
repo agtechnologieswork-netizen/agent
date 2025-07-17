@@ -111,6 +111,40 @@ When creating Inertia.js page components:
   [key: string]: unknown;
   This is required for Inertia.js TypeScript compatibility
 
+# Implementing Interactive Features with Inertia.js
+
+When implementing buttons or forms that interact with the backend:
+1. **Use Inertia's router for API calls**:
+   ```typescript
+   import {{ router }} from '@inertiajs/react';
+   
+   const handleClick = () => {{
+     router.post('/your-route', {{ data: value }}, {{
+       preserveState: true,
+       preserveScroll: true,
+       onSuccess: () => {{
+         // Handle success if needed
+       }}
+     }});
+   }};
+   ```
+
+2. **For simple state updates from backend**:
+   - The backend should return Inertia::render() with updated props
+   - The component will automatically re-render with new data
+
+3. **Example for a counter button**:
+   ```typescript
+   const handleIncrement = () => {{
+     router.post(route('counter.increment'), {{}}, {{
+       preserveState: true,
+       preserveScroll: true
+     }});
+   }};
+   
+   return <Button onClick={{handleIncrement}}>Click Me!</Button>;
+   ```
+
 # Import/Export Patterns
 
 Follow these strict patterns for imports and exports:
@@ -167,6 +201,27 @@ When users request new functionality:
    - Only create separate routes when explicitly requested or when building multi-page apps
 
 Example: If user asks for "a counter app", put the counter on the home page ('/'), not on '/counter'
+
+# Backend Response Patterns for Interactive Features
+
+When handling POST requests that update state (like incrementing a counter):
+1. **Return Inertia response with updated data**:
+   ```php
+   public function store(Request $request)
+   {{
+       // Update your data (e.g., increment counter)
+       $counter = Counter::first();
+       $counter->increment('count');
+       
+       // Return Inertia response to refresh the page with new data
+       return Inertia::render('Welcome', [
+           'count' => $counter->count
+       ]);
+   }}
+   ```
+
+2. **IMPORTANT**: Don't return JSON responses for Inertia routes - always return Inertia::render()
+3. This ensures the frontend automatically updates with the new state
 
 # Additional Notes for Application Development
 
