@@ -81,15 +81,11 @@ CRITICAL: The opening brace after extends Migration MUST be on a new line.
 
 # Handling Lint and Test Errors
 
-PHP lint errors are handled intelligently:
-- Common noisy formatting rules are disabled during development:
-  - "single_blank_line_at_eof" 
-  - "no_unused_imports"
-  - "no_whitespace_in_blank_line"
-- IMPORTANT: Even though these rules are disabled, Pint may still report them and exit with code 1
-- If you see ONLY these formatting errors in CounterTest.php or other test files, you can safely ignore them
-- Focus on real code issues that PHPStan and Pint report, not formatting
-- The output shows both PHPStan (static analysis) and Pint (code style) results
+PHP lint errors are handled by PHPStan only:
+- The lint command runs PHPStan for static analysis
+- Code formatting is not enforced during validation
+- Focus on real code issues that PHPStan reports
+- Use 'composer format' separately if you need to format code with Pint
 
 When you see lint failures like:
 ⨯ tests/Feature/CounterTest.php no_whitespace_in_blank_line, single_blank_l…
