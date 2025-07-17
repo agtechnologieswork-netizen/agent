@@ -109,6 +109,24 @@ When creating Inertia.js page components:
   [key: string]: unknown;
   This is required for Inertia.js TypeScript compatibility
 
+# Creating Inertia Page Components
+
+When creating a new page component (e.g., Counter.tsx):
+1. Create the component file in resources/js/pages/
+2. Update vite.config.ts to include the new page in the input array:
+   - Find the laravel({{ input: [...] }}) section
+   - Add the new page path to the input array
+   - Example: 'resources/js/pages/Counter.tsx'
+3. The full input array should look like:
+   input: [
+       'resources/css/app.css',
+       'resources/js/app.tsx',
+       'resources/js/pages/Counter.tsx'  // Add new pages here
+   ]
+
+IMPORTANT: Each new page component MUST be added to vite.config.ts input array
+for the @vite directive in app.blade.php to work correctly.
+
 # Additional Notes for Application Development
 
 - NEVER use dummy data unless explicitly requested by the user
@@ -120,9 +138,9 @@ When creating Inertia.js page components:
 
 MIGRATION_TEMPLATE = """<?php
 
-use Illuminate\Database\Migrations\Migration;
-use Illuminate\Database\Schema\Blueprint;
-use Illuminate\Support\Facades\Schema;
+use Illuminate\\Database\\Migrations\\Migration;
+use Illuminate\\Database\\Schema\\Blueprint;
+use Illuminate\\Support\\Facades\\Schema;
 
 return new class extends Migration
 {
