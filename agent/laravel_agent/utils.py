@@ -81,9 +81,23 @@ async def run_tests(ctr: dagger.Container) -> ExecResult:
     """
 
     try:
-        return await ExecResult.from_ctr(
-            ctr.with_exec(["npm", "run", "build"]).with_exec(["composer", "test"])
+        # First run npm build
+        build_result = await ExecResult.from_ctr(
+            ctr.with_exec(["npm", "run", "build"], expect=dagger.ReturnType.ANY)
         )
+        if build_result.exit_code != 0:
+            return ExecResult(
+                exit_code=build_result.exit_code,
+                stdout=f"NPM Build Failed:\n{build_result.stdout}",
+                stderr=f"NPM Build Errors:\n{build_result.stderr}"
+            )
+        
+        # If build succeeds, run tests
+        test_result = await ExecResult.from_ctr(
+            ctr.with_exec(["composer", "test"], expect=dagger.ReturnType.ANY)
+        )
+        return test_result
+        
     except (dagger.TransportError, dagger.QueryError) as exc:
         # Map transport issues to a non-zero ExecResult so callers can
         # surface the error context without crashing the task-group.
