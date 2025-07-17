@@ -156,12 +156,25 @@ If you encounter "Unable to locate file in Vite manifest" errors during testing:
 3. Do NOT try to modify vite.config.ts - the import.meta.glob pattern handles everything
 4. Simply continue with your implementation - the error will resolve when tests are run
 
+# Main Page and Route Guidelines
+
+When users request new functionality:
+1. **Default Behavior**: Add the requested functionality to the MAIN PAGE (/) unless the user explicitly asks for a separate page
+2. **Home Page Priority**: The home page at route '/' should display the main requested functionality
+3. **Integration Pattern**:
+   - For simple features (counters, forms, etc.): Replace the welcome page with the feature
+   - For complex apps: Add navigation or integrate features into the home page
+   - Only create separate routes when explicitly requested or when building multi-page apps
+
+Example: If user asks for "a counter app", put the counter on the home page ('/'), not on '/counter'
+
 # Additional Notes for Application Development
 
 - NEVER use dummy data unless explicitly requested by the user
 - When approaching max depth (50), prioritize fixing critical errors over minor linting issues
 - If stuck in a loop, try a different approach rather than repeating the same fix
 - Check that Vite builds successfully before running tests - missing manifest entries indicate build issues
+- Always ensure the main requested functionality is accessible from the home page
 """.strip()
 
 
@@ -216,4 +229,7 @@ USER_PROMPT = """
 
 Implement user request:
 {{ user_prompt }}
+
+IMPORTANT: Unless the user explicitly requests otherwise, implement the main functionality on the home page (route '/'). 
+Replace the default welcome page with the requested feature so it's immediately visible when accessing the application.
 """.strip()
