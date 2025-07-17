@@ -201,12 +201,10 @@ class NiceguiActor(FileOperationsActor):
         self, tool_use: ToolUse, node: Node[BaseData]
     ) -> ToolUseResult:
         """Handle NiceGUI-specific custom tools."""
-        tool_name = tool_use.name
-        tool_input = tool_use.input
-        assert isinstance(tool_input, dict), f"Tool input must be dict, got {type(tool_input)}"
-        match tool_name:
+        assert isinstance(tool_use.input, dict), f"Tool input must be dict, got {type(tool_use.input)}"
+        match tool_use.name:
             case "uv_add":
-                packages = tool_input["packages"]  # pyright: ignore[reportIndexIssue]
+                packages = tool_use.input["packages"]  # pyright: ignore[reportIndexIssue]
                 exec_res = await node.data.workspace.exec_mut(
                     ["uv", "add", " ".join(packages)]
                 )
@@ -237,9 +235,9 @@ class NiceguiActor(FileOperationsActor):
                     )
 
                 try:
-                    catalog = tool_input.get("catalog", "*")  # pyright: ignore[reportIndexIssue]
-                    schema = tool_input.get("schema", "*")  # pyright: ignore[reportIndexIssue]
-                    exclude_inaccessible = tool_input.get("exclude_inaccessible", True)  # pyright: ignore[reportIndexIssue]
+                    catalog = tool_use.input.get("catalog", "*")  # pyright: ignore[reportIndexIssue]
+                    schema = tool_use.input.get("schema", "*")  # pyright: ignore[reportIndexIssue]
+                    exclude_inaccessible = tool_use.input.get("exclude_inaccessible", True)  # pyright: ignore[reportIndexIssue]
 
                     tables = self.databricks_client.list_tables(
                         catalog=catalog,
@@ -279,8 +277,8 @@ class NiceguiActor(FileOperationsActor):
                     )
 
                 try:
-                    table_full_name = tool_input["table_full_name"]  # pyright: ignore[reportIndexIssue]
-                    sample_size = tool_input.get("sample_size", 10)  # pyright: ignore[reportIndexIssue]
+                    table_full_name = tool_use.input["table_full_name"]  # pyright: ignore[reportIndexIssue]
+                    sample_size = tool_use.input.get("sample_size", 10)  # pyright: ignore[reportIndexIssue]
 
                     table_details = self.databricks_client.get_table_details(
                         table_full_name=table_full_name,
@@ -348,8 +346,8 @@ class NiceguiActor(FileOperationsActor):
                     )
 
                 try:
-                    query = tool_input["query"]  # pyright: ignore[reportIndexIssue]
-                    timeout = tool_input.get("timeout", 45)  # pyright: ignore[reportIndexIssue]
+                    query = tool_use.input["query"]  # pyright: ignore[reportIndexIssue]
+                    timeout = tool_use.input.get("timeout", 45)  # pyright: ignore[reportIndexIssue]
 
                     df = self.databricks_client.execute_query(
                         query=query,
@@ -477,7 +475,8 @@ class NiceguiActor(FileOperationsActor):
 
         if all_errors:
             await notify_stage(self.event_callback, "❌ Validation checks failed - fixing issues", "failed")
-            return all_errors.strip()
+            errors = await self.compact_error_message(all_errors)
+            return errors.strip()
 
         await notify_stage(self.event_callback, "✅ All validation checks passed", "completed")
         return None

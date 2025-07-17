@@ -16,6 +16,7 @@ import anyio
 from fastapi import FastAPI, HTTPException, Depends
 from fastapi.responses import StreamingResponse
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from laravel_agent.agent_session import LaravelAgentSession
 import uvicorn
 from fire import Fire
 import os
@@ -291,6 +292,7 @@ async def message(
             "template_diff": TemplateDiffAgentImplementation,
             "trpc_agent": TrpcAgentSession,
             "nicegui_agent": NiceguiAgentSession,
+            "laravel_agent": LaravelAgentSession
         }
 
         if template_id not in agent_types:

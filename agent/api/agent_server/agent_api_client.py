@@ -1140,7 +1140,7 @@ def spawn_local_server(
         proc = subprocess.Popen(
             command, stdout=subprocess.PIPE, stderr=std_err_file, text=True
         )
-        logger.info(
+        print(
             f"Local server started, pid {proc.pid}, check `tail -f {std_err_file.name}` for logs"
         )
 

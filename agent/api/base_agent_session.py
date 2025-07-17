@@ -166,7 +166,7 @@ class BaseAgentSession(AgentInterface, ABC):
 
             while True:
                 logger.info("Looping into next step")
-                _, fsm_status, full_thread = await self.processor_instance.step(
+                thread, fsm_status, full_thread = await self.processor_instance.step(
                     agent_state["fsm_messages"],
                     top_level_agent_llm,
                     self.model_params
@@ -217,15 +217,16 @@ class BaseAgentSession(AgentInterface, ABC):
                         continue
                     case FSMStatus.REFINEMENT_REQUEST:
                         logger.info("Got REFINEMENT_REQUEST status, sending refinement request message")
-                        refinement_request_message = InternalMessage(
-                                    role="assistant",
-                                    content=[TextRaw("Agent is waiting for user input...")]
-                                )
+                        # Use the actual LLM response from thread if available
+                        messages_to_send = thread if thread else [InternalMessage(
+                            role="assistant",
+                            content=[TextRaw("Agent is waiting for user input...")]
+                        )]
                         await self.send_event(
                             event_tx=event_tx,
                             status=AgentStatus.IDLE,
                             kind=MessageKind.REFINEMENT_REQUEST,
-                            content=[refinement_request_message],
+                            content=messages_to_send,
                             agent_state=agent_state,
                             app_name=agent_state["metadata"]["app_name"],
                         )
