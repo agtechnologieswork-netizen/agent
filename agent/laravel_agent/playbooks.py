@@ -133,16 +133,26 @@ When implementing buttons or forms that interact with the backend:
    - The backend should return Inertia::render() with updated props
    - The component will automatically re-render with new data
 
-3. **Example for a counter button**:
+3. **Example for a counter button** (IMPORTANT: Use REST routes):
    ```typescript
    const handleIncrement = () => {{
-     router.post(route('counter.increment'), {{}}, {{
+     // Use store route for creating/updating resources
+     router.post(route('counter.store'), {{}}, {{
        preserveState: true,
        preserveScroll: true
      }});
    }};
    
    return <Button onClick={{handleIncrement}}>Click Me!</Button>;
+   ```
+
+4. **Routes must follow REST conventions**:
+   ```php
+   // CORRECT - uses standard REST method
+   Route::post('/counter', [CounterController::class, 'store'])->name('counter.store');
+   
+   // WRONG - custom method name
+   Route::post('/counter/increment', [CounterController::class, 'increment']);
    ```
 
 # Import/Export Patterns
@@ -205,7 +215,11 @@ Example: If user asks for "a counter app", put the counter on the home page ('/'
 # Backend Response Patterns for Interactive Features
 
 When handling POST requests that update state (like incrementing a counter):
-1. **Return Inertia response with updated data**:
+1. **Use standard REST methods** - Controllers should only have these public methods:
+   - `__construct`, `__invoke`, `index`, `show`, `create`, `store`, `edit`, `update`, `destroy`, `middleware`
+   - For actions like "increment", use the `store` method instead of creating custom public methods
+   
+2. **Return Inertia response with updated data**:
    ```php
    public function store(Request $request)
    {{
@@ -220,15 +234,16 @@ When handling POST requests that update state (like incrementing a counter):
    }}
    ```
 
-2. **IMPORTANT**: Don't return JSON responses for Inertia routes - always return Inertia::render()
-3. This ensures the frontend automatically updates with the new state
+3. **IMPORTANT**: Don't return JSON responses for Inertia routes - always return Inertia::render()
+4. This ensures the frontend automatically updates with the new state
 
 # Model and Entity Guidelines
 
 When creating Laravel models:
-1. **ALWAYS include PHPDoc annotations** for all model properties
+1. **ALWAYS include PHPDoc annotations** for ALL model properties
 2. **Document all database columns** with proper types
 3. **Use @property annotations** for virtual attributes and relationships
+4. **CRITICAL**: The PHPDoc block MUST be placed DIRECTLY above the class declaration with NO blank lines between them
 
 Example model with proper annotations:
 ```php
@@ -260,6 +275,11 @@ class Counter extends Model
     ];
 }}
 ```
+
+IMPORTANT: Architecture tests will fail if:
+- Models don't have PHPDoc annotations
+- There's a blank line between the PHPDoc block and the class declaration
+- Not all database columns are documented with @property annotations
 
 # Additional Notes for Application Development
 
