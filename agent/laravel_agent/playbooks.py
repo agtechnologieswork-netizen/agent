@@ -99,11 +99,22 @@ When tests fail:
 - Verify that API endpoints return expected responses
 - The test runner will automatically retry with more verbosity if initial output is unclear
 
+# React Component Guidelines
+
+When creating Inertia.js page components:
+- Use TypeScript interfaces for props
+- Ensure components are exported as default
+- Place page components in resources/js/pages/ directory
+- IMPORTANT: All page component Props interfaces must include this line:
+  [key: string]: unknown;
+  This is required for Inertia.js TypeScript compatibility
+
 # Additional Notes for Application Development
 
 - NEVER use dummy data unless explicitly requested by the user
-- When approaching max depth (30), prioritize fixing critical errors over minor linting issues
+- When approaching max depth (40), prioritize fixing critical errors over minor linting issues
 - If stuck in a loop, try a different approach rather than repeating the same fix
+- Check that Vite builds successfully before running tests - missing manifest entries indicate build issues
 """.strip()
 
 
@@ -151,6 +162,7 @@ def validate_migration_syntax(file_content: str) -> bool:
     # Check for correct anonymous class pattern with brace on new line
     pattern = r'return\s+new\s+class\s+extends\s+Migration\s*\n\s*\{'
     return bool(re.search(pattern, file_content))
+
 
 
 USER_PROMPT = """

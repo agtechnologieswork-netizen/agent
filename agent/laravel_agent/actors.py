@@ -73,6 +73,7 @@ class LaravelActor(FileOperationsActor):
             # Build and config files
             "webpack.mix.js",
             "vite.config.js",
+            "vite.config.ts",
             "tailwind.config.js",
             "postcss.config.js",
             ".gitignore",
@@ -374,6 +375,8 @@ class LaravelActor(FileOperationsActor):
         for i, block in enumerate(node.data.head().content):
             if isinstance(block, ToolUse) and block.name in ["write_file", "edit_file"]:
                 path = block.input.get("path", "")  # pyright: ignore[reportAttributeAccessIssue]
+                
+                # Validate migration files
                 if "/migrations/" in path and path.endswith(".php"):
                     # Find the corresponding result
                     tool_result = None
