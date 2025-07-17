@@ -160,43 +160,7 @@ class FSMApplication:
         ) -> None:
             logger.info("Running final steps after application generation")
             
-            # Run final cleanup to fix unused imports and other issues we skipped
-            logger.info("Running final PHP lint cleanup for unused imports")
-            try:
-                # Get the workspace from the result node
-                workspace_ctr = result.data.workspace.ctr
-                
-                # Use sed to temporarily re-enable no_unused_imports, run fix, then restore
-                cleanup_commands = [
-                    # Backup original pint.json
-                    ["cp", "pint.json", "pint.json.bak"],
-                    # Remove the no_unused_imports: false line to re-enable the check
-                    ["sed", "-i", '/"no_unused_imports": false/d', "pint.json"],
-                    # Run composer lint with fix to clean up unused imports
-                    ["composer", "lint", "--", "--fix"],
-                    # Restore original pint.json
-                    ["cp", "pint.json.bak", "pint.json"],
-                    # Remove backup
-                    ["rm", "pint.json.bak"]
-                ]
-                
-                for cmd in cleanup_commands:
-                    cmd_result = await workspace_ctr.with_exec(cmd).stdout()
-                    logger.debug(f"Cleanup command {' '.join(cmd)}: {cmd_result[:100] if cmd_result else 'OK'}")
-                
-                logger.info("Final lint cleanup completed successfully")
-                
-                # Update files in context with cleaned versions
-                for file_path in ctx.files.keys():
-                    if file_path.endswith('.php'):
-                        try:
-                            cleaned_content = await result.data.workspace.read_file(file_path)
-                            ctx.files[file_path] = cleaned_content
-                        except Exception as e:
-                            logger.warning(f"Could not read cleaned file {file_path}: {e}")
-                            
-            except Exception as e:
-                logger.warning(f"Final lint cleanup failed, but continuing: {e}")
+            # TODO: implement lint -- --fix for PHP filesß
 
         llm = get_best_coding_llm_client()
         workspace = await create_workspace(
