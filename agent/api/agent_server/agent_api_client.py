@@ -419,6 +419,16 @@ def cleanup_docker_projects():
 atexit.register(cleanup_docker_projects)
 
 
+# Common directories to exclude when collecting project files
+EXCLUDED_DIRS = {
+    "node_modules", "vendor", ".git", "dist", "build", 
+    ".cache", "coverage", "public/build", "storage/logs", 
+    "bootstrap/cache", ".cursor", ".claude", ".github",
+    "__pycache__", ".pytest_cache", ".venv", "venv",
+    ".next", ".nuxt", ".svelte-kit", ".output",
+    "tmp", "temp", ".idea", ".vscode"
+}
+
 # Function to get all files from the project directory
 def get_all_files_from_project_dir(project_dir_path: str) -> List[FileEntry]:
     local_files: List[FileEntry] = []
@@ -429,12 +439,25 @@ def get_all_files_from_project_dir(project_dir_path: str) -> List[FileEntry]:
         )
         return local_files
 
-    for root, _, files in os.walk(project_dir_path):
+    for root, dirs, files in os.walk(project_dir_path):
+        # Filter out excluded directories to prevent walking into them
+        dirs[:] = [d for d in dirs if d not in EXCLUDED_DIRS]
+        
+        # Also check if the current directory path contains any excluded patterns
+        rel_root = os.path.relpath(root, project_dir_path)
+        skip_dir = False
+        for excluded in EXCLUDED_DIRS:
+            if excluded in rel_root.split(os.sep):
+                skip_dir = True
+                break
+        if skip_dir:
+            continue
+            
         for filename in files:
             # Exclude common problematic/temporary files but allow .gitignore
             if (
-                filename.startswith(".") and filename != ".gitignore"
-            ) or filename.endswith((".patch", ".swp", ".swo", ".rej")):
+                filename.startswith(".") and filename not in {".gitignore", ".env", ".env.example"}
+            ) or filename.endswith((".patch", ".swp", ".swo", ".rej", ".pyc", ".pyo")):
                 continue
 
             filepath = os.path.join(root, filename)
@@ -444,7 +467,8 @@ def get_all_files_from_project_dir(project_dir_path: str) -> List[FileEntry]:
                     content = f.read()
                 local_files.append(FileEntry(path=relative_path, content=content))
             except Exception as e:
-                logger.error(f"Error reading file {filepath} for snapshot: {e}")
+                # Skip binary files or files that can't be read
+                logger.debug(f"Skipping file {filepath}: {e}")
     return local_files
 
 
