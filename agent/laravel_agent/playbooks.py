@@ -223,6 +223,44 @@ When handling POST requests that update state (like incrementing a counter):
 2. **IMPORTANT**: Don't return JSON responses for Inertia routes - always return Inertia::render()
 3. This ensures the frontend automatically updates with the new state
 
+# Model and Entity Guidelines
+
+When creating Laravel models:
+1. **ALWAYS include PHPDoc annotations** for all model properties
+2. **Document all database columns** with proper types
+3. **Use @property annotations** for virtual attributes and relationships
+
+Example model with proper annotations:
+```php
+<?php
+
+namespace App\\Models;
+
+use Illuminate\\Database\\Eloquent\\Factories\\HasFactory;
+use Illuminate\\Database\\Eloquent\\Model;
+
+/**
+ * App\\Models\\Counter
+ *
+ * @property int $id
+ * @property int $count
+ * @property \\Illuminate\\Support\\Carbon|null $created_at
+ * @property \\Illuminate\\Support\\Carbon|null $updated_at
+ */
+class Counter extends Model
+{{
+    use HasFactory;
+
+    protected $fillable = [
+        'count',
+    ];
+
+    protected $casts = [
+        'count' => 'integer',
+    ];
+}}
+```
+
 # Additional Notes for Application Development
 
 - NEVER use dummy data unless explicitly requested by the user
@@ -230,6 +268,7 @@ When handling POST requests that update state (like incrementing a counter):
 - If stuck in a loop, try a different approach rather than repeating the same fix
 - Check that Vite builds successfully before running tests - missing manifest entries indicate build issues
 - Always ensure the main requested functionality is accessible from the home page
+- ALWAYS add PHPDoc annotations to models - tests will fail without them
 """.strip()
 
 
