@@ -1,3 +1,7 @@
+# Import new prompt templates to ensure they're registered
+import trpc_agent.prompt_templates
+from core.prompts import build_prompt, get_prompt_template, PromptKind, Framework
+
 BASE_TYPESCRIPT_SCHEMA = """
 <file path="server/src/schema.ts">
 import { z } from 'zod';
@@ -843,6 +847,72 @@ Task:
 """.strip()
 
 
+def get_backend_draft_system_prompt() -> str:
+    """Return backend draft system prompt using unified system"""
+    from core.prompts import build_prompt, PromptKind
+    
+    try:
+        return build_prompt(
+            lang="typescript",
+            framework="trpc",
+            kind=PromptKind.DRAFT,
+            integrations=[]
+        )
+    except ValueError:
+        # Fallback to legacy
+        return BACKEND_DRAFT_SYSTEM_PROMPT
+
+
+def get_backend_handler_system_prompt() -> str:
+    """Return backend handler system prompt using unified system"""
+    from core.prompts import build_prompt, PromptKind
+    
+    try:
+        return build_prompt(
+            lang="typescript",
+            framework="trpc",
+            kind=PromptKind.HANDLER,
+            integrations=[]
+        )
+    except ValueError:
+        # Fallback to legacy
+        return BACKEND_HANDLER_SYSTEM_PROMPT
+
+
+def get_frontend_system_prompt() -> str:
+    """Return frontend system prompt using unified system"""
+    from core.prompts import build_prompt, PromptKind
+    
+    try:
+        return build_prompt(
+            lang="typescript",
+            framework="trpc",
+            kind=PromptKind.FRONTEND,
+            integrations=[]
+        )
+    except ValueError:
+        # Fallback to legacy
+        return FRONTEND_SYSTEM_PROMPT
+
+
+def get_trpc_user_prompt() -> str:
+    """Return user prompt using unified system"""
+    from core.prompts import get_prompt_template, PromptKind
+    
+    template = get_prompt_template(
+        lang="typescript",
+        framework="trpc",
+        kind=PromptKind.USER,
+        integrations=[]
+    )
+    
+    if template:
+        return template.content
+    else:
+        # Fallback to legacy
+        return BACKEND_DRAFT_USER_PROMPT
+
+
 FRONTEND_VALIDATION_PROMPT = """Given the attached screenshot, decide where the frontend code is correct and relevant to the original prompt. Keep in mind that the backend is currently not implemented, so you can only validate the frontend code and ignore the backend part.
 Original prompt to generate this website: {{ user_prompt }}.
 
@@ -1072,3 +1142,20 @@ Given original user request:
 Implement solely the required changes according to the user feedback:
 {{ feedback }}
 """.strip()
+
+
+# Wrapper functions for backward compatibility with new unified prompt system
+def get_system_prompt() -> str:
+    """Return tRPC system prompt"""
+    return build_prompt(
+        framework=Framework.TRPC,
+        kind=PromptKind.SYSTEM
+    )
+
+
+def get_user_prompt() -> str:
+    """Return tRPC user prompt template"""
+    return get_prompt_template(
+        framework=Framework.TRPC,
+        kind=PromptKind.USER
+    )

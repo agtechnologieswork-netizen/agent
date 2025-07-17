@@ -1,3 +1,7 @@
+# Import new prompt templates to ensure they're registered
+import nicegui_agent.prompt_templates
+from core.prompts import build_prompt, get_prompt_template, PromptKind, Framework
+
 # Common rules used across all contexts
 CORE_PYTHON_RULES = """
 # Universal Python rules
@@ -791,246 +795,32 @@ If the application uses external data sources, ALWAYS have at least one test fet
 
 def get_data_model_system_prompt(use_databricks: bool = False) -> str:
     """Return data model system prompt with optional databricks support"""
-    return f"""
-You are a software engineer specializing in data modeling. Your task is to design and implement data models, schemas, and data structures for a NiceGUI application. Strictly follow provided rules.
-Don't be chatty, keep on solving the problem, not describing what you are doing.
-
-{PYTHON_RULES}
-
-{get_data_model_rules(use_databricks)}
-
-{get_tool_usage_rules(use_databricks)}
-
-# Additional Notes for Data Modeling
-
-- Focus ONLY on data models and structures - DO NOT create UI components, services or application logic.
-- There are smoke tests for data models provided in tests/test_models_smoke.py, your models should pass them. No need to write additional tests.
-""".strip()
+    integrations = ["databricks"] if use_databricks else []
+    return build_prompt(
+        framework=Framework.NICEGUI,
+        kind=PromptKind.SYSTEM,
+        integrations=integrations
+    )
 
 
 def get_application_system_prompt(use_databricks: bool = False) -> str:
     """Return application system prompt with optional databricks support"""
-    databricks_section = f"\n{get_databricks_rules(use_databricks)}" if use_databricks else ""
-
-    return f"""
-You are a software engineer specializing in NiceGUI application development. Your task is to build UI components and application logic using existing data models. Strictly follow provided rules.
-Don't be chatty, keep on solving the problem, not describing what you are doing.
-
-{PYTHON_RULES}
-
-{APPLICATION_RULES}
-{databricks_section}
-
-{get_tool_usage_rules(use_databricks)}
-
-## UI Design Guidelines
-
-### Color Palette Implementation
-
-```python
-from nicegui import ui
-
-# Modern color scheme for 2025
-def apply_modern_theme():
-    ui.colors(
-        primary='#2563eb',    # Professional blue
-        secondary='#64748b',  # Subtle gray
-        accent='#10b981',     # Success green
-        positive='#10b981',
-        negative='#ef4444',   # Error red
-        warning='#f59e0b',    # Warning amber
-        info='#3b82f6'        # Info blue
+    integrations = ["databricks"] if use_databricks else []
+    return build_prompt(
+        framework=Framework.NICEGUI,
+        kind=PromptKind.SYSTEM,
+        integrations=integrations
     )
 
-# Apply theme at app start
-apply_modern_theme()
-```
+def get_user_prompt(use_databricks: bool = False) -> str:
+    """Return user prompt template with optional databricks support"""
+    integrations = ["databricks"] if use_databricks else []
+    return get_prompt_template(
+        framework=Framework.NICEGUI,
+        kind=PromptKind.USER,
+        integrations=integrations
+    )
 
-### Essential Spacing Classes
-
-Always use these Tailwind spacing classes for consistency:
-- `p-2` (8px) - Tight spacing
-- `p-4` (16px) - Default component padding
-- `p-6` (24px) - Card padding
-- `gap-4` (16px) - Space between elements
-- `mb-4` (16px) - Bottom margin between sections
-
-### Typography Scale
-
-```python
-# Define reusable text styles
-class TextStyles:
-    HEADING = 'text-2xl font-bold text-gray-800 mb-4'
-    SUBHEADING = 'text-lg font-semibold text-gray-700 mb-2'
-    BODY = 'text-base text-gray-600 leading-relaxed'
-    CAPTION = 'text-sm text-gray-500'
-
-# Usage
-ui.label('Dashboard Overview').classes(TextStyles.HEADING)
-ui.label('Key metrics for your application').classes(TextStyles.BODY)
-```
-
-## NiceGUI-Specific Best Practices
-
-### 1. Component Styling Methods
-
-NiceGUI offers three styling approaches - use them in this order:
-
-```python
-# Method 1: Tailwind classes (preferred for layout/spacing)
-ui.button('Save').classes('bg-blue-500 hover:bg-blue-600 text-white px-4 py-2 rounded')
-
-# Method 2: Quasar props (for component-specific features)
-ui.button('Delete').props('color=negative outline')
-
-# Method 3: CSS styles (for custom properties)
-ui.card().style('background: linear-gradient(135deg, #667eea 0%, #764ba2 100%)')
-```
-
-### 2. Professional Layout Patterns
-
-#### Card-Based Dashboard
-```python
-from nicegui import ui
-
-# Modern card component
-def create_metric_card(title: str, value: str, change: str, positive: bool = True):
-    with ui.card().classes('p-6 bg-white shadow-lg rounded-xl hover:shadow-xl transition-shadow'):
-        ui.label(title).classes('text-sm text-gray-500 uppercase tracking-wider')
-        ui.label(value).classes('text-3xl font-bold text-gray-800 mt-2')
-        change_color = 'text-green-500' if positive else 'text-red-500'
-        ui.label(change).classes(f'text-sm {{change_color}} mt-1')
-
-# Usage
-with ui.row().classes('gap-4 w-full'):
-    create_metric_card('Total Users', '1,234', '+12.5%')
-    create_metric_card('Revenue', '$45,678', '+8.3%')
-    create_metric_card('Conversion', '3.2%', '-2.1%', positive=False)
-```
-
-#### Responsive Sidebar Layout
-```python
-# Professional app layout with sidebar
-with ui.row().classes('w-full h-screen'):
-    # Sidebar
-    with ui.column().classes('w-64 bg-gray-800 text-white p-4'):
-        ui.label('My App').classes('text-xl font-bold mb-6')
-
-        # Navigation items
-        for item in ['Dashboard', 'Analytics', 'Settings']:
-            ui.button(item, on_click=lambda: None).classes(
-                'w-full text-left px-4 py-2 hover:bg-gray-700 rounded'
-            ).props('flat text-color=white')
-
-    # Main content area
-    with ui.column().classes('flex-1 bg-gray-50 p-6 overflow-auto'):
-        ui.label('Welcome to your dashboard').classes('text-2xl font-bold mb-4')
-```
-
-### 3. Form Design
-
-```python
-# Modern form with proper spacing and validation feedback
-def create_modern_form():
-    with ui.card().classes('w-96 p-6 shadow-lg rounded-lg'):
-        ui.label('Create New Project').classes('text-xl font-bold mb-6')
-
-        # Input fields with labels
-        ui.label('Project Name').classes('text-sm font-medium text-gray-700 mb-1')
-        ui.input(placeholder='Enter project name').classes('w-full mb-4')
-
-        ui.label('Description').classes('text-sm font-medium text-gray-700 mb-1')
-        ui.textarea(placeholder='Project description').classes('w-full mb-4').props('rows=3')
-
-        # Action buttons
-        with ui.row().classes('gap-2 justify-end'):
-            ui.button('Cancel').classes('px-4 py-2').props('outline')
-            ui.button('Create').classes('bg-blue-500 text-white px-4 py-2')
-```
-
-## Common Design Mistakes to Avoid
-
-### ❌ Don't Do This:
-```python
-# Too many colors and inconsistent spacing
-ui.label('Title').style('color: red; margin: 13px')
-ui.button('Click').style('background: yellow; padding: 7px')
-ui.label('Text').style('color: green; margin-top: 21px')
-```
-
-### ✅ Do This Instead:
-```python
-# Consistent theme and spacing
-ui.label('Title').classes('text-primary text-xl font-bold mb-4')
-ui.button('Click').classes('bg-primary text-white px-4 py-2 rounded')
-ui.label('Text').classes('text-gray-600 mt-4')
-```
-
-### Other Common Mistakes:
-1. **Using pure white/black backgrounds** - Use `bg-gray-50` or `bg-gray-100` instead for light theme
-2. **No hover states** - Always add `hover:` classes for interactive elements
-3. **Inconsistent shadows** - Stick to `shadow-md` or `shadow-lg`
-4. **Missing focus states** - Ensure keyboard navigation is visible
-5. **Cramped layouts** - Use proper spacing between elements
-
-### Modern UI Patterns
-
-1. Glass Morphism Card
-```python
-ui.add_head_html('''<style>
-.glass-card {{
-    background: rgba(255, 255, 255, 0.7);
-    backdrop-filter: blur(10px);
-    border: 1px solid rgba(255, 255, 255, 0.3);
-}}
-</style>''')
-
-with ui.card().classes('glass-card p-6 rounded-xl shadow-xl'):
-    ui.label('Modern Glass Effect').classes('text-xl font-bold')
-```
-
-2. Gradient Buttons
-```python
-# Attractive gradient button
-ui.button('Get Started').style(
-    'background: linear-gradient(45deg, #3b82f6 0%, #8b5cf6 100%);'
-    'color: white; font-weight: bold;'
-).classes('px-6 py-3 rounded-lg shadow-md hover:shadow-lg transition-shadow')
-```
-
-3. Loading States
-```python
-# Professional loading indicator
-def show_loading():
-    with ui.card().classes('p-8 text-center'):
-        ui.spinner(size='lg')
-        ui.label('Loading data...').classes('mt-4 text-gray-600')
-```
-
-# Additional Notes for Application Development
-
-- USE existing data models from previous phase - DO NOT redefine them
-- Focus on UI components, event handlers, and application logic
-- NEVER use dummy data unless explicitly requested by the user
-- NEVER use quiet failures such as (try: ... except: return None) - always handle errors explicitly
-- Aim for best possible aesthetics in UI design unless user asks for the opposite - use NiceGUI's features to create visually appealing interfaces, ensure adequate page structure, spacing, alignment, and use of colors.
-""".strip()
-
-USER_PROMPT = """
-{{ project_context }}
-
-Implement user request:
-{{ user_prompt }}
-""".strip()
-
-# Template for prompts with databricks support
-USER_PROMPT_WITH_DATABRICKS = """
-{{ project_context }}
-
-{% if use_databricks %}
-DATABRICKS INTEGRATION: This project uses Databricks for data processing and analytics. Models are defined in app/models.py, use them.
-{% endif %}
-
-Implement user request:
-{{ user_prompt }}
-""".strip()
+# Keep legacy constants for backward compatibility
+USER_PROMPT = get_user_prompt(use_databricks=False)
+USER_PROMPT_WITH_DATABRICKS = get_user_prompt(use_databricks=True)
