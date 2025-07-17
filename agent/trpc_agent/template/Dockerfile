@@ -32,6 +32,9 @@ FROM oven/bun:1.2.2-alpine
 # Env vars for the end image should be here
 ENV APP_DATABASE_URL=${APP_DATABASE_URL}
 ENV SERVER_PORT=${SERVER_PORT:-2022}
+ENV VITE_STACK_PROJECT_ID=${VITE_STACK_PROJECT_ID}
+ENV VITE_STACK_PUBLISHABLE_CLIENT_KEY=${VITE_STACK_PUBLISHABLE_CLIENT_KEY}
+
 # Install curl for healthcheck, Caddy, and supervisor
 RUN apk add --no-cache curl caddy supervisor
 

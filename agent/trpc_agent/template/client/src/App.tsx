@@ -16,7 +16,7 @@ function App() {
           <div className="dot"></div>
         </div>
         <footer className="footer">
-          Built with ❤️ by{" "}
+          Built with ❤️ by{' '}
           <a href="https://app.build" target="_blank" className="footer-link">
             app.build
           </a>
