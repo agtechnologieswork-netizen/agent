@@ -1,7 +1,6 @@
 ---
 description: Event Handler Patterns and Lambda Safety
 globs: ["**/*.py"]
-alwaysApply: true
 ---
 
 # Event Handler Best Practices

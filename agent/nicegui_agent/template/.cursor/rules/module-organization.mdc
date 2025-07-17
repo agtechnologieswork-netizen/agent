@@ -1,7 +1,6 @@
 ---
 description: NiceGUI Module Organization Patterns
 globs: ["**/app/*.py", "**/app/**/*.py"]
-alwaysApply: true
 ---
 
 # Module Organization Best Practices

@@ -1,7 +1,6 @@
 ---
 description: None/Optional Type Handling Patterns
 globs: ["**/*.py"]
-alwaysApply: true
 ---
 
 # None Handling Best Practices

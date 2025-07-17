@@ -1,7 +1,6 @@
 ---
 description: Testing Patterns for NiceGUI Applications
 globs: ["**/tests/*.py", "**/test_*.py"]
-alwaysApply: true
 ---
 
 # Testing Strategy: Logic-First Approach

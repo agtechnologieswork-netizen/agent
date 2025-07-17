@@ -1,7 +1,6 @@
 ---
 description: NiceGUI UI Component Usage Patterns
 globs: ["**/*.py"]
-alwaysApply: true
 ---
 
 # NiceGUI Component Best Practices

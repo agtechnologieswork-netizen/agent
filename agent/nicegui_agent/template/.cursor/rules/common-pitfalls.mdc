@@ -1,7 +1,6 @@
 ---
 description: Common NiceGUI Component Pitfalls and Solutions
 globs: ["**/*.py"]
-alwaysApply: true
 ---
 
 # CRITICAL: Avoid These Common NiceGUI Mistakes

@@ -1,7 +1,6 @@
 ---
 description: NiceGUI State Management Patterns
 globs: ["**/*.py"]
-alwaysApply: true
 ---
 
 # State Management with NiceGUI Storage

@@ -1,7 +1,6 @@
 ---
 description: Type Safety and Type Hints Best Practices
 globs: ["**/*.py"]
-alwaysApply: true
 ---
 
 # Type Safety Patterns

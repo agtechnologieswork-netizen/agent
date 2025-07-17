@@ -1,7 +1,6 @@
 ---
 description: SQLModel Data Modeling Best Practices
 globs: ["**/models.py", "**/models/*.py", "**/schemas.py"]
-alwaysApply: true
 ---
 
 # SQLModel Data Model Patterns

@@ -1,7 +1,6 @@
 ---
 description: SQLModel Database Query Patterns
 globs: ["**/*.py"]
-alwaysApply: true
 ---
 
 # Database Query Best Practices
