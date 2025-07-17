@@ -109,6 +109,32 @@ When creating Inertia.js page components:
   [key: string]: unknown;
   This is required for Inertia.js TypeScript compatibility
 
+# Import/Export Patterns
+
+Follow these strict patterns for imports and exports:
+
+1. **Page Components** (in resources/js/pages/):
+   - MUST use default exports: export default function PageName()
+   - Import example: import PageName from '@/pages/PageName'
+
+2. **Shared Components** (in resources/js/components/):
+   - MUST use named exports: export function ComponentName()
+   - Import example: import {{ ComponentName }} from '@/components/component-name'
+
+3. **UI Components** (in resources/js/components/ui/):
+   - MUST use named exports: export {{ Button, buttonVariants }}
+   - Import example: import {{ Button }} from '@/components/ui/button'
+
+4. **Layout Components**:
+   - AppLayout uses default export: import AppLayout from '@/layouts/app-layout'
+   - Other layout components use named exports
+
+Common import mistakes to avoid:
+- WRONG: import AppShell from '@/components/app-shell' 
+- CORRECT: import {{ AppShell }} from '@/components/app-shell'
+- WRONG: export function Dashboard() (for pages)
+- CORRECT: export default function Dashboard() (for pages)
+
 # Creating Inertia Page Components
 
 When creating a new page component (e.g., Counter.tsx):
@@ -181,6 +207,42 @@ def validate_migration_syntax(file_content: str) -> bool:
     # Check for correct anonymous class pattern with brace on new line
     pattern = r'return\s+new\s+class\s+extends\s+Migration\s*\n\s*\{'
     return bool(re.search(pattern, file_content))
+
+
+def validate_react_imports(file_path: str, file_content: str) -> tuple[bool, str]:
+    """Validate React component imports follow Laravel template patterns
+    
+    Returns:
+        tuple: (is_valid, error_message)
+    """
+    import re
+    
+    errors = []
+    
+    # Check imports from app-shell (should be named import)
+    if re.search(r"import\s+AppShell\s+from\s+['\"]@/components/app-shell['\"]", file_content):
+        errors.append("AppShell must be imported as named import: import { AppShell } from '@/components/app-shell'")
+    
+    # Check imports from UI components (should be named imports)
+    ui_default_imports = re.findall(r"import\s+(\w+)\s+from\s+['\"]@/components/ui/(\w+)['\"]", file_content)
+    for component_name, file_name in ui_default_imports:
+        errors.append(f"{component_name} from ui/{file_name} must be imported as named import: import {{ {component_name} }} from '@/components/ui/{file_name}'")
+    
+    # Check page component exports (should be default export)
+    if '/pages/' in file_path:
+        # Check if it has a named export instead of default
+        if re.search(r"export\s+(function|const)\s+\w+", file_content) and not re.search(r"export\s+default", file_content):
+            errors.append("Page components must use default export: export default function ComponentName()")
+    
+    # Check non-page component exports (should be named export)
+    elif '/components/' in file_path and '/ui/' not in file_path:
+        # Skip UI components as they have their own patterns
+        if re.search(r"export\s+default\s+(function|const)", file_content):
+            errors.append("Shared components should use named exports: export function ComponentName()")
+    
+    if errors:
+        return False, "\n".join(errors)
+    return True, ""
 
 
 

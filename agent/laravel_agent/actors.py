@@ -8,7 +8,7 @@ from core.actors import BaseData, FileOperationsActor
 from llm.common import AsyncLLM, Message, TextRaw, ToolUse, ToolUseResult
 from laravel_agent import playbooks
 from laravel_agent.utils import run_migrations, run_tests
-from laravel_agent.playbooks import validate_migration_syntax, MIGRATION_SYNTAX_EXAMPLE
+from laravel_agent.playbooks import validate_migration_syntax, validate_react_imports, MIGRATION_SYNTAX_EXAMPLE
 from core.notification_utils import notify_if_callback, notify_stage
 
 logger = logging.getLogger(__name__)
@@ -409,5 +409,37 @@ class LaravelActor(FileOperationsActor):
                                     del node.data.files[path]
                         except Exception as e:
                             logger.error(f"Error validating migration {path}: {e}")
+                
+                # Validate React/TypeScript files
+                elif path.endswith(".tsx") or path.endswith(".jsx"):
+                    # Find the corresponding result
+                    tool_result = None
+                    for j, res in enumerate(result):
+                        if res.tool_use.id == block.id:
+                            tool_result = res
+                            break
+                    
+                    # If the operation was successful, validate the React imports
+                    if tool_result and not tool_result.tool_result.is_error:
+                        try:
+                            # Read the current file content
+                            file_content = await node.data.workspace.read_file(path)
+                            is_valid, error_msg = validate_react_imports(path, file_content)
+                            if not is_valid:
+                                full_error_msg = (
+                                    f"Invalid React import/export patterns in {path}:\n"
+                                    f"{error_msg}\n\n"
+                                    "Remember:\n"
+                                    "- Page components (in /pages/) must use default exports\n"
+                                    "- Shared components must use named exports\n"
+                                    "- UI components must use named imports"
+                                )
+                                logger.warning(f"React import validation failed for {path}")
+                                # Replace the success result with an error
+                                result[j] = ToolUseResult.from_tool_use(block, full_error_msg, is_error=True)
+                                if path in node.data.files:
+                                    del node.data.files[path]
+                        except Exception as e:
+                            logger.error(f"Error validating React imports in {path}: {e}")
         
         return result, is_completed
