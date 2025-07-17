@@ -86,9 +86,15 @@ PHP lint errors are handled intelligently:
   - "single_blank_line_at_eof" 
   - "no_unused_imports"
   - "no_whitespace_in_blank_line"
-- These disabled rules will be automatically fixed in the final cleanup step
+- IMPORTANT: Even though these rules are disabled, Pint may still report them and exit with code 1
+- If you see ONLY these formatting errors in CounterTest.php or other test files, you can safely ignore them
 - Focus on real code issues that PHPStan and Pint report, not formatting
 - The output shows both PHPStan (static analysis) and Pint (code style) results
+
+When you see lint failures like:
+⨯ tests/Feature/CounterTest.php no_whitespace_in_blank_line, single_blank_l…
+
+This is NOT a blocking issue if these are the only errors. The application is working correctly.
 
 When tests fail:
 - The system will provide detailed output showing what failed
