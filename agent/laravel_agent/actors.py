@@ -73,7 +73,8 @@ class LaravelActor(FileOperationsActor):
             # Build and config files
             "webpack.mix.js",
             "vite.config.js",
-            # Note: vite.config.ts is NOT protected - agent needs to modify it for new pages
+            "vite.config.ts",
+            "resources/js/app.tsx",  # Contains import.meta.glob pattern
             "tailwind.config.js",
             "postcss.config.js",
             ".gitignore",

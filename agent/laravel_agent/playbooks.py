@@ -113,24 +113,25 @@ When creating Inertia.js page components:
 
 When creating a new page component (e.g., Counter.tsx):
 1. Create the component file in resources/js/pages/
-2. Update vite.config.ts to include the new page in the input array:
-   - Find the laravel({{ input: [...] }}) section
-   - Add the new page path to the input array
-   - Example: 'resources/js/pages/Counter.tsx'
-3. The full input array should look like:
-   input: [
-       'resources/css/app.css',
-       'resources/js/app.tsx',
-       'resources/js/pages/Counter.tsx'  // Add new pages here
-   ]
+2. Create a route in routes/web.php that renders the page with Inertia::render('Counter')
 
-IMPORTANT: Each new page component MUST be added to vite.config.ts input array
-for the @vite directive in app.blade.php to work correctly.
+IMPORTANT: The import.meta.glob('./pages/**/*.tsx') in app.tsx automatically includes 
+all page components. You do NOT need to modify vite.config.ts when adding new pages.
+The Vite manifest will be automatically rebuilt when tests are run, so new pages will
+be included in the build.
+
+# Handling Vite Manifest Errors
+
+If you encounter "Unable to locate file in Vite manifest" errors during testing:
+1. This means a page component was just created but the manifest hasn't been rebuilt yet
+2. This is EXPECTED behavior when adding new pages - the build will run automatically during validation
+3. Do NOT try to modify vite.config.ts - the import.meta.glob pattern handles everything
+4. Simply continue with your implementation - the error will resolve when tests are run
 
 # Additional Notes for Application Development
 
 - NEVER use dummy data unless explicitly requested by the user
-- When approaching max depth (40), prioritize fixing critical errors over minor linting issues
+- When approaching max depth (50), prioritize fixing critical errors over minor linting issues
 - If stuck in a loop, try a different approach rather than repeating the same fix
 - Check that Vite builds successfully before running tests - missing manifest entries indicate build issues
 """.strip()
