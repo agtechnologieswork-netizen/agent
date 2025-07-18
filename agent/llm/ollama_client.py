@@ -1,5 +1,4 @@
 from typing import List, Dict, Any
-import time
 try:
     import ollama
 except ImportError:
@@ -8,6 +7,7 @@ except ImportError:
         "Install it with: uv sync --group ollama"
     )
 from llm import common
+from llm.telemetry import LLMTelemetry
 from log import get_logger
 import logging
 from tenacity import retry, stop_after_attempt, wait_exponential_jitter, before_sleep_log
@@ -149,26 +149,23 @@ class OllamaLLM:
         
         try:
             logger.info(f"Ollama request params: {request_params}")
-            start_time = time.time()
+            telemetry = LLMTelemetry()
+            telemetry.start_timing()
             
             response = await self.client.chat(**request_params)
             
-            elapsed_time = time.time() - start_time
-            
-            # Enhanced telemetry logging
+            # Log telemetry if token counts are available
             if hasattr(response, 'prompt_eval_count') and hasattr(response, 'eval_count'):
                 input_tokens = getattr(response, 'prompt_eval_count', 0)
                 output_tokens = getattr(response, 'eval_count', 0)
-                total_tokens = input_tokens + output_tokens
                 
-                logger.info(
-                    f"LLM Request completed | Model: {chosen_model} | "
-                    f"Input tokens: {input_tokens} | "
-                    f"Output tokens: {output_tokens} | "
-                    f"Total tokens: {total_tokens} | "
-                    f"Duration: {elapsed_time:.2f}s | "
-                    f"Temperature: {temperature} | "
-                    f"Has tools: {ollama_tools is not None}"
+                telemetry.log_completion(
+                    model=chosen_model,
+                    input_tokens=input_tokens,
+                    output_tokens=output_tokens,
+                    temperature=temperature,
+                    has_tools=ollama_tools is not None,
+                    provider="Ollama"
                 )
             
             logger.info(f"Ollama raw response: {response}")

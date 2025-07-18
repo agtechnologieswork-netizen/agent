@@ -1,6 +1,5 @@
 from typing import Iterable, TypedDict, NotRequired
 import anthropic
-import time
 from anthropic.types import (
     ToolParam,
     TextBlock,
@@ -14,6 +13,7 @@ from anthropic.types import (
     ToolChoiceParam,
 )
 from llm import common
+from llm.telemetry import LLMTelemetry
 from log import get_logger
 import logging
 from tenacity import retry, stop_after_attempt, wait_exponential_jitter, before_sleep_log
@@ -91,25 +91,20 @@ class AnthropicLLM(common.AsyncLLM):
 
     @retry_rate_limits
     async def _create_message_with_retry(self, call_args: AnthropicParams) -> common.Completion:
-        start_time = time.time()
+        telemetry = LLMTelemetry()
+        telemetry.start_timing()
         
         completion = await self.client.messages.create(**call_args)
         
-        elapsed_time = time.time() - start_time
-
-        # Enhanced telemetry logging
+        # Log telemetry if usage data is available
         if hasattr(completion, "usage"):
-            total_tokens = completion.usage.input_tokens + completion.usage.output_tokens
-            model = call_args.get("model", "unknown")
-            
-            logger.info(
-                f"LLM Request completed | Model: {model} | "
-                f"Input tokens: {completion.usage.input_tokens} | "
-                f"Output tokens: {completion.usage.output_tokens} | "
-                f"Total tokens: {total_tokens} | "
-                f"Duration: {elapsed_time:.2f}s | "
-                f"Has tools: {'tools' in call_args} | "
-                f"Temperature: {call_args.get('temperature', 'N/A')}"
+            telemetry.log_completion(
+                model=call_args.get("model", "unknown"),
+                input_tokens=completion.usage.input_tokens,
+                output_tokens=completion.usage.output_tokens,
+                temperature=call_args.get("temperature"),
+                has_tools="tools" in call_args,
+                provider="Anthropic"
             )
 
         return self._completion_from(completion)

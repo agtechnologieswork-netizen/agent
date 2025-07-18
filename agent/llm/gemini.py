@@ -1,11 +1,11 @@
 from typing import List
-import time
 
 from google import genai
 from google.genai import types as genai_types
 from google.genai.errors import ServerError
 import os
 from llm import common
+from llm.telemetry import LLMTelemetry
 from log import get_logger
 import logging
 from tenacity import retry, stop_after_attempt, wait_exponential_jitter, retry_if_exception_type, before_sleep_log
@@ -92,7 +92,8 @@ class GeminiLLM(common.AsyncLLM):
         gemini_messages: List[genai_types.Content],
         config: genai_types.GenerateContentConfig
     ) -> common.Completion:
-        start_time = time.time()
+        telemetry = LLMTelemetry()
+        telemetry.start_timing()
         
         response = await self._async_client.models.generate_content(
             model=self.model_name,
@@ -100,21 +101,16 @@ class GeminiLLM(common.AsyncLLM):
             config=config,
         )
         
-        elapsed_time = time.time() - start_time
-        
-        # Enhanced telemetry logging
+        # Log telemetry if usage metadata is available
         if hasattr(response, 'usage_metadata'):
             usage = response.usage_metadata
-            total_tokens = usage.prompt_token_count + usage.candidates_token_count
-            
-            logger.info(
-                f"LLM Request completed | Model: {self.model_name} | "
-                f"Input tokens: {usage.prompt_token_count} | "
-                f"Output tokens: {usage.candidates_token_count} | "
-                f"Total tokens: {total_tokens} | "
-                f"Duration: {elapsed_time:.2f}s | "
-                f"Temperature: {config.temperature if config.temperature is not None else 'N/A'} | "
-                f"Has tools: {config.tools is not None if config else False}"
+            telemetry.log_completion(
+                model=self.model_name,
+                input_tokens=usage.prompt_token_count,
+                output_tokens=usage.candidates_token_count,
+                temperature=config.temperature if config and config.temperature is not None else None,
+                has_tools=bool(config and config.tools),
+                provider="Gemini"
             )
         
         return self._completion_from(response)
