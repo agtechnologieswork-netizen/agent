@@ -5,7 +5,8 @@ import enum
 from typing import Dict, Self, Optional, Literal, Any
 from dataclasses import dataclass, field
 from core.statemachine import StateMachine, State, Context
-from llm.utils import get_best_coding_llm_client
+from llm.utils import get_best_coding_llm_client, get_universal_llm_client
+from llm.alloy import AlloyLLM
 from core.actors import BaseData
 from core.base_node import Node
 from core.statemachine import MachineCheckpoint
@@ -204,7 +205,8 @@ class FSMApplication:
                     if content is not None:
                         ctx.files[file] = content
 
-        llm = get_best_coding_llm_client()
+        llm = AlloyLLM.from_models([get_best_coding_llm_client(), get_universal_llm_client()])
+
         workspace = await Workspace.create(
             client=client,
             base_image="alpine:3.21.3",
