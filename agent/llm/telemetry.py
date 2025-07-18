@@ -1,7 +1,7 @@
 """Common telemetry utilities for LLM providers."""
 
 import time
-from typing import Optional, Any, Dict
+from typing import Optional, Any
 from log import get_logger
 
 logger = get_logger(__name__)
@@ -49,7 +49,7 @@ class LLMTelemetry:
         
         # Build the log message
         message_parts = [
-            f"LLM Request completed",
+            "LLM Request completed",
             f"Model: {model}",
             f"Input tokens: {input_tokens}",
             f"Output tokens: {output_tokens}",
