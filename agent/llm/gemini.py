@@ -1,4 +1,5 @@
 from typing import List
+import time
 
 from google import genai
 from google.genai import types as genai_types
@@ -91,11 +92,31 @@ class GeminiLLM(common.AsyncLLM):
         gemini_messages: List[genai_types.Content],
         config: genai_types.GenerateContentConfig
     ) -> common.Completion:
+        start_time = time.time()
+        
         response = await self._async_client.models.generate_content(
             model=self.model_name,
             contents=gemini_messages,
             config=config,
         )
+        
+        elapsed_time = time.time() - start_time
+        
+        # Enhanced telemetry logging
+        if hasattr(response, 'usage_metadata'):
+            usage = response.usage_metadata
+            total_tokens = usage.prompt_token_count + usage.candidates_token_count
+            
+            logger.info(
+                f"LLM Request completed | Model: {self.model_name} | "
+                f"Input tokens: {usage.prompt_token_count} | "
+                f"Output tokens: {usage.candidates_token_count} | "
+                f"Total tokens: {total_tokens} | "
+                f"Duration: {elapsed_time:.2f}s | "
+                f"Temperature: {config.temperature if config.temperature is not None else 'N/A'} | "
+                f"Has tools: {config.tools is not None if config else False}"
+            )
+        
         return self._completion_from(response)
 
     async def upload_files(self, files: List[str]) -> List[genai_types.File]:

@@ -1,4 +1,5 @@
 from typing import List, Dict, Any
+import time
 try:
     import ollama
 except ImportError:
@@ -148,7 +149,28 @@ class OllamaLLM:
         
         try:
             logger.info(f"Ollama request params: {request_params}")
+            start_time = time.time()
+            
             response = await self.client.chat(**request_params)
+            
+            elapsed_time = time.time() - start_time
+            
+            # Enhanced telemetry logging
+            if hasattr(response, 'prompt_eval_count') and hasattr(response, 'eval_count'):
+                input_tokens = getattr(response, 'prompt_eval_count', 0)
+                output_tokens = getattr(response, 'eval_count', 0)
+                total_tokens = input_tokens + output_tokens
+                
+                logger.info(
+                    f"LLM Request completed | Model: {chosen_model} | "
+                    f"Input tokens: {input_tokens} | "
+                    f"Output tokens: {output_tokens} | "
+                    f"Total tokens: {total_tokens} | "
+                    f"Duration: {elapsed_time:.2f}s | "
+                    f"Temperature: {temperature} | "
+                    f"Has tools: {ollama_tools is not None}"
+                )
+            
             logger.info(f"Ollama raw response: {response}")
             completion = self._completion_into(response, input_tokens=0)
             logger.info(f"Parsed completion: content_length={len(completion.content)}, stop_reason={completion.stop_reason}")
