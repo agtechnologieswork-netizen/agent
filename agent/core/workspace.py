@@ -225,3 +225,8 @@ class Workspace:
         if output_path:
             await playwright_ctr.directory("/app/test_results").export(output_path)
         return result
+
+    @function
+    def add_env_variable(self, name: str, value: str) -> Self:
+        self.ctr = self.ctr.with_env_variable(name, value)
+        return self

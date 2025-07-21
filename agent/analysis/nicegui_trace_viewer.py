@@ -57,7 +57,7 @@ def format_content(content, format="display"):
             if isinstance(parsed, list):
                 return format_content(parsed, format)
         except json.JSONDecodeError:
-            pass
+            print("Warning: Content is not valid JSON, treating as plain text")
 
     content_str = str(content)
     if format == "preview":
@@ -215,11 +215,8 @@ def display_conversation(chain: List[Dict], chain_num: int):
             # format timestamp
             time_str = ""
             if timestamp:
-                try:
-                    dt = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
-                    time_str = dt.strftime("%H:%M:%S")
-                except ValueError:
-                    pass
+                dt = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
+                time_str = dt.strftime("%H:%M:%S")
 
             print(f"{message_count}. {role_display} {time_str}")
             print("-" * 40)

@@ -1,11 +1,21 @@
+import logging
 import os
 from app.startup import startup
 from nicegui import app, ui
 
-# add health endpoint using fastapi route
+# configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+
+
 @app.get('/health')
 async def health():
     return {"status": "healthy", "service": "nicegui-app"}
+
+# suppress sqlalchemy engine logs below warning level
+logging.getLogger('sqlalchemy.engine.Engine').setLevel(logging.WARNING)
 
 app.on_startup(startup)
 ui.run(

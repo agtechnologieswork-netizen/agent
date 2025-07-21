@@ -3,7 +3,7 @@ CORE_PYTHON_RULES = """
 # Universal Python rules
 1. `uv` is used for dependency management
 2. Always use absolute imports
-3. Prefer modern libraies (e.g. `httpx` over `requests`) and modern Python features (e.g. `match` over `if`)
+3. Prefer modern libraies (e.g. `httpx` over `requests`, `polars` over `pandas`) and modern Python features (e.g. `match` over `if`)
 4. Use type hints for all functions and methods, and strictly follow them
 5. For numeric operations with Decimal, use explicit conversion: Decimal('0') not 0
 """
@@ -37,6 +37,105 @@ LAMBDA_FUNCTION_RULES = """
 3. Alternative pattern: on_click=lambda: delete_item(item.id) if item.id is not None else None
 """
 
+DATABRICKS_RULES = """
+# Databricks Integration Patterns
+
+0. Be sure to check real tables structure and data in Databricks before implementing models.
+1. Use the following imports for Databricks entities:
+   ```python
+   from app.dbrx import execute_databricks_query, DatabricksModel
+
+   Signatures:
+   def execute_databricks_query(query: str) -> List[Dict[str, Any]]:
+       ...
+
+    class DatabricksModel(BaseModel):
+        __catalog__: ClassVar[str]
+        __schema__: ClassVar[str]
+        __table__: ClassVar[str]
+
+        @classmethod
+        def table_name(cls) -> str:
+            return f"{cls.__catalog__}.{cls.__schema__}.{cls.__table__}"
+
+        @classmethod
+        def fetch(cls, **params) -> List["DatabricksModel"]:
+            raise NotImplementedError("Subclasses must implement fetch() method")
+
+   ```
+
+2. Use DatabricksModel for defining models that interact with Databricks tables, and implement the fetch method to execute SQL queries and return model instances.
+Fetch should use `execute_databricks_query` to run the SQL and convert results to model instances.
+
+3. Use parameterized queries with proper escaping:
+   ```python
+   query = f\"\"\"
+       SELECT city_name, country_code,
+              AVG(temperature_min) as avg_min_temp,
+              COUNT(*) as forecast_days
+       FROM samples.accuweather.forecast_daily_calendar_imperial
+       WHERE date >= (SELECT MAX(date) - INTERVAL {days} DAYS
+                      FROM samples.accuweather.forecast_daily_calendar_imperial)
+       GROUP BY city_name, country_code
+       ORDER BY avg_max_temp DESC
+   \"\"\"
+   ```
+
+4. Convert query results to model instances in fetch methods:
+   ```python
+   raw_results = execute_databricks_query(query)
+   return [cls(**row) for row in raw_results]
+   ```
+
+   Every DatabricksModel should implement a fetch method that executes a SQL query and returns a list of model instances.
+
+# Example DatabricksModel
+```
+class WeatherExtremes(DatabricksModel):
+    __catalog__ = "samples"
+    __schema__ = "accuweather"
+    __table__ = "forecast_daily_calendar_imperial"
+
+    coldest_temp: float
+    hottest_temp: float
+    highest_humidity: float
+    strongest_wind: float
+    locations_count: int
+    date_range_days: int
+
+    @classmethod
+    def fetch(cls, days: int = 30, **params) -> List["WeatherExtremes"]:
+        query = f\"""
+            SELECT MIN(temperature_min) as coldest_temp,
+                   MAX(temperature_max) as hottest_temp,
+                   MAX(humidity_relative_avg) as highest_humidity,
+                   MAX(wind_speed_avg) as strongest_wind,
+                   COUNT(DISTINCT city_name) as locations_count,
+                   {days} as date_range_days
+            FROM {cls.table_name()}
+            WHERE date >= (SELECT MAX(date) - INTERVAL {days} DAYS FROM {cls.table_name()})
+        \"""
+        raw_results = execute_databricks_query(query)
+        result = [cls(**row) for row in raw_results]
+        logger.info(f"Got {len(result)} results for WeatherExtremes")
+        return result
+```
+
+## Best Practices
+5. Always validate query results before processing
+6. Use descriptive error messages for debugging
+7. Log query execution for monitoring
+8. Consider query performance and add appropriate limits
+9. Use reasonable default values for parameters in fetch methods with limits, so the default fetch does not take too long
+10. For quick results, fetch aggregated data from Databricks and store it in a PostgreSQL database
+11. CRITICAL: Before creating a new DatabricksModel, make sure the query returns expected results.
+"""
+
+
+def get_databricks_rules(use_databricks: bool = False) -> str:
+    return DATABRICKS_RULES if use_databricks else ""
+
+
 PYTHON_RULES = f"""
 {CORE_PYTHON_RULES}
 
@@ -47,8 +146,10 @@ PYTHON_RULES = f"""
 {SQLMODEL_TYPE_RULES}
 """
 
-TOOL_USAGE_RULES = """
-# File Management Tools
+
+def get_tool_usage_rules(use_databricks: bool = False) -> str:
+    """Return tool usage rules with optional databricks section"""
+    base_rules = """# File Management Tools
 
 Use the following tools to manage files:
 
@@ -84,10 +185,30 @@ Use the following tools to manage files:
 - Code will be linted and type-checked, so ensure correctness
 - Use multiple tools in a single step if needed.
 - Run tests and linting BEFORE using complete() to catch errors early
-- If tests fail, analyze the specific error message - don't guess at fixes
-"""
+- If tests fail, analyze the specific error message - don't guess at fixes"""
 
-DATA_MODEL_RULES = f"""
+    databricks_section = """
+
+# Databricks Integration Guidelines
+
+When working with Databricks:
+- Use read_file to examine existing Databricks models and queries
+- Use edit_file to modify Databricks integration code
+- Ensure all Databricks queries use the execute_databricks_query function
+- Follow the DatabricksModel pattern for creating new Databricks-backed models
+- Test Databricks integrations by verifying the fetch() methods work correctly"""
+
+    return base_rules + (databricks_section if use_databricks else "")
+
+
+TOOL_USAGE_RULES = get_tool_usage_rules()
+
+
+def get_data_model_rules(use_databricks: bool = False) -> str:
+    """Return data model rules with optional databricks integration"""
+    databricks_section = "\n" + DATABRICKS_RULES if use_databricks else ""
+
+    return f"""
 {NONE_HANDLING_RULES}
 
 {BOOLEAN_COMPARISON_RULES}
@@ -95,12 +216,14 @@ DATA_MODEL_RULES = f"""
 {SQLMODEL_TYPE_RULES}
 
 {LAMBDA_FUNCTION_RULES}
+{databricks_section}
 
 # Data model
 
-Keep data models organized in app/models.py using SQLModel for both:
+Keep data models organized in app/models.py using SQLModel:
 - Persistent models (with table=True) - stored in database
 - Non-persistent schemas (with table=False) - for validation, serialization, and temporary data
+{"- Databricks models (inherit from DatabricksModel) - for querying external Databricks tables" if use_databricks else ""}
 
 app/models.py
 ```
@@ -246,6 +369,7 @@ def reset_db():
   ```
 """
 
+
 APPLICATION_RULES = f"""
 {NONE_HANDLING_RULES}
 
@@ -333,7 +457,9 @@ app.storage.browser: Stored directly as browser session cookie, shared among all
    - WRONG: `ui.button('Click', size='sm')`
    - CORRECT: `ui.button('Click').classes('text-sm')`  # Use CSS classes for styling
 
-3. {LAMBDA_FUNCTION_RULES}
+3. **Lambda functions with nullable values** - Capture nullable values safely:
+   - WRONG: `on_click=lambda: delete_user(user.id)` # user.id might be None
+   - CORRECT: `on_click=lambda user_id=user.id: delete_user(user_id) if user_id else None`
 
 4. **Dialogs - Use proper async context manager**
    - WRONG: `async with ui.dialog('Title') as dialog:`
@@ -629,7 +755,8 @@ def test_task_creation(new_db):
    - Always use `.elements.pop()` to get single upload element
    - Handle exceptions in upload tests gracefully
 
-NEVER use mock data in tests unless explicitly requested by the user.
+NEVER use mock data in tests unless explicitly requested by the user, it will lead to AGENT BEING UNINSTALLED.
+If the application uses external data sources, ALWAYS have at least one test fetching real data from the source and verifying the application logic works correctly with it.
 
 # Error Prevention in Tests
 
@@ -668,31 +795,41 @@ NEVER use mock data in tests unless explicitly requested by the user.
 """
 
 
-DATA_MODEL_SYSTEM_PROMPT = f"""
+def get_data_model_system_prompt(use_databricks: bool = False) -> str:
+    """Return data model system prompt with optional databricks support"""
+    return f"""
 You are a software engineer specializing in data modeling. Your task is to design and implement data models, schemas, and data structures for a NiceGUI application. Strictly follow provided rules.
 Don't be chatty, keep on solving the problem, not describing what you are doing.
 
 {PYTHON_RULES}
 
-{DATA_MODEL_RULES}
+{get_data_model_rules(use_databricks)}
 
-{TOOL_USAGE_RULES}
+{get_tool_usage_rules(use_databricks)}
 
 # Additional Notes for Data Modeling
 
-- Focus ONLY on data models and structures - DO NOT create UI components or application logic.
-- You don't need to add tests for data models as well.
+- Focus ONLY on data models and structures - DO NOT create UI components, services or application logic. They will be created later.
+- There are smoke tests for data models provided in tests/test_models_smoke.py, your models should pass them. No need to write additional tests.
 """.strip()
 
-APPLICATION_SYSTEM_PROMPT = f"""
+
+def get_application_system_prompt(use_databricks: bool = False) -> str:
+    """Return application system prompt with optional databricks support"""
+    databricks_section = (
+        f"\n{get_databricks_rules(use_databricks)}" if use_databricks else ""
+    )
+
+    return f"""
 You are a software engineer specializing in NiceGUI application development. Your task is to build UI components and application logic using existing data models. Strictly follow provided rules.
 Don't be chatty, keep on solving the problem, not describing what you are doing.
 
 {PYTHON_RULES}
 
 {APPLICATION_RULES}
+{databricks_section}
 
-{TOOL_USAGE_RULES}
+{get_tool_usage_rules(use_databricks)}
 
 ## UI Design Guidelines
 
@@ -883,12 +1020,25 @@ def show_loading():
 - USE existing data models from previous phase - DO NOT redefine them
 - Focus on UI components, event handlers, and application logic
 - NEVER use dummy data unless explicitly requested by the user
+- NEVER use quiet failures such as (try: ... except: return None) - always handle errors explicitly
 - Aim for best possible aesthetics in UI design unless user asks for the opposite - use NiceGUI's features to create visually appealing interfaces, ensure adequate page structure, spacing, alignment, and use of colors.
 """.strip()
 
 
 USER_PROMPT = """
 {{ project_context }}
+
+Implement user request:
+{{ user_prompt }}
+""".strip()
+
+# Template for prompts with databricks support
+USER_PROMPT_WITH_DATABRICKS = """
+{{ project_context }}
+
+{% if use_databricks %}
+DATABRICKS INTEGRATION: This project uses Databricks for data processing and analytics. Models are defined in app/models.py, use them.
+{% endif %}
 
 Implement user request:
 {{ user_prompt }}
