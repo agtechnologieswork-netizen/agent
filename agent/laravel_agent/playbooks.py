@@ -55,18 +55,71 @@ use Illuminate\\Support\\Facades\\Schema;
 
 return new class extends Migration
 {{
+    /**
+     * Run the migrations.
+     */
     public function up(): void
     {{
         Schema::create('counters', function (Blueprint $table) {{
             $table->id();
-            $table->integer('count')->default(0);
+            $table->integer('count')->default(0)->comment('The current count value');
             $table->timestamps();
+            
+            // Add indexes if needed
+            $table->index('created_at');
         }});
     }}
 
+    /**
+     * Reverse the migrations.
+     */
     public function down(): void
     {{
         Schema::dropIfExists('counters');
+    }}
+}};
+```
+
+For a more complex example (e.g., customers table for CRM):
+```php
+<?php
+
+use Illuminate\\Database\\Migrations\\Migration;
+use Illuminate\\Database\\Schema\\Blueprint;
+use Illuminate\\Support\\Facades\\Schema;
+
+return new class extends Migration
+{{
+    /**
+     * Run the migrations.
+     */
+    public function up(): void
+    {{
+        Schema::create('customers', function (Blueprint $table) {{
+            $table->id();
+            $table->string('name');
+            $table->string('email')->unique();
+            $table->string('phone')->nullable();
+            $table->string('company')->nullable();
+            $table->text('address')->nullable();
+            $table->text('notes')->nullable();
+            $table->enum('status', ['active', 'inactive'])->default('active');
+            $table->timestamps();
+            
+            // Indexes for performance
+            $table->index('name');
+            $table->index('email');
+            $table->index('status');
+            $table->index(['status', 'created_at']);
+        }});
+    }}
+
+    /**
+     * Reverse the migrations.
+     */
+    public function down(): void
+    {{
+        Schema::dropIfExists('customers');
     }}
 }};
 ```
@@ -76,7 +129,10 @@ CRITICAL SYNTAX RULES:
 2. WRONG: return new class extends Migration {{
 3. CORRECT: return new class extends Migration
    {{
-4. This is ENFORCED by validation - migrations WILL FAIL without proper syntax
+4. Include PHPDoc comments for up() and down() methods
+5. Add column comments for clarity
+6. Include appropriate indexes for query performance
+7. This is ENFORCED by validation - migrations WILL FAIL without proper syntax
 
 # Laravel Migration Tool Usage
 - When editing migrations, always ensure the anonymous class syntax is correct
@@ -248,7 +304,113 @@ Example: If user asks for "a counter app", put the counter on the home page ('/'
 
 # Backend Controller Patterns - COMPLETE WORKING EXAMPLE
 
-COMPLETE CounterController Example (app/Http/Controllers/CounterController.php):
+COMPLETE CustomerController Example with ALL REST methods (app/Http/Controllers/CustomerController.php):
+```php
+<?php
+
+namespace App\\Http\\Controllers;
+
+use App\\Http\\Controllers\\Controller;
+use App\\Models\\Customer;
+use Illuminate\\Http\\Request;
+use Inertia\\Inertia;
+
+class CustomerController extends Controller
+{{
+    /**
+     * Display a listing of the resource.
+     */
+    public function index()
+    {{
+        $customers = Customer::latest()->paginate(10);
+        
+        return Inertia::render('Customers/Index', [
+            'customers' => $customers
+        ]);
+    }}
+
+    /**
+     * Show the form for creating a new resource.
+     */
+    public function create()
+    {{
+        return Inertia::render('Customers/Create');
+    }}
+
+    /**
+     * Store a newly created resource in storage.
+     */
+    public function store(Request $request)
+    {{
+        $validated = $request->validate([
+            'name' => 'required|string|max:255',
+            'email' => 'required|email|unique:customers,email',
+            'phone' => 'nullable|string|max:20',
+            'company' => 'nullable|string|max:255',
+            'address' => 'nullable|string',
+            'notes' => 'nullable|string',
+        ]);
+
+        $customer = Customer::create($validated);
+
+        return redirect()->route('customers.show', $customer)
+            ->with('success', 'Customer created successfully.');
+    }}
+
+    /**
+     * Display the specified resource.
+     */
+    public function show(Customer $customer)
+    {{
+        return Inertia::render('Customers/Show', [
+            'customer' => $customer
+        ]);
+    }}
+
+    /**
+     * Show the form for editing the specified resource.
+     */
+    public function edit(Customer $customer)
+    {{
+        return Inertia::render('Customers/Edit', [
+            'customer' => $customer
+        ]);
+    }}
+
+    /**
+     * Update the specified resource in storage.
+     */
+    public function update(Request $request, Customer $customer)
+    {{
+        $validated = $request->validate([
+            'name' => 'required|string|max:255',
+            'email' => 'required|email|unique:customers,email,' . $customer->id,
+            'phone' => 'nullable|string|max:20',
+            'company' => 'nullable|string|max:255',
+            'address' => 'nullable|string',
+            'notes' => 'nullable|string',
+        ]);
+
+        $customer->update($validated);
+
+        return redirect()->route('customers.show', $customer)
+            ->with('success', 'Customer updated successfully.');
+    }}
+
+    /**
+     * Remove the specified resource from storage.
+     */
+    public function destroy(Customer $customer)
+    {{
+        $customer->delete();
+
+        return redirect()->route('customers.index')
+            ->with('success', 'Customer deleted successfully.');
+    }}
+}}
+```
+
+Simple Counter Example:
 ```php
 <?php
 
@@ -261,6 +423,9 @@ use Inertia\\Inertia;
 
 class CounterController extends Controller
 {{
+    /**
+     * Display the counter.
+     */
     public function index()
     {{
         $counter = Counter::firstOrCreate([], ['count' => 0]);
@@ -270,6 +435,9 @@ class CounterController extends Controller
         ]);
     }}
     
+    /**
+     * Increment the counter.
+     */
     public function store(Request $request)
     {{
         $counter = Counter::firstOrCreate([], ['count' => 0]);
@@ -288,7 +456,8 @@ CRITICAL CONTROLLER RULES:
 2. NEVER create custom public methods like increment(), decrement(), etc.
 3. Use store() for creating/updating, update() for specific resource updates
 4. ALWAYS return Inertia::render() - NEVER return JSON for Inertia routes
-5. Architecture tests WILL FAIL if you add custom public methods
+5. Include PHPDoc comments for all methods
+6. Architecture tests WILL FAIL if you add custom public methods
 
 # Model and Entity Guidelines
 
@@ -299,7 +468,77 @@ When creating Laravel models:
 4. **CRITICAL**: The PHPDoc block MUST be placed DIRECTLY above the class declaration with NO blank lines between them
 5. **VALIDATION**: Architecture tests WILL FAIL if PHPDoc annotations are missing or improperly formatted
 
-COMPLETE WORKING EXAMPLE - Counter Model with REQUIRED annotations:
+COMPLETE WORKING EXAMPLE - Counter Model with ALL REQUIRED annotations:
+```php
+<?php
+
+namespace App\\Models;
+
+use Illuminate\\Database\\Eloquent\\Factories\\HasFactory;
+use Illuminate\\Database\\Eloquent\\Model;
+use Illuminate\\Database\\Eloquent\\Relations\\HasMany;
+
+/**
+ * App\\Models\\Counter
+ *
+ * @property int $id
+ * @property int $count
+ * @property \\Illuminate\\Support\\Carbon|null $created_at
+ * @property \\Illuminate\\Support\\Carbon|null $updated_at
+ * 
+ * @method static \\Illuminate\\Database\\Eloquent\\Builder|Counter newModelQuery()
+ * @method static \\Illuminate\\Database\\Eloquent\\Builder|Counter newQuery()
+ * @method static \\Illuminate\\Database\\Eloquent\\Builder|Counter query()
+ * @method static \\Illuminate\\Database\\Eloquent\\Builder|Counter whereCount($value)
+ * @method static \\Illuminate\\Database\\Eloquent\\Builder|Counter whereCreatedAt($value)
+ * @method static \\Illuminate\\Database\\Eloquent\\Builder|Counter whereId($value)
+ * @method static \\Illuminate\\Database\\Eloquent\\Builder|Counter whereUpdatedAt($value)
+ * @method static \\Database\\Factories\\CounterFactory factory($count = null, $state = [])
+ * @method static Counter create(array $attributes = [])
+ * @method static Counter firstOrCreate(array $attributes = [], array $values = [])
+ * 
+ * @mixin \\Eloquent
+ */
+class Counter extends Model
+{{
+    use HasFactory;
+
+    /**
+     * The attributes that are mass assignable.
+     *
+     * @var array<int, string>
+     */
+    protected $fillable = [
+        'count',
+    ];
+
+    /**
+     * The attributes that should be cast.
+     *
+     * @var array<string, string>
+     */
+    protected $casts = [
+        'count' => 'integer',
+    ];
+
+    /**
+     * The table associated with the model.
+     *
+     * @var string
+     */
+    protected $table = 'counters';
+}}
+```
+
+CRITICAL POINTS:
+- PHPDoc block MUST be DIRECTLY above class with NO blank line
+- MUST include @property for EVERY database column (id, count, created_at, updated_at)
+- Include @method annotations for query builder methods
+- Include @mixin \\Eloquent for IDE support
+- Document all class properties with proper PHPDoc
+- Architecture tests WILL FAIL without proper documentation
+
+COMPLETE Customer Model Example for CRM:
 ```php
 <?php
 
@@ -309,37 +548,84 @@ use Illuminate\\Database\\Eloquent\\Factories\\HasFactory;
 use Illuminate\\Database\\Eloquent\\Model;
 
 /**
- * App\\Models\\Counter
+ * App\\Models\\Customer
  *
  * @property int $id
- * @property int $count
+ * @property string $name
+ * @property string $email
+ * @property string|null $phone
+ * @property string|null $company
+ * @property string|null $address
+ * @property string|null $notes
+ * @property string $status
  * @property \\Illuminate\\Support\\Carbon|null $created_at
  * @property \\Illuminate\\Support\\Carbon|null $updated_at
+ * 
+ * @method static \\Illuminate\\Database\\Eloquent\\Builder|Customer newModelQuery()
+ * @method static \\Illuminate\\Database\\Eloquent\\Builder|Customer newQuery()
+ * @method static \\Illuminate\\Database\\Eloquent\\Builder|Customer query()
+ * @method static \\Illuminate\\Database\\Eloquent\\Builder|Customer whereAddress($value)
+ * @method static \\Illuminate\\Database\\Eloquent\\Builder|Customer whereCompany($value)
+ * @method static \\Illuminate\\Database\\Eloquent\\Builder|Customer whereCreatedAt($value)
+ * @method static \\Illuminate\\Database\\Eloquent\\Builder|Customer whereEmail($value)
+ * @method static \\Illuminate\\Database\\Eloquent\\Builder|Customer whereId($value)
+ * @method static \\Illuminate\\Database\\Eloquent\\Builder|Customer whereName($value)
+ * @method static \\Illuminate\\Database\\Eloquent\\Builder|Customer whereNotes($value)
+ * @method static \\Illuminate\\Database\\Eloquent\\Builder|Customer wherePhone($value)
+ * @method static \\Illuminate\\Database\\Eloquent\\Builder|Customer whereStatus($value)
+ * @method static \\Illuminate\\Database\\Eloquent\\Builder|Customer whereUpdatedAt($value)
+ * @method static \\Illuminate\\Database\\Eloquent\\Builder|Customer active()
+ * @method static \\Database\\Factories\\CustomerFactory factory($count = null, $state = [])
+ * 
+ * @mixin \\Eloquent
  */
-class Counter extends Model
+class Customer extends Model
 {{
     use HasFactory;
 
+    /**
+     * The attributes that are mass assignable.
+     *
+     * @var array<int, string>
+     */
     protected $fillable = [
-        'count',
+        'name',
+        'email',
+        'phone',
+        'company',
+        'address',
+        'notes',
+        'status',
     ];
 
+    /**
+     * The attributes that should be cast.
+     *
+     * @var array<string, string>
+     */
     protected $casts = [
-        'count' => 'integer',
+        'created_at' => 'datetime',
+        'updated_at' => 'datetime',
     ];
+
+    /**
+     * Scope a query to only include active customers.
+     *
+     * @param  \\Illuminate\\Database\\Eloquent\\Builder  $query
+     * @return \\Illuminate\\Database\\Eloquent\\Builder
+     */
+    public function scopeActive($query)
+    {{
+        return $query->where('status', 'active');
+    }}
 }}
 ```
-
-CRITICAL POINTS:
-- PHPDoc block MUST be DIRECTLY above class with NO blank line
-- MUST include @property for EVERY database column (id, count, created_at, updated_at)
-- Use \\Illuminate\\Support\\Carbon for timestamp types
-- Architecture tests WILL FAIL without these exact annotations
 
 IMPORTANT: Architecture tests will fail if:
 - Models don't have PHPDoc annotations
 - There's a blank line between the PHPDoc block and the class declaration
 - Not all database columns are documented with @property annotations
+- Methods (including scopes) are not documented
 
 # Error Prevention Checklist - MUST FOLLOW
 
@@ -369,6 +655,46 @@ Before completing ANY Laravel task, verify:
    ✓ Follow REST conventions
    ✓ Use resource routes where possible
    ✓ Main functionality on home route '/' unless specified
+
+COMPLETE Routes Example (routes/web.php):
+```php
+<?php
+
+use App\\Http\\Controllers\\CustomerController;
+use App\\Http\\Controllers\\CounterController;
+use App\\Http\\Controllers\\ProfileController;
+use Illuminate\\Support\\Facades\\Route;
+use Inertia\\Inertia;
+
+// Home page - main functionality
+Route::get('/', function () {{
+    return Inertia::render('Welcome');
+}});
+
+// Dashboard (requires authentication)
+Route::get('/dashboard', function () {{
+    return Inertia::render('Dashboard');
+}})->middleware(['auth', 'verified'])->name('dashboard');
+
+// Resource routes for customers
+Route::resource('customers', CustomerController::class)
+    ->middleware(['auth']);
+
+// Simple counter routes (if not on home page)
+Route::controller(CounterController::class)->group(function () {{
+    Route::get('/counter', 'index')->name('counter.index');
+    Route::post('/counter', 'store')->name('counter.store');
+}});
+
+// Profile routes
+Route::middleware('auth')->group(function () {{
+    Route::get('/profile', [ProfileController::class, 'edit'])->name('profile.edit');
+    Route::patch('/profile', [ProfileController::class, 'update'])->name('profile.update');
+    Route::delete('/profile', [ProfileController::class, 'destroy'])->name('profile.destroy');
+}});
+
+require __DIR__.'/auth.php';
+```
 
 VALIDATION ENFORCEMENT:
 - Architecture tests check Models and Controllers
