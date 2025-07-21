@@ -302,7 +302,115 @@ When users request new functionality:
 
 Example: If user asks for "a counter app", put the counter on the home page ('/'), not on '/counter'
 
-# Backend Controller Patterns - COMPLETE WORKING EXAMPLE
+# Form Request Validation Pattern - BEST PRACTICE
+
+When handling form validation in Laravel, use custom Form Request classes for better organization and reusability.
+
+## StoreCustomerRequest Example (app/Http/Requests/StoreCustomerRequest.php):
+```php
+<?php
+
+namespace App\\Http\\Requests;
+
+use Illuminate\\Foundation\\Http\\FormRequest;
+
+class StoreCustomerRequest extends FormRequest
+{{
+    /**
+     * Determine if the user is authorized to make this request.
+     */
+    public function authorize(): bool
+    {{
+        return true;
+    }}
+
+    /**
+     * Get the validation rules that apply to the request.
+     *
+     * @return array<string, \\Illuminate\\Contracts\\Validation\\ValidationRule|array<mixed>|string>
+     */
+    public function rules(): array
+    {{
+        return [
+            'name' => 'required|string|max:255',
+            'email' => 'required|email|unique:customers,email',
+            'phone' => 'nullable|string|max:20',
+            'company' => 'nullable|string|max:255',
+            'address' => 'nullable|string',
+            'notes' => 'nullable|string',
+        ];
+    }}
+
+    /**
+     * Get custom error messages for validator errors.
+     *
+     * @return array<string, string>
+     */
+    public function messages(): array
+    {{
+        return [
+            'name.required' => 'Customer name is required.',
+            'email.required' => 'Email address is required.',
+            'email.email' => 'Please provide a valid email address.',
+            'email.unique' => 'This email is already registered.',
+        ];
+    }}
+}}
+```
+
+## UpdateCustomerRequest Example (app/Http/Requests/UpdateCustomerRequest.php):
+```php
+<?php
+
+namespace App\\Http\\Requests;
+
+use Illuminate\\Foundation\\Http\\FormRequest;
+
+class UpdateCustomerRequest extends FormRequest
+{{
+    /**
+     * Determine if the user is authorized to make this request.
+     */
+    public function authorize(): bool
+    {{
+        return true;
+    }}
+
+    /**
+     * Get the validation rules that apply to the request.
+     *
+     * @return array<string, \\Illuminate\\Contracts\\Validation\\ValidationRule|array<mixed>|string>
+     */
+    public function rules(): array
+    {{
+        return [
+            'name' => 'required|string|max:255',
+            'email' => 'required|email|unique:customers,email,' . $this->route('customer')->id,
+            'phone' => 'nullable|string|max:20',
+            'company' => 'nullable|string|max:255',
+            'address' => 'nullable|string',
+            'notes' => 'nullable|string',
+        ];
+    }}
+
+    /**
+     * Get custom error messages for validator errors.
+     *
+     * @return array<string, string>
+     */
+    public function messages(): array
+    {{
+        return [
+            'name.required' => 'Customer name is required.',
+            'email.required' => 'Email address is required.',
+            'email.email' => 'Please provide a valid email address.',
+            'email.unique' => 'This email is already registered to another customer.',
+        ];
+    }}
+}}
+```
+
+# Backend Controller Patterns - COMPLETE WORKING EXAMPLE WITH FORM REQUESTS
 
 COMPLETE CustomerController Example with ALL REST methods (app/Http/Controllers/CustomerController.php):
 ```php
@@ -311,8 +419,9 @@ COMPLETE CustomerController Example with ALL REST methods (app/Http/Controllers/
 namespace App\\Http\\Controllers;
 
 use App\\Http\\Controllers\\Controller;
+use App\\Http\\Requests\\StoreCustomerRequest;
+use App\\Http\\Requests\\UpdateCustomerRequest;
 use App\\Models\\Customer;
-use Illuminate\\Http\\Request;
 use Inertia\\Inertia;
 
 class CustomerController extends Controller
@@ -340,18 +449,9 @@ class CustomerController extends Controller
     /**
      * Store a newly created resource in storage.
      */
-    public function store(Request $request)
+    public function store(StoreCustomerRequest $request)
     {{
-        $validated = $request->validate([
-            'name' => 'required|string|max:255',
-            'email' => 'required|email|unique:customers,email',
-            'phone' => 'nullable|string|max:20',
-            'company' => 'nullable|string|max:255',
-            'address' => 'nullable|string',
-            'notes' => 'nullable|string',
-        ]);
-
-        $customer = Customer::create($validated);
+        $customer = Customer::create($request->validated());
 
         return redirect()->route('customers.show', $customer)
             ->with('success', 'Customer created successfully.');
@@ -380,18 +480,9 @@ class CustomerController extends Controller
     /**
      * Update the specified resource in storage.
      */
-    public function update(Request $request, Customer $customer)
+    public function update(UpdateCustomerRequest $request, Customer $customer)
     {{
-        $validated = $request->validate([
-            'name' => 'required|string|max:255',
-            'email' => 'required|email|unique:customers,email,' . $customer->id,
-            'phone' => 'nullable|string|max:20',
-            'company' => 'nullable|string|max:255',
-            'address' => 'nullable|string',
-            'notes' => 'nullable|string',
-        ]);
-
-        $customer->update($validated);
+        $customer->update($request->validated());
 
         return redirect()->route('customers.show', $customer)
             ->with('success', 'Customer updated successfully.');
@@ -458,6 +549,11 @@ CRITICAL CONTROLLER RULES:
 4. ALWAYS return Inertia::render() - NEVER return JSON for Inertia routes
 5. Include PHPDoc comments for all methods
 6. Architecture tests WILL FAIL if you add custom public methods
+7. **BEST PRACTICE**: Use Form Request classes for validation instead of inline validation:
+   - Create custom Request classes (e.g., StoreCustomerRequest, UpdateCustomerRequest)
+   - Use $request->validated() to get validated data
+   - This provides better organization, reusability, and separation of concerns
+   - Form requests can include custom error messages and authorization logic
 
 # Model and Entity Guidelines
 
@@ -644,6 +740,8 @@ Before completing ANY Laravel task, verify:
    ✓ ONLY use standard REST methods
    ✓ NO custom public methods (use store() not increment())
    ✓ Return Inertia::render() not JSON
+   ✓ Use Form Request classes for validation (StoreXRequest, UpdateXRequest)
+   ✓ Use $request->validated() instead of inline validation
 
 4. **TypeScript/React (Type Safety)**:
    ✓ Props interface includes [key: string]: unknown;
