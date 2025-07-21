@@ -244,6 +244,15 @@ class LaravelActor(FileOperationsActor):
         return None
 
     async def run_php_lint_checks(self, node: Node[BaseData]) -> str | None:
+        # First run Pint to format the code
+        pint_result = await node.data.workspace.exec(
+            ["vendor/bin/pint", "--preset", "laravel"]
+        )
+        # Pint returns 1 if it made changes, which is OK
+        if pint_result.exit_code not in [0, 1]:
+            logger.warning(f"Pint formatting failed: {pint_result.stderr}")
+        
+        # Then run PHPStan for actual lint checks
         php_lint_result = await node.data.workspace.exec(
             ["composer", "lint"]
         )
