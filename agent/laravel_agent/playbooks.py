@@ -112,31 +112,31 @@ COMPLETE Counter Page Component Example (resources/js/pages/Counter.tsx):
 ```typescript
 import React from 'react';
 import AppLayout from '@/layouts/app-layout';
-import { Button } from '@/components/ui/button';
-import { router } from '@inertiajs/react';
+import {{ Button }} from '@/components/ui/button';
+import {{ router }} from '@inertiajs/react';
 
-interface Props {
+interface Props {{
     count: number;
     [key: string]: unknown;  // REQUIRED for Inertia.js TypeScript compatibility
-}
+}}
 
-export default function Counter({ count }: Props) {
-    const handleIncrement = () => {
-        router.post(route('counter.store'), {}, {
+export default function Counter({{ count }}: Props) {{
+    const handleIncrement = () => {{
+        router.post(route('counter.store'), {{}}, {{
             preserveState: true,
             preserveScroll: true
-        });
-    };
+        }});
+    }};
 
     return (
         <AppLayout>
             <div className="container mx-auto p-4">
-                <h1 className="text-2xl font-bold mb-4">Counter: {count}</h1>
-                <Button onClick={handleIncrement}>Increment</Button>
+                <h1 className="text-2xl font-bold mb-4">Counter: {{count}}</h1>
+                <Button onClick={{handleIncrement}}>Increment</Button>
             </div>
         </AppLayout>
     );
-}
+}}
 ```
 
 CRITICAL REQUIREMENTS:
