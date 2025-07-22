@@ -16,6 +16,12 @@ We're currently supporting the following application types:
 - **Automatic validation** with ESLint, TypeScript, and runtime verification;
 - **Applications tested** ahead of generation with smoke tests using Playwright
 
+### Laravel Web Applications (Alpha Version)
+
+- **Full-stack web apps** with Laravel, React, TypeScript, Tailwind CSS, and Inertia.js;
+- **Modern Laravel 12** with PHP 8+ features and strict typing;
+- Designed to become production-ready soon with authentication, validation, code style enforcement and testing infrastructure;
+
 ### Data-oriented Applications
 
 - **Data apps** with Python + NiceGUI + SQLModel stack - perfect for dashboards and data visualization;
@@ -43,6 +49,12 @@ npx @app.build/cli --template=python
 
 ### Locally
 Local usage and development instructions are available in [CONTRIBUTING.md](CONTRIBUTING.md).
+
+### Local Models with Ollama (expreimental)
+
+Want to run everything locally without API keys? We  added experimental support [Ollama](https://ollama.ai) for local model inference. Set up Ollama, pull your preferred models, and run the agent completely offline. See [PROJECT_GUIDELINES.md](PROJECT_GUIDELINES.md) for detailed setup instructions and recommended models.
+
+We are open for you contributions in better supporting local models. Feel free to send you PRs!
 
 ## Architecture
 

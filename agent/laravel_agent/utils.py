@@ -60,6 +60,14 @@ async def create_workspace(client: dagger.Client, context: dagger.Directory, pro
         .with_exec(["npm", "install"])
     )
     ctr = ctr.with_env_variable("INSTANCE_ID", uuid.uuid4().hex)
+    
+    # Generate a secure APP_KEY for Laravel
+    import secrets
+    import base64
+    random_bytes = secrets.token_bytes(32)
+    app_key = f"base64:{base64.b64encode(random_bytes).decode('utf-8')}"
+    ctr = ctr.with_env_variable("APP_KEY", app_key)
+    
     return Workspace(
         client=client,
         ctr=ctr,

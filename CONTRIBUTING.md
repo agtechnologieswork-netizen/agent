@@ -21,14 +21,20 @@ uv run interactive  # a naive debug client working with local server
 
 ### App templates
 
-We support two app templates:
+We support three app templates:
 - **trpc**: Full-stack web app with Bun, React, Vite, Fastify, tRPC and Drizzle
 - **python**: Data-oriented app with Python, NiceGUI, and SQLModel
+- **laravel**: Full-stack web app with Laravel, React, TypeScript, Tailwind CSS, and Inertia.js (early version)
 
 You can specify the template when generating an app, e.g.:
 
 ```bash
 uv run generate "make a dashboard showing my current stock portfolio value using up to date prices from yfinance" --template_id "nicegui_agent"
+```
+or
+
+```bash
+uv run generate "make a presentation-like website with multiple pages with content and next buttons on each. last page mush show a counter that increments each time this presentation has been shown" --template_id "laravel_agent"
 ```
 
 

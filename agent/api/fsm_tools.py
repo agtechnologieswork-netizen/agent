@@ -21,7 +21,7 @@ class FSMInterface(ApplicationBase, Protocol):
     async def apply_changes(self, feedback: str): ...
     async def complete_fsm(self): ...
     @classmethod
-    def base_execution_plan(cls) -> str: ...
+    def base_execution_plan(cls, settings: dict[str, Any] | None = None) -> str: ...
     @property
     def available_actions(self) -> dict[str, str]: ...  # FSMTools Specific
     @classmethod
@@ -370,7 +370,7 @@ class FSMToolProcessor:
         return f"""You are a software engineering expert who can generate application code using a code generation framework. This framework uses a Finite State Machine (FSM) to guide the generation process.
 
 Your task is to control the FSM through the following stages of code generation:
-{self.fsm_class.base_execution_plan()}
+{self.fsm_class.base_execution_plan(self.settings)}
 
 To successfully complete this task, follow these steps:
 
@@ -400,7 +400,7 @@ If user's request is not detailed, ask for clarification. Make reasonable assump
 If user asks for a specific technology stack, make sure it matches the stack the FSM is designed to work with. If the stack is not compatible, try to find a common ground that satisfies both the user and the FSM capabilities.
 The final app is expected to be deployed to the Neon platform or run locally with Docker.
 
-If the user's problem requires a specific integration that is not available, make sure to ask for user's approval to use stub data or a workaround. Once this workaround is agreed upon, reflect it when starting the FSM session.
+If the user's problem requires a specific integration that is not available, make sure to ask for user's approval to use mock/stub data or a workaround. Once this workaround is explicitly agreed upon, reflect it when starting the FSM session. Otherwise using generated sample data is STRICTLY FORBIDDEN, and agent should require FSM to use real data.
 
 Make sure to appreciate the best software engineering practices, no matter what the user asks. Even stupid requests should be handled professionally.
 Do not consider the work complete until all components have been generated and the complete_fsm tool has been called.""".strip()
