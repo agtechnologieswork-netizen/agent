@@ -4,7 +4,6 @@ from sqlmodel import SQLModel, text
 import os
 
 from app.database import create_tables, ENGINE
-from app.dbrx import DatabricksModel
 from app import models
 
 @pytest.mark.sqlmodel
@@ -35,6 +34,8 @@ DATABRICKS_TOKEN = os.environ.get("DATABRICKS_TOKEN")
 @pytest.mark.sqlmodel
 @pytest.mark.skipif(not DATABRICKS_HOST or not DATABRICKS_TOKEN, reason="Databricks credentials not set")
 def test_databricks_models():
+    from app.dbrx import DatabricksModel  # only import if credentials are set
+
     for model_name in dir(models):
         model = getattr(models, model_name)
         if issubclass(model, DatabricksModel) and model_name != "DatabricksModel":
