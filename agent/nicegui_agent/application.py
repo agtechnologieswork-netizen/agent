@@ -242,7 +242,10 @@ class FSMApplication:
                     "curl",
                     "python3",
                     "nodejs",
-                ],  # node for pyright
+                    "gcc",
+                    "musl-dev",
+                    "linux-headers",
+                ],  # node for pyright, gcc/musl-dev for building ast-grep-cli
                 [
                     "sh",
                     "-c",

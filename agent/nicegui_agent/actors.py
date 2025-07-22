@@ -486,6 +486,14 @@ class NiceguiActor(FileOperationsActor):
             )
         return None
 
+    async def run_astgrep_checks(self, node: Node[BaseData]) -> str | None:
+        astgrep_result = await node.data.workspace.exec(
+            ["uv", "run", "ast-grep", "scan", "app/", "tests/"]
+        )
+        if astgrep_result.exit_code != 0:
+            return f"{astgrep_result.stdout}\n{astgrep_result.stderr}"
+        return None
+
     async def run_checks(self, node: Node[BaseData], user_prompt: str) -> str | None:
         await notify_stage(
             self.event_callback, "🔍 Running validation checks", "in_progress"
@@ -509,9 +517,7 @@ class NiceguiActor(FileOperationsActor):
             tg.start_soon(run_and_store, "type_check", self.run_type_checks(node))
             tg.start_soon(run_and_store, "tests", self.run_tests(node))
             tg.start_soon(run_and_store, "sqlmodel", self.run_sqlmodel_checks(node))
-            tg.start_soon(
-                run_and_store, "mocked_files", self.check_for_mocked_files(node)
-            )
+            tg.start_soon(run_and_store, "astgrep", self.run_astgrep_checks(node))
 
         if lint_result := results.get("lint"):
             logger.info(f"Lint checks failed: {lint_result}")
@@ -525,11 +531,9 @@ class NiceguiActor(FileOperationsActor):
         if sqlmodel_result := results.get("sqlmodel"):
             logger.info(f"SQLModel checks failed: {sqlmodel_result}")
             all_errors += f"SQLModel errors:\n{sqlmodel_result}\n"
-        if mocked_files_result := results.get("mocked_files"):
-            logger.info(f"Mocked files found: {mocked_files_result}")
-            all_errors += (
-                f"Error! Disallowed mocked files found:\n{mocked_files_result}\n"
-            )
+        if astgrep_result := results.get("astgrep"):
+            logger.info(f"AST-grep checks failed: {astgrep_result}")
+            all_errors += f"Code pattern violations:\n{astgrep_result}\n"
 
         if all_errors:
             await notify_stage(
@@ -545,17 +549,6 @@ class NiceguiActor(FileOperationsActor):
         )
         return None
 
-    async def check_for_mocked_files(self, node: Node[BaseData]) -> str | None:
-        res = await node.data.workspace.exec(
-            [
-                "sh",
-                "-c",
-                "grep -r -l -E '(mock|simulated|stub)' app/ tests/ 2>/dev/null | sed 's/^/file /' | sed 's/$/ contains mock/' || true",
-            ]
-        )
-        if res.stdout:
-            return res.stdout.strip()
-        return None
 
     async def get_repo_files(
         self, workspace: Workspace, files: dict[str, str]

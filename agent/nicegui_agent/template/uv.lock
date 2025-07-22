@@ -108,6 +108,21 @@ wheels = [
 ]
 
 [[package]]
+name = "ast-grep-cli"
+version = "0.39.1"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/7d/3e/44b61cfc15a2b4015a15cc0877cffe2539b7759949e898c9c184d534bc0d/ast_grep_cli-0.39.1.tar.gz", hash = "sha256:51ba6ea36f9d93b05fc892a005358f1e1de4acfbe8293af8b1e5105ece2320bb", size = 204965, upload-time = "2025-07-21T03:33:49.992Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/b0/2f/3222d27f2933f9371a5d9a4a3db7a6e823f69630f3bd74bf6b53907bf5f4/ast_grep_cli-0.39.1-py3-none-macosx_10_12_x86_64.macosx_11_0_arm64.macosx_10_12_universal2.whl", hash = "sha256:02f4320aad37fe0c02c2f924754e4117c81ee845b8d6e8b6042c23ebc1514416", size = 13816584, upload-time = "2025-07-21T03:33:37.024Z" },
+    { url = "https://files.pythonhosted.org/packages/64/f6/5166c08ec8c29aa86bdc5f2960018a615b3dc8135751ad2221a729d9903d/ast_grep_cli-0.39.1-py3-none-macosx_10_12_x86_64.whl", hash = "sha256:be0705b30a08f8e180a71f52bb81c3b433f94b3734919e827bd5478ce4f7a67d", size = 6937048, upload-time = "2025-07-21T03:33:39.615Z" },
+    { url = "https://files.pythonhosted.org/packages/c3/09/49f2f55ff2ac745caf1132db67ebbe0bcecd944ff3ee5a5217d065d2b1e8/ast_grep_cli-0.39.1-py3-none-manylinux_2_28_aarch64.whl", hash = "sha256:8740a682ec448f5c7fbbc19de8da3a493380187c636f56d510fcc2a49459f9cc", size = 6725725, upload-time = "2025-07-21T03:33:41.48Z" },
+    { url = "https://files.pythonhosted.org/packages/75/7d/e5f85c4ad594685e2ef65022c4061b4d2462e52a394d3b7df43fa79265de/ast_grep_cli-0.39.1-py3-none-manylinux_2_28_x86_64.whl", hash = "sha256:73a9c644c8e29994bdd1a21b4db691f1b77f3f03f2421cec441b89ac3acd6c8f", size = 7095847, upload-time = "2025-07-21T03:33:42.933Z" },
+    { url = "https://files.pythonhosted.org/packages/e9/0d/26d8680f7d1ea292386b8a364764f3d6f698ea7254b32641886e460a0cce/ast_grep_cli-0.39.1-py3-none-win32.whl", hash = "sha256:6b0343c950997a160b04cf672e53617fd199612b2ed130a3bdc064fb58f9283c", size = 6643251, upload-time = "2025-07-21T03:33:45.239Z" },
+    { url = "https://files.pythonhosted.org/packages/87/9c/1e8e9a5500179a2bfc75f0ac559babe8f99d53ffa7bb0bfacc6bccb181b8/ast_grep_cli-0.39.1-py3-none-win_amd64.whl", hash = "sha256:f4f6300830b84f71ff38e11af706b758e0c1dfdf7d148aa6625217e9ba465a1f", size = 6970299, upload-time = "2025-07-21T03:33:46.945Z" },
+    { url = "https://files.pythonhosted.org/packages/6b/76/c96dcb20efce9f56c5551b82b25111fdf99df30be7f399c9c9e3f3462dba/ast_grep_cli-0.39.1-py3-none-win_arm64.whl", hash = "sha256:c055969b88fad7fb2421c81c8f2c8980ae249f890090e2fc020345dadd855769", size = 6660442, upload-time = "2025-07-21T03:33:48.446Z" },
+]
+
+[[package]]
 name = "asyncpg"
 version = "0.30.0"
 source = { registry = "https://pypi.org/simple" }
@@ -147,15 +162,6 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/9a/6e/026678aa5a830e07cd9498a05d3e7e650a4f56a42f267a53d22bcda1bdc9/bidict-0.23.1.tar.gz", hash = "sha256:03069d763bc387bbd20e7d49914e75fc4132a41937fa3405417e1a5a2d006d71", size = 29093, upload-time = "2024-02-18T19:09:05.748Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/99/37/e8730c3587a65eb5645d4aba2d27aae48e8003614d6aaf15dda67f702f1f/bidict-0.23.1-py3-none-any.whl", hash = "sha256:5dae8d4d79b552a71cbabc7deb25dfe8ce710b17ff41711e13010ead2abfc3e5", size = 32764, upload-time = "2024-02-18T19:09:04.156Z" },
-]
-
-[[package]]
-name = "cachetools"
-version = "5.5.2"
-source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/6c/81/3747dad6b14fa2cf53fcf10548cf5aea6913e96fab41a3c198676f8948a5/cachetools-5.5.2.tar.gz", hash = "sha256:1a661caa9175d26759571b2e19580f9d6393969e5dfca11fdb1f947a23e640d4", size = 28380, upload-time = "2025-02-20T21:01:19.524Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/72/76/20fa66124dbe6be5cafeb312ece67de6b61dd91a0247d1ea13db4ebb33c2/cachetools-5.5.2-py3-none-any.whl", hash = "sha256:d26a22bcc62eb95c3beabd9f1ee5e820d3d2704fe2967cbe350e20c8ffcd3f0a", size = 10080, upload-time = "2025-02-20T21:01:16.647Z" },
 ]
 
 [[package]]
@@ -239,19 +245,6 @@ wheels = [
 ]
 
 [[package]]
-name = "databricks-sdk"
-version = "0.57.0"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "google-auth" },
-    { name = "requests" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/27/79/729b7a4abb687aa8bba8a909aa65cea3b9a42f5196ae4c9a28d081b7bff4/databricks_sdk-0.57.0.tar.gz", hash = "sha256:62c012001b6bd4d46e5a117b90e286c2c5a77e4f53f31985f253ce21ce986837", size = 774447, upload-time = "2025-06-13T05:48:58.37Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/51/db/6d34604be92a163309cbf1e3aeb11ea464012cdc33fe11132ea1eff2f072/databricks_sdk-0.57.0-py3-none-any.whl", hash = "sha256:a253bb4c7e00e43654af8b6e29ac79bee72d310e342ec73e148e4e591b75915f", size = 733790, upload-time = "2025-06-13T05:48:56.602Z" },
-]
-
-[[package]]
 name = "docutils"
 version = "0.20.1"
 source = { registry = "https://pypi.org/simple" }
@@ -332,20 +325,6 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/0b/31/8fbc5af2d183bff20f21aa743b4088eac4445d2bb1cdece449ae80e4e2d1/frozenlist-1.7.0-cp313-cp313t-win32.whl", hash = "sha256:3a14027124ddb70dfcee5148979998066897e79f89f64b13328595c4bdf77c81", size = 43059, upload-time = "2025-06-09T23:02:02.072Z" },
     { url = "https://files.pythonhosted.org/packages/bb/ed/41956f52105b8dbc26e457c5705340c67c8cc2b79f394b79bffc09d0e938/frozenlist-1.7.0-cp313-cp313t-win_amd64.whl", hash = "sha256:3bf8010d71d4507775f658e9823210b7427be36625b387221642725b515dcf3e", size = 47516, upload-time = "2025-06-09T23:02:03.779Z" },
     { url = "https://files.pythonhosted.org/packages/ee/45/b82e3c16be2182bff01179db177fe144d58b5dc787a7d4492c6ed8b9317f/frozenlist-1.7.0-py3-none-any.whl", hash = "sha256:9a5af342e34f7e97caf8c995864c7a396418ae2859cc6fdf1b1073020d516a7e", size = 13106, upload-time = "2025-06-09T23:02:34.204Z" },
-]
-
-[[package]]
-name = "google-auth"
-version = "2.40.3"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "cachetools" },
-    { name = "pyasn1-modules" },
-    { name = "rsa" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/9e/9b/e92ef23b84fa10a64ce4831390b7a4c2e53c0132568d99d4ae61d04c8855/google_auth-2.40.3.tar.gz", hash = "sha256:500c3a29adedeb36ea9cf24b8d10858e152f2412e3ca37829b3fa18e33d63b77", size = 281029, upload-time = "2025-06-04T18:04:57.577Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/17/63/b19553b658a1692443c62bd07e5868adaa0ad746a0751ba62c59568cd45b/google_auth-2.40.3-py2.py3-none-any.whl", hash = "sha256:1370d4593e86213563547f97a92752fc658456fe4514c809544f330fed45a7ca", size = 216137, upload-time = "2025-06-04T18:04:55.573Z" },
 ]
 
 [[package]]
@@ -823,27 +802,6 @@ wheels = [
 ]
 
 [[package]]
-name = "pyasn1"
-version = "0.6.1"
-source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/ba/e9/01f1a64245b89f039897cb0130016d79f77d52669aae6ee7b159a6c4c018/pyasn1-0.6.1.tar.gz", hash = "sha256:6f580d2bdd84365380830acf45550f2511469f673cb4a5ae3857a3170128b034", size = 145322, upload-time = "2024-09-10T22:41:42.55Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/c8/f1/d6a797abb14f6283c0ddff96bbdd46937f64122b8c925cab503dd37f8214/pyasn1-0.6.1-py3-none-any.whl", hash = "sha256:0d632f46f2ba09143da3a8afe9e33fb6f92fa2320ab7e886e2d0f7672af84629", size = 83135, upload-time = "2024-09-11T16:00:36.122Z" },
-]
-
-[[package]]
-name = "pyasn1-modules"
-version = "0.4.2"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "pyasn1" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/e9/e6/78ebbb10a8c8e4b61a59249394a4a594c1a7af95593dc933a349c8d00964/pyasn1_modules-0.4.2.tar.gz", hash = "sha256:677091de870a80aae844b1ca6134f54652fa2c8c5a52aa396440ac3106e941e6", size = 307892, upload-time = "2025-03-28T02:41:22.17Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/47/8d/d529b5d697919ba8c11ad626e835d4039be708a35b0d22de83a269a6682c/pyasn1_modules-0.4.2-py3-none-any.whl", hash = "sha256:29253a9207ce32b64c3ac6600edc75368f98473906e8fd1043bd6b5b1de2c14a", size = 181259, upload-time = "2025-03-28T02:41:19.028Z" },
-]
-
-[[package]]
 name = "pycparser"
 version = "2.22"
 source = { registry = "https://pypi.org/simple" }
@@ -1127,18 +1085,6 @@ wheels = [
 ]
 
 [[package]]
-name = "rsa"
-version = "4.9.1"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "pyasn1" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/da/8a/22b7beea3ee0d44b1916c0c1cb0ee3af23b700b6da9f04991899d0c555d4/rsa-4.9.1.tar.gz", hash = "sha256:e7bdbfdb5497da4c07dfd35530e1a902659db6ff241e39d9953cad06ebd0ae75", size = 29034, upload-time = "2025-04-16T09:51:18.218Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/64/8d/0133e4eb4beed9e425d9a98ed6e081a55d195481b7632472be1af08d2f6b/rsa-4.9.1-py3-none-any.whl", hash = "sha256:68635866661c6836b8d39430f97a996acbd61bfa49406748ea243539fe239762", size = 34696, upload-time = "2025-04-16T09:51:17.142Z" },
-]
-
-[[package]]
 name = "ruff"
 version = "0.12.2"
 source = { registry = "https://pypi.org/simple" }
@@ -1270,7 +1216,6 @@ version = "0.1.0"
 source = { virtual = "." }
 dependencies = [
     { name = "asyncpg" },
-    { name = "databricks-sdk" },
     { name = "nicegui", extra = ["highcharts"] },
     { name = "psycopg2-binary" },
     { name = "pytest-asyncio" },
@@ -1280,6 +1225,7 @@ dependencies = [
 
 [package.dev-dependencies]
 dev = [
+    { name = "ast-grep-cli" },
     { name = "pyright" },
     { name = "ruff" },
 ]
@@ -1287,7 +1233,6 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "asyncpg", specifier = ">=0.30.0" },
-    { name = "databricks-sdk", specifier = ">=0.57.0" },
     { name = "nicegui", extras = ["highcharts"], specifier = ">=2.19.0" },
     { name = "psycopg2-binary", specifier = ">=2.9.10" },
     { name = "pytest-asyncio", specifier = ">=1.0.0" },
@@ -1297,6 +1242,7 @@ requires-dist = [
 
 [package.metadata.requires-dev]
 dev = [
+    { name = "ast-grep-cli", specifier = ">=0.39.1" },
     { name = "pyright", specifier = ">=1.1.403" },
     { name = "ruff", specifier = ">=0.11.5" },
 ]

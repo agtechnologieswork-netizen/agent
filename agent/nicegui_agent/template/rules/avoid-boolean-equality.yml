@@ -1,0 +1,15 @@
+id: avoid-boolean-equality
+message: Use truthiness instead of explicit boolean comparisons
+severity: warning
+language: python
+rule:
+  any:
+    - pattern: $VALUE == True
+    - pattern: $VALUE == False
+    - pattern: $VALUE != True
+    - pattern: $VALUE != False
+fix: |
+  # For == True, use: if $VALUE:
+  # For == False, use: if not $VALUE:
+  # For != True, use: if not $VALUE:
+  # For != False, use: if $VALUE:
