@@ -63,7 +63,7 @@ class AlloyLLM(AsyncLLM):
             model_idx = self.current_index
             self.current_index = (self.current_index + 1) % len(self.models)
 
-        logger.warning(f"AlloyLLM selected model index {model_idx} of {len(self.models)}, which is {selected_model.__class__.__name__}")
+        logger.info(f"AlloyLLM selected model index {model_idx} of {len(self.models)}, which is {repr(selected_model)}")
 
         # delegate to selected model
         return await selected_model.completion(
