@@ -297,4 +297,4 @@ class CachedLLM(AsyncLLM):
                 raise ValueError(f"unknown cache mode: {self.cache_mode}")
 
     def __repr__(self):
-        return f"CachedLLM(client={self.client.__class__.__name__}")
+        return f"CachedLLM(client={self.client.__class__.__name__})"
