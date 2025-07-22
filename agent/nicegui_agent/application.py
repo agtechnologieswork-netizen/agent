@@ -224,7 +224,10 @@ class FSMApplication:
                     if content is not None:
                         ctx.files[file] = content
 
-        llm = AlloyLLM.from_models([get_best_coding_llm_client(), get_universal_llm_client()])
+        if os.getenv("USE_ALLOY_LLM"):
+            llm = AlloyLLM.from_models([get_best_coding_llm_client(), get_universal_llm_client()])
+        else:
+            llm = get_best_coding_llm_client()
 
         workspace = await Workspace.create(
             client=client,

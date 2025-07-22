@@ -494,11 +494,6 @@ class NiceguiActor(FileOperationsActor):
         all_errors = ""
         results = {}
 
-        res = await node.data.workspace.exec(
-            ["sh", "-c", "echo $DATABRICKS_HOST $DATABRICKS_TOKEN"]
-        )
-        logger.warning(f"DATABRICKS_HOST: {res.stdout.strip()}")
-
         async with anyio.create_task_group() as tg:
 
             async def run_and_store(key, coro):
