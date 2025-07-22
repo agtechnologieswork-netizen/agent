@@ -115,6 +115,7 @@ class FSMApplication:
     @classmethod
     def template_path(cls) -> str:
         import os
+
         # Get the absolute path to avoid relative path issues
         current_file = os.path.abspath(__file__)
         parent_dir = os.path.dirname(current_file)
@@ -159,13 +160,12 @@ class FSMApplication:
             ctx: ApplicationContext, result: Node[BaseData]
         ) -> None:
             logger.info("Running final steps after application generation")
-            
+
             # TODO: implement lint -- --fix for PHP filesß
 
         llm = get_best_coding_llm_client()
         workspace = await create_workspace(
-            client,
-            client.host().directory(cls.template_path())
+            client, client.host().directory(cls.template_path())
         )
 
         # Extract event_callback from settings if provided
@@ -191,7 +191,8 @@ class FSMApplication:
                 FSMState.APPLICATION_GENERATION: State(
                     invoke={
                         "src": app_actor,
-                        "input_fn": lambda ctx: (ctx.files,
+                        "input_fn": lambda ctx: (
+                            ctx.files,
                             ctx.feedback_data or ctx.user_prompt,
                         ),
                         "on_done": {
@@ -318,19 +319,19 @@ class FSMApplication:
         start = start.with_exec(["git", "init"]).with_exec(
             ["git", "config", "--global", "user.email", "agent@appbuild.com"]
         )
-        
+
         if snapshot:
             # Sort keys for consistent sample logging, especially in tests
             sorted_snapshot_keys = sorted(snapshot.keys())
             logger.info(
                 f"SERVER get_diff_with: Snapshot sample paths (up to 5): {sorted_snapshot_keys[:5]}"
             )
-            
+
             # Create a directory with all snapshot files first
             snapshot_dir = self.client.directory()
             for file_path, content in snapshot.items():
                 snapshot_dir = snapshot_dir.with_new_file(file_path, content)
-            
+
             # Now add the entire directory at once
             start = start.with_directory(".", snapshot_dir)
             start = start.with_exec(["git", "add", "."]).with_exec(
@@ -341,10 +342,8 @@ class FSMApplication:
                 "SERVER get_diff_with: Snapshot is empty. Diff will be against template + FSM context files."
             )
             # If no snapshot, create an empty initial commit
-            start = (
-                start.with_exec(["touch", "README.md"])
-                .with_exec(["git", "add", "."])
-                .with_exec(["git", "commit", "-m", "'initial'"])
+            start = start.with_exec(["git", "add", "."]).with_exec(
+                ["git", "commit", "-m", "'initial'", "--allow-empty"]
             )
 
         # Add template files (they will appear in diff if not in snapshot)
@@ -358,7 +357,7 @@ class FSMApplication:
             fsm_dir = self.client.directory()
             for file_path, content in self.fsm.context.files.items():
                 fsm_dir = fsm_dir.with_new_file(file_path, content)
-            
+
             # Add the entire FSM directory at once
             start = start.with_directory(".", fsm_dir)
 
