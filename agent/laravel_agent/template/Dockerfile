@@ -104,5 +104,9 @@ EXPOSE 80
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
     CMD curl -f http://localhost/ || exit 1
 
+# Set DB_URL from APP_DATABASE_URL at runtime
+# This tells Docker that this environment variable should be available at runtime
+ENV DB_URL=${APP_DATABASE_URL}
+
 # Use entrypoint script to run migrations and start services
 CMD ["/usr/local/bin/entrypoint.sh"] 
