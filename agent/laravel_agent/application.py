@@ -175,7 +175,7 @@ class FSMApplication:
             llm=llm,
             workspace=workspace.clone(),
             beam_width=5,
-            max_depth=40,  # Increased from 30 to allow more iterations for complex apps
+            max_depth=100,  # Increased to 100 iterations as requested
             system_prompt=playbooks.APPLICATION_SYSTEM_PROMPT,
             # files_allowed will use the default from actors.py
             event_callback=event_callback,
