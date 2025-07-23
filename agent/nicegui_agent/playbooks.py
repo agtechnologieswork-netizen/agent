@@ -173,7 +173,7 @@ Use the following tools to manage files:
 5. **uv_add** - Install additional packages
    - Input: packages (array of strings)
 
-6. **complete** - Mark the task as complete (runs tests and type checks)
+6. **complete** - Mark the task as complete (runs tests, type checks and other validators)
    - No inputs required
 
 # Tool Usage Guidelines
@@ -183,7 +183,7 @@ Use the following tools to manage files:
 - Use edit_file for small, targeted changes to existing files
 - Ensure proper indentation when using edit_file - the search string must match exactly
 - Code will be linted and type-checked, so ensure correctness
-- Use multiple tools in a single step if needed.
+- For maximum efficiency, whenever you need to perform multiple independent operations (e.g. address errors revealed by tests), invoke all relevant tools simultaneously rather than sequentially.
 - Run tests and linting BEFORE using complete() to catch errors early
 - If tests fail, analyze the specific error message - don't guess at fixes"""
 
