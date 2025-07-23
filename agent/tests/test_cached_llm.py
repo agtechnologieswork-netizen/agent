@@ -3,6 +3,7 @@ import tempfile
 from llm.cached import CachedLLM, AsyncLLM
 from llm.common import Message, TextRaw, Completion, Tool, AttachedFiles, ToolUse
 from llm.utils import get_ultra_fast_llm_client, get_vision_llm_client, get_best_coding_llm_client, merge_text
+from llm.alloy import AlloyLLM
 import uuid
 import ujson as json
 import os
@@ -203,3 +204,62 @@ async def test_ollama_function_calling():
     assert tool_call.name == 'calculate', f"Expected tool 'calculate', got '{tool_call.name}'"
     assert isinstance(tool_call.input, dict), f"Tool input should be dict, got {type(tool_call.input)}"
     assert 'expression' in tool_call.input, f"Tool input should have 'expression' key, got {tool_call.input}"
+
+
+@pytest.mark.skipif(requires_llm_provider(), reason=requires_llm_provider_reason)
+async def test_alloy_llm_round_robin():
+    """Test AlloyLLM with round-robin selection strategy"""
+    # create stub LLMs with distinct responses
+    stub1 = StubLLM()
+    stub2 = StubLLM()
+    
+    # create alloy with round-robin strategy
+    alloy = AlloyLLM.from_models([stub1, stub2], selection_strategy="round_robin")
+    
+    messages = [Message(role="user", content=[TextRaw("Hello")])]
+    
+    # make 4 calls
+    responses = []
+    for _ in range(4):
+        resp = await alloy.completion(messages=messages, max_tokens=100)
+        responses.append(resp)
+    
+    # verify alternating calls
+    assert stub1.calls == 2, "First model should be called twice"
+    assert stub2.calls == 2, "Second model should be called twice"
+    
+    # responses should alternate between models
+    assert responses[0] != responses[1]  # different models
+    assert responses[0] != responses[2]  # same model but different response (uuid)
+    assert responses[1] != responses[3]  # same model but different response (uuid)
+
+
+@pytest.mark.skipif(requires_llm_provider(), reason=requires_llm_provider_reason)  
+async def test_alloy_llm_random():
+    """Test AlloyLLM with random selection strategy"""
+    # create multiple stub LLMs
+    stubs = [StubLLM() for _ in range(3)]
+    
+    # create alloy with random strategy
+    alloy = AlloyLLM.from_models(stubs, selection_strategy="random")
+    
+    messages = [Message(role="user", content=[TextRaw("Hello")])]
+    
+    # make multiple calls
+    for _ in range(10):
+        await alloy.completion(messages=messages, max_tokens=100)
+    
+    # verify all models were called (probabilistically)
+    total_calls = sum(stub.calls for stub in stubs)
+    assert total_calls == 10, "Total calls should be 10"
+    
+    # with 10 calls and 3 models, each should be called at least once (very high probability)
+    for stub in stubs:
+        assert stub.calls > 0, "Each model should be called at least once"
+
+
+@pytest.mark.skipif(requires_llm_provider(), reason=requires_llm_provider_reason)
+async def test_alloy_llm_empty_models():
+    """Test AlloyLLM raises error with empty model list"""
+    with pytest.raises(ValueError, match="At least one model must be provided"):
+        AlloyLLM.from_models([])

@@ -5,7 +5,8 @@ import enum
 from typing import Dict, Self, Optional, Literal, Any
 from dataclasses import dataclass, field
 from core.statemachine import StateMachine, State, Context
-from llm.utils import get_best_coding_llm_client
+from llm.utils import get_best_coding_llm_client, get_universal_llm_client
+from llm.alloy import AlloyLLM
 from core.actors import BaseData
 from core.base_node import Node
 from core.statemachine import MachineCheckpoint
@@ -105,20 +106,37 @@ class FSMApplication:
         return cls(client, fsm)
 
     @classmethod
-    def base_execution_plan(cls) -> str:
+    def is_databricks_available(cls, settings: Dict[str, Any]) -> bool:
+        settings = settings or {}
+        databricks_host = settings.get("databricks_host")
+        databricks_token = settings.get("databricks_token")
+        return bool(databricks_host and databricks_token)
+
+    @classmethod
+    def base_execution_plan(cls, settings: Dict[str, Any] | None = None) -> str:
+        settings = settings or {}
+
+        databricks_part = (
+            "This application can have access to Databricks Unity Catalog for data access"
+            if cls.is_databricks_available(settings)
+            else ""
+        )
+
         return "\n".join(
             [
                 "1. Data model generation - Define data structures, schemas, and models. ",
                 "2. Application generation - Implement UI components and application logic. ",
                 "",
                 "The result application will be based on Python and NiceGUI framework. Persistent data will be stored in Postgres with SQLModel ORM. "
-                "The application can include various UI components, event handling, and state management.",
+                "The application can include various UI components, event handling, and state management. ",
+                "This application can use install new libraries if needed. ",
+                databricks_part,
             ]
         )
 
     @classmethod
     def template_path(cls) -> str:
-        return "./nicegui_agent/template"
+        return os.path.join(os.path.dirname(os.path.abspath(__file__)), "./template")
 
     @classmethod
     async def start_fsm(
@@ -138,6 +156,8 @@ class FSMApplication:
     async def make_states(
         cls, client: dagger.Client, settings: Dict[str, Any] | None = None
     ) -> State[ApplicationContext, FSMEvent]:
+        settings = settings or {}
+
         # Define actions to update context
         async def update_node_files(
             ctx: ApplicationContext, result: Node[BaseData]
@@ -204,7 +224,11 @@ class FSMApplication:
                     if content is not None:
                         ctx.files[file] = content
 
-        llm = get_best_coding_llm_client()
+        if os.getenv("USE_ALLOY_LLM"):
+            llm = AlloyLLM.from_models([get_best_coding_llm_client(), get_universal_llm_client()])
+        else:
+            llm = get_best_coding_llm_client()
+
         workspace = await Workspace.create(
             client=client,
             base_image="alpine:3.21.3",
@@ -218,7 +242,10 @@ class FSMApplication:
                     "curl",
                     "python3",
                     "nodejs",
-                ],  # node for pyright
+                    "gcc",
+                    "musl-dev",
+                    "linux-headers",
+                ],  # node for pyright, gcc/musl-dev for building ast-grep-cli
                 [
                     "sh",
                     "-c",
@@ -229,16 +256,29 @@ class FSMApplication:
         )
 
         # Extract event_callback from settings if provided
-        event_callback = settings.pop("event_callback", None) if settings else None
-        
+        event_callback = settings.pop("event_callback", None)
+
+        use_databricks = cls.is_databricks_available(settings)
+        databricks_host = settings.get("databricks_host", "")
+        databricks_token = settings.get("databricks_token", "")
+
+        if use_databricks:
+            workspace = workspace.add_env_variable(
+                "DATABRICKS_HOST", databricks_host
+            ).add_env_variable("DATABRICKS_TOKEN", databricks_token)
+
         data_actor = NiceguiActor(
             llm=llm,
             workspace=workspace.clone(),
             beam_width=3,
             max_depth=50,
-            system_prompt=playbooks.DATA_MODEL_SYSTEM_PROMPT,
+            system_prompt=playbooks.get_data_model_system_prompt(
+                use_databricks=use_databricks
+            ),
             files_allowed=["app/models.py"],
             event_callback=event_callback,
+            databricks_host=databricks_host,
+            databricks_token=databricks_token,
         )
         # ToDo: propagate crucial template files to DATA_MODEL_SYSTEM_PROMPT so they're cached
         app_actor = NiceguiActor(
@@ -246,9 +286,12 @@ class FSMApplication:
             workspace=workspace.clone(),
             beam_width=3,
             max_depth=100,  # can be larger given every file change is a separate tool call,
-            system_prompt=playbooks.APPLICATION_SYSTEM_PROMPT,
+            system_prompt=playbooks.get_application_system_prompt(),
             event_callback=event_callback,
+            databricks_host=databricks_host,
+            databricks_token=databricks_token,
         )
+        # FixMe: second stage actor in general should not alter models.py, but on the edit stage it should
 
         # Define state machine states
         states = State[ApplicationContext, FSMEvent](
@@ -261,7 +304,11 @@ class FSMApplication:
                     invoke={
                         "src": data_actor,
                         "input_fn": lambda ctx: (
-                            {k:v for k, v in ctx.files.items() if k != "requirements.txt"},
+                            {
+                                k: v
+                                for k, v in ctx.files.items()
+                                if k != "requirements.txt"
+                            },
                             ctx.feedback_data or ctx.user_prompt,
                         ),
                         "on_done": {
@@ -284,7 +331,11 @@ class FSMApplication:
                     invoke={
                         "src": data_actor,
                         "input_fn": lambda ctx: (
-                            {k:v for k, v in ctx.files.items() if k != "requirements.txt"},
+                            {
+                                k: v
+                                for k, v in ctx.files.items()
+                                if k != "requirements.txt"
+                            },
                             ctx.feedback_data,
                         ),
                         "on_done": {
@@ -301,7 +352,11 @@ class FSMApplication:
                     invoke={
                         "src": app_actor,
                         "input_fn": lambda ctx: (
-                            {k:v for k, v in ctx.files.items() if k != "requirements.txt"},
+                            {
+                                k: v
+                                for k, v in ctx.files.items()
+                                if k != "requirements.txt"
+                            },
                             ctx.feedback_data or ctx.user_prompt,
                         ),
                         "on_done": {
@@ -324,7 +379,11 @@ class FSMApplication:
                     invoke={
                         "src": app_actor,
                         "input_fn": lambda ctx: (
-                            {k:v for k, v in ctx.files.items() if k != "requirements.txt"},
+                            {
+                                k: v
+                                for k, v in ctx.files.items()
+                                if k != "requirements.txt"
+                            },
                             ctx.feedback_data,
                         ),
                         "on_done": {
@@ -446,10 +505,8 @@ class FSMApplication:
                 "SERVER get_diff_with: Snapshot is empty. Diff will be against template + FSM context files."
             )
             # If no snapshot, create an empty initial commit
-            start = (
-                start.with_exec(["touch", "README.md"])
-                .with_exec(["git", "add", "."])
-                .with_exec(["git", "commit", "-m", "'initial'"])
+            start = start.with_exec(["git", "add", "."]).with_exec(
+                ["git", "commit", "-m", "'initial'", "--allow-empty"]
             )
 
         # Add template files (they will appear in diff if not in snapshot)

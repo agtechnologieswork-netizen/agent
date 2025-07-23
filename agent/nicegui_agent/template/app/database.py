@@ -5,7 +5,7 @@ from sqlmodel import SQLModel, create_engine, Session
 from app.models import *  # noqa: F401, F403
 
 DATABASE_URL = os.environ.get("APP_DATABASE_URL", "postgresql://postgres:postgres@postgres:5432/postgres")
-ENGINE = create_engine(DATABASE_URL, echo=True)
+ENGINE = create_engine(DATABASE_URL)
 
 def create_tables():
     SQLModel.metadata.create_all(ENGINE)

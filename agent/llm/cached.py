@@ -192,7 +192,7 @@ class CachedLLM(AsyncLLM):
         """handle cache lookup and request coordination."""
         event = None
         make_request = False
-        
+
         async with self.lock:
             if cache_key in self._cache:
                 logger.info(f"cache hit: {cache_key}")
@@ -205,17 +205,17 @@ class CachedLLM(AsyncLLM):
                 event = anyio.Event()
                 self._pending_requests[cache_key] = event
                 make_request = True
-        
+
         if use_lru:
             logger.info(f"lru cache miss: {cache_key}")
-        
+
         if not make_request:
             await event.wait()
             async with self.lock:
                 if use_lru:
                     self._update_lru_cache(cache_key)
                 return Completion.from_dict(self._cache[cache_key]["data"])
-        
+
         try:
             # Filter out parameters that the underlying client may not accept.
             # Currently only "event_callback" is known to cause issues for some
@@ -225,7 +225,7 @@ class CachedLLM(AsyncLLM):
             safe_request_params = {k: v for k, v in request_params.items() if k != "event_callback"}
 
             response = await self.client.completion(**safe_request_params)
-            
+
             async with self.lock:
                 self._cache[cache_key] = {"data": response.to_dict(), "params": norm_params}
                 if use_lru:
@@ -233,7 +233,7 @@ class CachedLLM(AsyncLLM):
                 else:
                     self._save_cache()
                 del self._pending_requests[cache_key]
-            
+
             event.set()
             return response
         except Exception:
@@ -256,7 +256,7 @@ class CachedLLM(AsyncLLM):
         """performs LLM completion with caching support."""
         if args:
             raise RuntimeError("args are not expected in this method, use kwargs instead")
-        
+
         request_params = {
             "model": model,
             "messages": messages,
@@ -270,16 +270,16 @@ class CachedLLM(AsyncLLM):
         match self.cache_mode:
             case "off":
                 return await self.client.completion(**request_params)
-            
+
             case "record":
                 norm_params, cache_key = self._get_cache_key(**request_params)
                 logger.info(f"Caching response with key: {cache_key}")
                 return await self._get_or_make_request(cache_key, norm_params, request_params)
-            
+
             case "lru":
                 norm_params, cache_key = self._get_cache_key(**request_params)
                 return await self._get_or_make_request(cache_key, norm_params, request_params, use_lru=True)
-            
+
             case "replay":
                 norm_params, cache_key = self._get_cache_key(**request_params)
                 if cache_key in self._cache:
@@ -292,6 +292,9 @@ class CachedLLM(AsyncLLM):
                         f"No cached response found for this request in replay mode; "
                         f"run in record mode first to populate the cache. Cache_key: {cache_key}"
                     )
-            
+
             case _:
                 raise ValueError(f"unknown cache mode: {self.cache_mode}")
+
+    def __repr__(self):
+        return f"CachedLLM(client={self.client.__class__.__name__})"

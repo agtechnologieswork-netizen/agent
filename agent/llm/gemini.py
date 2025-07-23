@@ -5,9 +5,11 @@ from google.genai import types as genai_types
 from google.genai.errors import ServerError
 import os
 from llm import common
+from llm.telemetry import LLMTelemetry
 from log import get_logger
 import logging
 from tenacity import retry, stop_after_attempt, wait_exponential_jitter, retry_if_exception_type, before_sleep_log
+import uuid
 
 
 logger = get_logger(__name__)
@@ -91,11 +93,29 @@ class GeminiLLM(common.AsyncLLM):
         gemini_messages: List[genai_types.Content],
         config: genai_types.GenerateContentConfig
     ) -> common.Completion:
+        telemetry = LLMTelemetry()
+        telemetry.start_timing()
+
         response = await self._async_client.models.generate_content(
             model=self.model_name,
             contents=gemini_messages,
             config=config,
         )
+
+        # Log telemetry if usage metadata is available
+        if hasattr(response, 'usage_metadata'):
+            usage = response.usage_metadata
+            telemetry.log_completion(
+                model=self.model_name,
+                input_tokens=usage.prompt_token_count if usage else None,
+                output_tokens=usage.candidates_token_count if usage else None,
+                temperature=config.temperature if config and config.temperature is not None else None,
+                has_tools=bool(config and config.tools),
+                provider="Gemini"
+            )
+        else:
+            logger.warning(f"Gemini response missing usage_metadata attribute for model {self.model_name}")
+
         return self._completion_from(response)
 
     async def upload_files(self, files: List[str]) -> List[genai_types.File]:
@@ -130,11 +150,10 @@ class GeminiLLM(common.AsyncLLM):
                     ours_content.append(common.TextRaw(text=block.text))
             if block.function_call and block.function_call.name:
                 ours_content.append(common.ToolUse(
-                    id=block.function_call.id,
+                    id=block.function_call.id or uuid.uuid4().hex,
                     name=block.function_call.name,
                     input=block.function_call.args
                 ))
-
         match completion.usage_metadata:
             case genai_types.GenerateContentResponseUsageMetadata(prompt_token_count=input_tokens, candidates_token_count=output_tokens, thoughts_token_count=thinking_tokens):
                 usage = (input_tokens, output_tokens, thinking_tokens)

@@ -1,7 +1,10 @@
-FROM alpine:3.21.3 AS prod
+FROM python:3.12-slim AS prod
 
-RUN apk add --update --no-cache curl python3 docker
-COPY --from=ghcr.io/astral-sh/uv:0.6.14 /uv /uvx /bin/
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl \
+    docker.io \
+    && rm -rf /var/lib/apt/lists/*
+COPY --from=ghcr.io/astral-sh/uv:0.7.20-debian /usr/local/bin/uv /usr/local/bin/uvx /usr/local/bin
 RUN curl -fsSL https://dl.dagger.io/dagger/install.sh | BIN_DIR=/usr/local/bin sh
 
 WORKDIR /app

@@ -337,6 +337,8 @@ def get_template_path_from_id(template_id: Optional[str]) -> str:
         return "./trpc_agent/template"
     elif template_id == "nicegui_agent":
         return "./nicegui_agent/template"
+    elif template_id == "laravel_agent":
+        return "./laravel_agent/template"
     elif template_id == "template_diff":
         return "./template_diff/template"
     else:
@@ -419,6 +421,16 @@ def cleanup_docker_projects():
 atexit.register(cleanup_docker_projects)
 
 
+# Common directories to exclude when collecting project files
+EXCLUDED_DIRS = {
+    "node_modules", "vendor", ".git", "dist", "build", 
+    ".cache", "coverage", "public/build", "storage/logs", 
+    "bootstrap/cache", ".cursor", ".claude", ".github",
+    "__pycache__", ".pytest_cache", ".venv", "venv",
+    ".next", ".nuxt", ".svelte-kit", ".output",
+    "tmp", "temp", ".idea", ".vscode"
+}
+
 # Function to get all files from the project directory
 def get_all_files_from_project_dir(project_dir_path: str) -> List[FileEntry]:
     local_files: List[FileEntry] = []
@@ -429,12 +441,25 @@ def get_all_files_from_project_dir(project_dir_path: str) -> List[FileEntry]:
         )
         return local_files
 
-    for root, _, files in os.walk(project_dir_path):
+    for root, dirs, files in os.walk(project_dir_path):
+        # Filter out excluded directories to prevent walking into them
+        dirs[:] = [d for d in dirs if d not in EXCLUDED_DIRS]
+        
+        # Also check if the current directory path contains any excluded patterns
+        rel_root = os.path.relpath(root, project_dir_path)
+        skip_dir = False
+        for excluded in EXCLUDED_DIRS:
+            if excluded in rel_root.split(os.sep):
+                skip_dir = True
+                break
+        if skip_dir:
+            continue
+            
         for filename in files:
             # Exclude common problematic/temporary files but allow .gitignore
             if (
-                filename.startswith(".") and filename != ".gitignore"
-            ) or filename.endswith((".patch", ".swp", ".swo", ".rej")):
+                filename.startswith(".") and filename not in {".gitignore", ".env", ".env.example"}
+            ) or filename.endswith((".patch", ".swp", ".swo", ".rej", ".pyc", ".pyo")):
                 continue
 
             filepath = os.path.join(root, filename)
@@ -444,7 +469,8 @@ def get_all_files_from_project_dir(project_dir_path: str) -> List[FileEntry]:
                     content = f.read()
                 local_files.append(FileEntry(path=relative_path, content=content))
             except Exception as e:
-                logger.error(f"Error reading file {filepath} for snapshot: {e}")
+                # Skip binary files or files that can't be read
+                logger.debug(f"Skipping file {filepath}: {e}")
     return local_files
 
 
@@ -455,6 +481,7 @@ async def run_chatbot_client(
     settings: Optional[str] = None,
     autosave=False,
     template_id: Optional[str] = None,
+    use_databricks: bool = False,
 ) -> None:
     """
     Async interactive Agent CLI chat.
@@ -488,6 +515,15 @@ async def run_chatbot_client(
             settings_dict = json.loads(settings)
         except json.JSONDecodeError:
             print(f"Warning: could not parse settings JSON: {settings}")
+
+    if use_databricks:
+        settings_dict["databricks_host"] = os.getenv("DATABRICKS_HOST")
+        settings_dict["databricks_token"] = os.getenv("DATABRICKS_TOKEN")
+
+        if not settings_dict["databricks_host"] or not settings_dict["databricks_token"]:
+            raise ValueError(
+                "Databricks host and token must be set in environment variables to use Databricks"
+            )
 
     # Load saved state if available
     if os.path.exists(state_file):
@@ -1140,7 +1176,7 @@ def spawn_local_server(
         proc = subprocess.Popen(
             command, stdout=subprocess.PIPE, stderr=std_err_file, text=True
         )
-        logger.info(
+        print(
             f"Local server started, pid {proc.pid}, check `tail -f {std_err_file.name}` for logs"
         )
 
@@ -1166,6 +1202,7 @@ def cli(
     port: int = 8001,
     state_file: str = "/tmp/agent_chat_state.json",
     template_id: Optional[str] = None,
+    use_databricks: bool = False,
 ):
     if not host:
         with spawn_local_server() as (local_host, local_port):
@@ -1177,6 +1214,7 @@ def cli(
                 None,
                 False,
                 template_id,
+                use_databricks,
                 backend="asyncio",
             )
     else:
@@ -1188,6 +1226,7 @@ def cli(
             None,
             False,
             template_id,
+            use_databricks,
             backend="asyncio",
         )
 

@@ -16,10 +16,17 @@ import anyio
 from fastapi import FastAPI, HTTPException, Depends
 from fastapi.responses import StreamingResponse
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from laravel_agent.agent_session import LaravelAgentSession
 import uvicorn
 from fire import Fire
-import dagger
 import os
+# Disable dagger telemetry
+os.environ["DO_NOT_TRACK"] = "1"
+os.environ["OTEL_TRACES_EXPORTER"] = "none"
+os.environ["OTEL_METRICS_EXPORTER"] = "none"
+os.environ["OTEL_LOGS_EXPORTER"] = "none"
+
+import dagger
 import json
 from brotli_asgi import BrotliMiddleware
 from dotenv import load_dotenv
@@ -113,10 +120,6 @@ class SessionManager:
     ) -> T:
         session_id = f"{request.application_id}:{request.trace_id}"
 
-        #if session_id in self.sessions:
-        #    logger.info(f"Reusing existing session for {session_id}")
-        #    return self.sessions[session_id]
-
         logger.info(f"Creating new agent session for {session_id}")
         agent = agent_class(
             client=client,
@@ -126,7 +129,6 @@ class SessionManager:
             *args,
             **kwargs
         )
-        #self.sessions[session_id] = agent
         return agent
 
     def cleanup_session(self, application_id: str, trace_id: str) -> None:
@@ -285,6 +287,7 @@ async def message(
             "template_diff": TemplateDiffAgentImplementation,
             "trpc_agent": TrpcAgentSession,
             "nicegui_agent": NiceguiAgentSession,
+            "laravel_agent": LaravelAgentSession
         }
 
         if template_id not in agent_types:
