@@ -17,6 +17,8 @@ Use the following tools to manage files:
    - Use this for small, precise edits where you know the exact text to replace
    - The search text must match exactly (including whitespace/indentation)
    - Will fail if search text is not found or appears multiple times
+   - NEVER use "..." or ellipsis in search strings - copy the EXACT text from the file
+   - When you see "name: ..." in examples, you must replace with actual content like "name: string;"
 
 4. **delete_file** - Remove a file
    - Input: path (string)
@@ -34,6 +36,21 @@ Use the following tools to manage files:
 - Use multiple tools in a single step if needed.
 - Run tests and linting BEFORE using complete() to catch errors early
 - If tests fail, analyze the specific error message - don't guess at fixes
+
+## Common edit_file Errors to Avoid:
+
+1. **Using ellipsis (...) in search text**: 
+   - WRONG: `search: "name: ..."`
+   - CORRECT: `search: "name: string;"`
+   - Always use the COMPLETE, EXACT text from the file
+
+2. **Not reading the file first**:
+   - ALWAYS use read_file before edit_file to see the exact content
+   - Copy the exact text including all whitespace and punctuation
+
+3. **Search text too short**:
+   - If search text appears multiple times, include more context
+   - Include unique surrounding lines to make the search unique
 """
 
 
@@ -303,6 +320,17 @@ When users request new functionality:
    - Only create separate routes when explicitly requested or when building multi-page apps
 
 Example: If user asks for "a counter app", put the counter on the home page ('/'), not on '/counter'
+
+## Welcome Page Requirements (MUST FOLLOW)
+
+NEVER leave the default "under construction" welcome page. Always customize it to:
+1. **Show the app's purpose**: Clear headline with emojis (e.g., "📊 Sales Dashboard" or "🤝 Personal CRM")
+2. **List key features**: 3-4 bullet points with icons showing what users can do
+3. **Include screenshots or mockups**: Even simple colored boxes representing the UI
+4. **Clear CTAs**: Prominent Login/Register buttons with good contrast
+5. **Professional appearance**: The app should look finished and ready to use
+
+For authenticated apps, the welcome page is the user's first impression - make it count!
 
 # Form Request Validation Pattern - BEST PRACTICE
 
@@ -877,6 +905,15 @@ Implement user request:
 
 IMPORTANT: Unless the user explicitly requests otherwise, implement the main functionality on the home page (route '/'). 
 Replace the default welcome page with the requested feature so it's immediately visible when accessing the application.
+
+CRITICAL FOR USER EXPERIENCE: Always update the welcome page (resources/js/pages/welcome.tsx) to showcase the app's functionality, even for authenticated apps. The welcome page should:
+- Display what the app does with attractive visuals
+- Show key features and benefits
+- Include clear call-to-action buttons (Login/Register)
+- Look professional and ready-to-use, NOT "under construction"
+- Use emojis and engaging copy that matches the app's purpose
+
+Example: For a CRM app, show "🤝 Personal CRM - Keep track of your relationships" with feature highlights, not "Your app is under construction".
 
 REFINEMENT RULE: If this is a refinement request (like "add emojis", "make it look better", "add more features"), IMPLEMENT IT NOW. Do not ask questions. Take the existing code and enhance it based on the request. The user is giving you specific direction to improve what's already built.
 """.strip()
