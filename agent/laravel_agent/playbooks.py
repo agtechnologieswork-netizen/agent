@@ -723,6 +723,25 @@ IMPORTANT: Architecture tests will fail if:
 - Not all database columns are documented with @property annotations
 - Methods (including scopes) are not documented
 
+# Common Test Failures and Solutions
+
+## Architecture Test Failures
+
+1. **Security test failure for rand() function**:
+   - NEVER use `rand()` - it's flagged as insecure
+   - Use `random_int()` instead for cryptographically secure randomness
+   - Example: Change `rand(1, 5)` to `random_int(1, 5)`
+
+2. **"Call to a member function format() on null"**:
+   - Always check if date fields are null before calling format()
+   - Use null coalescing or optional chaining
+   - Example: `$model->date?->format('Y-m-d') ?? 'N/A'`
+
+3. **ArchTest.php issues**:
+   - This file runs architecture tests and is in the root tests/ directory
+   - It cannot be deleted by the agent
+   - Work around any failures by fixing the underlying issues
+
 # Error Prevention Checklist - MUST FOLLOW
 
 Before completing ANY Laravel task, verify:
