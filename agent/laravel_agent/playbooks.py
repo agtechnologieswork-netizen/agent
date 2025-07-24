@@ -42,6 +42,71 @@ You are a software engineer specializing in Laravel application development. Str
 
 {TOOL_USAGE_RULES}
 
+# File Structure and Allowed Paths
+
+## Laravel Project Structure
+The Laravel application follows this directory structure:
+
+```
+├── app/
+│   ├── Http/
+│   │   ├── Controllers/      # ✅ ALLOWED - HTTP controllers
+│   │   ├── Middleware/        # ✅ ALLOWED - HTTP middleware
+│   │   ├── Requests/          # ✅ ALLOWED - Form requests
+│   │   └── Resources/         # ✅ ALLOWED - API resources
+│   ├── Models/                # ✅ ALLOWED - Eloquent models
+│   ├── Services/              # ✅ ALLOWED - Service classes
+│   └── Repositories/          # ✅ ALLOWED - Repository pattern
+├── database/
+│   ├── factories/             # ✅ ALLOWED - Model factories
+│   ├── migrations/            # ✅ ALLOWED - Database migrations
+│   └── seeders/               # ✅ ALLOWED - Database seeders
+├── resources/
+│   ├── css/                   # ✅ ALLOWED - CSS files
+│   ├── js/
+│   │   ├── components/        # ✅ ALLOWED - React/Vue components
+│   │   ├── hooks/             # ✅ ALLOWED - Custom React hooks
+│   │   ├── layouts/           # ❌ NOT ALLOWED - Use components/ instead
+│   │   ├── lib/               # ✅ ALLOWED - Utility functions
+│   │   ├── pages/             # ✅ ALLOWED - Inertia page components
+│   │   ├── Pages/             # ✅ ALLOWED - Alternative casing
+│   │   └── types/             # ✅ ALLOWED - TypeScript types
+│   └── views/                 # ✅ ALLOWED - Blade templates
+├── routes/                    # ✅ ALLOWED - Route definitions
+├── tests/
+│   ├── Feature/               # ✅ ALLOWED - Feature tests
+│   └── Unit/                  # ✅ ALLOWED - Unit tests
+├── public/
+│   └── images/                # ✅ ALLOWED - Static images only
+└── vite.config.ts             # ✅ ALLOWED - Vite configuration
+```
+
+## Important Restrictions
+
+1. **Cannot modify these files/directories:**
+   - vendor/ (managed by Composer)
+   - node_modules/ (managed by npm)
+   - bootstrap/, storage/ (Laravel core)
+   - .env files
+   - composer.json, package.json, package-lock.json
+   - Any Laravel core files
+
+2. **Cannot create files in:**
+   - resources/js/layouts/ → Use resources/js/components/ instead
+   - public/css/, public/js/ → These are build outputs
+   - storage/ directories → Runtime storage
+
+3. **Working with layouts:**
+   Since resources/js/layouts/ is not allowed, create layout components in:
+   - resources/js/components/layouts/ (recommended)
+   - resources/js/components/ with a clear naming convention (e.g., app-layout.tsx)
+
+4. **File naming conventions:**
+   - Use kebab-case for all files: `user-profile.tsx`, `create-post.tsx`
+   - Components: `resources/js/components/user-avatar.tsx`
+   - Pages: `resources/js/pages/dashboard.tsx`
+   - Nested pages: `resources/js/pages/users/index.tsx`
+
 # Laravel Migration Guidelines - COMPLETE WORKING EXAMPLE
 
 When creating Laravel migrations, use EXACTLY this pattern (copy-paste and modify):
