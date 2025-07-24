@@ -848,6 +848,113 @@ def validate_migration_syntax(file_content: str) -> bool:
     return bool(re.search(pattern, file_content))
 
 
+def validate_filename_camelcase(filename: str) -> bool:
+    """Validate that PHP filenames follow CamelCase convention"""
+    import os
+    # Extract just the filename without extension
+    name_without_ext = os.path.splitext(filename)[0]
+    
+    # Check if it's CamelCase (PascalCase) - first letter uppercase, no underscores or hyphens
+    return (name_without_ext[0].isupper() and 
+            '_' not in name_without_ext and 
+            '-' not in name_without_ext and
+            name_without_ext.replace(' ', '').isalnum())
+
+
+def check_case_insensitive_duplicate(filename: str, existing_files: list[str]) -> str | None:
+    """Check if a filename would create a case-insensitive duplicate"""
+    filename_lower = filename.lower()
+    for existing_file in existing_files:
+        if existing_file.lower() == filename_lower and existing_file != filename:
+            return existing_file
+    return None
+
+
+# File naming rules configuration
+FILE_NAMING_RULES = [
+    {
+        'id': 'php_camelcase',
+        'name': 'PHP CamelCase Rule',
+        'paths': [
+            'app/Http/Controllers/',
+            'app/Models/',
+            'app/Services/',
+            'app/Repositories/',
+            'app/Http/Requests/',
+            'app/Http/Resources/',
+            'app/Http/Middleware/',
+            'app/Providers/',
+            'app/Console/Commands/',
+            'app/Jobs/',
+            'app/Events/',
+            'app/Listeners/',
+            'app/Policies/',
+            'app/Rules/',
+            'app/Observers/',
+            'app/Traits/',
+            'app/Enums/',
+            'app/Exceptions/',
+        ],
+        'extensions': ['.php'],
+        'exclude_paths': [
+            'database/migrations/',  # Migrations use date prefixes
+            'database/seeders/',     # Some seeders might use special naming
+            'app/Helpers/',          # Helper files might use snake_case
+        ],
+        'validator': validate_filename_camelcase,
+        'error_template': "Invalid filename '{filename}'. Laravel PHP files in {directory} must use CamelCase naming. Please rename to: '{suggestion}'",
+    },
+    {
+        'id': 'case_insensitive_duplicate',
+        'name': 'Case-insensitive duplicate check',
+        'paths': ['./'],  # Check all paths
+        'extensions': ['.php', '.js', '.jsx', '.ts', '.tsx', '.vue'],
+        'exclude_paths': ['vendor/', 'node_modules/', 'storage/', 'bootstrap/cache/'],
+        'validator': None,  # This is handled differently as it needs existing files list
+        'error_template': "A file with a similar name already exists: '{existing}'. Cannot create '{filename}' as it would cause case-insensitive naming conflicts.",
+    }
+]
+
+# Create a dictionary for O(1) rule lookup by ID
+FILE_NAMING_RULES_BY_ID = {rule['id']: rule for rule in FILE_NAMING_RULES}
+
+
+def get_camelcase_suggestion(filename: str) -> str:
+    """Generate a CamelCase suggestion for a filename"""
+    import os
+    name_without_ext = os.path.splitext(filename)[0]
+    ext = os.path.splitext(filename)[1]
+    # Convert snake_case or kebab-case to CamelCase
+    suggested = ''.join(word.capitalize() for word in name_without_ext.replace('_', ' ').replace('-', ' ').split())
+    return suggested + ext
+
+
+def should_validate_file(filepath: str, rule: dict) -> bool:
+    """Check if a file should be validated according to a rule"""
+    import os
+    
+    # Check if file is in excluded paths
+    for exclude in rule.get('exclude_paths', []):
+        if exclude in filepath:
+            return False
+    
+    # Check if file extension matches
+    if rule.get('extensions'):
+        if not any(filepath.endswith(ext) for ext in rule['extensions']):
+            return False
+    
+    # Check if file is in one of the specified paths
+    if rule.get('paths'):
+        if rule['paths'] == ['./']:  # Special case for all paths
+            return True
+        for path in rule['paths']:
+            if path in filepath:
+                return True
+        return False
+    
+    return True
+
+
 USER_PROMPT = """
 {{ project_context }}
 

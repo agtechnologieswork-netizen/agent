@@ -8,7 +8,15 @@ from core.actors import BaseData, FileOperationsActor
 from llm.common import AsyncLLM, Message, TextRaw, ToolUse, ToolUseResult
 from laravel_agent import playbooks
 from laravel_agent.utils import run_migrations, run_tests
-from laravel_agent.playbooks import validate_migration_syntax, MIGRATION_SYNTAX_EXAMPLE
+from laravel_agent.playbooks import (
+    validate_migration_syntax, 
+    MIGRATION_SYNTAX_EXAMPLE,
+    FILE_NAMING_RULES,
+    FILE_NAMING_RULES_BY_ID,
+    check_case_insensitive_duplicate,
+    get_camelcase_suggestion,
+    should_validate_file
+)
 from core.notification_utils import notify_if_callback, notify_stage
 
 logger = logging.getLogger(__name__)
@@ -375,22 +383,69 @@ class LaravelActor(FileOperationsActor):
         # First, call the parent implementation
         result, is_completed = await super().run_tools(node, user_prompt)
         
-        # Then, check if any migration files were written/edited and validate them
+        # Then, check if any files were written/edited and validate them
+        import os
+        
         for i, block in enumerate(node.data.head().content):
             if isinstance(block, ToolUse) and block.name in ["write_file", "edit_file"]:
                 path = block.input.get("path", "")  # pyright: ignore[reportAttributeAccessIssue]
                 
-                # Validate migration files
-                if "/migrations/" in path and path.endswith(".php"):
-                    # Find the corresponding result
-                    tool_result = None
-                    for j, res in enumerate(result):
-                        if res.tool_use.id == block.id:
-                            tool_result = res
-                            break
+                # Find the corresponding result
+                tool_result = None
+                result_index = None
+                for j, res in enumerate(result):
+                    if res.tool_use.id == block.id:
+                        tool_result = res
+                        result_index = j
+                        break
+                
+                # If the operation was successful, perform validations
+                if tool_result and not tool_result.tool_result.is_error:
+                    filename = os.path.basename(path)
+                    directory = os.path.dirname(path)
                     
-                    # If the operation was successful, validate the migration syntax
-                    if tool_result and not tool_result.tool_result.is_error:
+                    # Apply file naming rules
+                    for rule in FILE_NAMING_RULES:
+                        if not should_validate_file(path, rule):
+                            continue
+                        
+                        # Handle case-insensitive duplicate check
+                        if rule['id'] == 'case_insensitive_duplicate' and block.name == "write_file":
+                            try:
+                                existing_files = await node.data.workspace.ls(directory)
+                                duplicate = check_case_insensitive_duplicate(filename, existing_files)
+                                if duplicate:
+                                    error_msg = rule['error_template'].format(
+                                        existing=duplicate,
+                                        filename=filename
+                                    )
+                                    logger.warning(f"Case-insensitive duplicate file detected: {path}")
+                                    result[result_index] = ToolUseResult.from_tool_use(block, error_msg, is_error=True)
+                                    if path in node.data.files:
+                                        del node.data.files[path]
+                                    break  # Stop processing other rules for this file
+                            except Exception as e:
+                                logger.debug(f"Could not check for duplicate files in {directory}: {e}")
+                        
+                        # Handle other validators
+                        elif rule.get('validator') and rule['validator'](filename):
+                            continue  # Validation passed
+                        elif rule.get('validator'):
+                            # Validation failed
+                            suggestion = get_camelcase_suggestion(filename) if rule['id'] == 'php_camelcase' else filename
+                            error_msg = rule['error_template'].format(
+                                filename=filename,
+                                directory=directory,
+                                suggestion=suggestion
+                            )
+                            logger.warning(f"{rule['name']} validation failed for: {path}")
+                            result[result_index] = ToolUseResult.from_tool_use(block, error_msg, is_error=True)
+                            if path in node.data.files:
+                                del node.data.files[path]
+                            break  # Stop processing other rules for this file
+                    
+                    # Special validation for migration files (keeping existing logic)
+                    if "/migrations/" in path and path.endswith(".php"):
                         try:
                             # Read the current file content
                             file_content = await node.data.workspace.read_file(path)
@@ -403,7 +458,7 @@ class LaravelActor(FileOperationsActor):
                                 )
                                 logger.warning(f"Migration validation failed for {path}")
                                 # Replace the success result with an error
-                                result[j] = ToolUseResult.from_tool_use(block, error_msg, is_error=True)
+                                result[result_index] = ToolUseResult.from_tool_use(block, error_msg, is_error=True)
                                 # Also remove the file from node.data.files if it was added
                                 if path in node.data.files:
                                     del node.data.files[path]
