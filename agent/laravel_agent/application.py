@@ -310,9 +310,14 @@ class FSMApplication:
         return actions
 
     async def get_diff_with(self, snapshot: dict[str, str]) -> str:
+        # TODO: Filter out binary files from diffs - https://github.com/appdotbuild/agent/issues/247
         logger.info(
             f"SERVER get_diff_with: Received snapshot with {len(snapshot)} files."
         )
+        
+        # Temporary fix: exclude .png and .ico files from diffs
+        def should_exclude_from_diff(file_path: str) -> bool:
+            return file_path.lower().endswith(('.png', '.ico'))
 
         # Start with empty directory and git init
         start = self.client.container().from_("alpine/git").with_workdir("/app")
@@ -330,7 +335,8 @@ class FSMApplication:
             # Create a directory with all snapshot files first
             snapshot_dir = self.client.directory()
             for file_path, content in snapshot.items():
-                snapshot_dir = snapshot_dir.with_new_file(file_path, content)
+                if not should_exclude_from_diff(file_path):
+                    snapshot_dir = snapshot_dir.with_new_file(file_path, content)
 
             # Now add the entire directory at once
             start = start.with_directory(".", snapshot_dir)
@@ -350,13 +356,18 @@ class FSMApplication:
         template_dir = self.client.host().directory(self.template_path())
         start = start.with_directory(".", template_dir)
         logger.info("SERVER get_diff_with: Added template directory to workspace")
+        
+        # Exclude .png and .ico files from being tracked by git
+        # Using || true to prevent failures if no files are found
+        start = start.with_exec(["sh", "-c", "find . -name '*.png' -o -name '*.ico' | xargs -r git rm --cached || true"])
 
         # Add FSM context files on top
         if self.fsm.context.files:
             # Create a directory with all FSM files
             fsm_dir = self.client.directory()
             for file_path, content in self.fsm.context.files.items():
-                fsm_dir = fsm_dir.with_new_file(file_path, content)
+                if not should_exclude_from_diff(file_path):
+                    fsm_dir = fsm_dir.with_new_file(file_path, content)
 
             # Add the entire FSM directory at once
             start = start.with_directory(".", fsm_dir)
