@@ -20,7 +20,9 @@ We're currently supporting the following application types:
 
 - **Full-stack web apps** with Laravel, React, TypeScript, Tailwind CSS, and Inertia.js;
 - **Modern Laravel 12** with PHP 8+ features and strict typing;
-- Designed to become production-ready soon with authentication, validation, code style enforcement and testing infrastructure;
+- **Built-in authentication** with Laravel Breeze providing complete user registration, login, and profile management;
+- **Production-ready features** including validation, testing infrastructure, and code style enforcement;
+- **AI-powered development** that creates complete applications including models, migrations, controllers, and React components from a single prompt;
 
 ### Data-oriented Applications
 
@@ -43,12 +45,22 @@ New application types are work in progress, stay tuned for updates!
 # for tRPC CRUD apps
 npx @app.build/cli
 
-for Python/NiceGUI apps
+# for Laravel apps (Alpha)
+npx @app.build/cli --template=laravel
+
+# for Python/NiceGUI apps
 npx @app.build/cli --template=python
 ```
 
 ### Locally
 Local usage and development instructions are available in [CONTRIBUTING.md](CONTRIBUTING.md).
+
+For Laravel agent development:
+```bash
+# Run the Laravel agent locally
+cd agent/laravel_agent
+python main.py --prompt "Create a personal CRM application"
+```
 
 ### Local Models with Ollama (expreimental)
 
@@ -60,11 +72,18 @@ We are open for you contributions in better supporting local models. Feel free t
 
 This agent doesn't generate entire applications at once. Instead, it breaks down app creation into small, well-scoped tasks that run in isolated sandboxes:
 
+### tRPC Applications
 1. **Database schema generation** - Creates typed database models
 2. **API handler logic** - Builds validated Fastify routes
 3. **Frontend components** - Generates React UI with proper typing
 
-Each task is validated independently using ESLint, TypeScript compilation, test execution, and runtime logs before being accepted.
+### Laravel Applications
+1. **Database migrations & models** - Creates Laravel migrations with proper syntax and Eloquent models with PHPDoc annotations
+2. **Controllers & routes** - Builds RESTful controllers with Form Request validation
+3. **Inertia.js pages** - Generates React components with TypeScript interfaces
+4. **Validation & testing** - Runs PHPStan, architecture tests, and feature tests
+
+Each task is validated independently using language-specific tools (ESLint/TypeScript for JS, PHPStan for PHP), test execution, and runtime logs before being accepted.
 
 More details on the architecture can be found in the [blog on our design decisions](https://www.app.build/blog/design-decisions).
 
