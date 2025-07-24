@@ -75,7 +75,7 @@ def sync_directories(source: Path, dest: Path, dry_run: bool = False):
     cmd.extend([f"{source}/", f"{dest}/"])
     
     # Execute
-    print(f"🔄 Syncing template...")
+    print("🔄 Syncing template...")
     if dry_run:
         print("   (DRY RUN - no changes will be made)")
     
