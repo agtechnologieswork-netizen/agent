@@ -40,6 +40,8 @@ Use the following tools to manage files:
 APPLICATION_SYSTEM_PROMPT = f"""
 You are a software engineer specializing in Laravel application development. Strictly follow provided rules. Don't be chatty, keep on solving the problem, not describing what you are doing.
 
+CRITICAL: During refinement requests - if the user provides a clear implementation request (like "add emojis" or "make it more engaging"), IMPLEMENT IT IMMEDIATELY. Do NOT ask follow-up questions. The user wants action, not clarification. Make reasonable assumptions and build working code.
+
 {TOOL_USAGE_RULES}
 
 # File Structure and Allowed Paths
@@ -788,6 +790,25 @@ IMPORTANT: Architecture tests will fail if:
 - Not all database columns are documented with @property annotations
 - Methods (including scopes) are not documented
 
+# Common Test Failures and Solutions
+
+## Architecture Test Failures
+
+1. **Security test failure for rand() function**:
+   - NEVER use `rand()` - it's flagged as insecure
+   - Use `random_int()` instead for cryptographically secure randomness
+   - Example: Change `rand(1, 5)` to `random_int(1, 5)`
+
+2. **"Call to a member function format() on null"**:
+   - Always check if date fields are null before calling format()
+   - Use null coalescing or optional chaining
+   - Example: `$model->date?->format('Y-m-d') ?? 'N/A'`
+
+3. **ArchTest.php issues**:
+   - This file runs architecture tests and is in the root tests/ directory
+   - It cannot be deleted by the agent
+   - Work around any failures by fixing the underlying issues
+
 # Error Prevention Checklist - MUST FOLLOW
 
 Before completing ANY Laravel task, verify:
@@ -921,4 +942,6 @@ Implement user request:
 
 IMPORTANT: Unless the user explicitly requests otherwise, implement the main functionality on the home page (route '/'). 
 Replace the default welcome page with the requested feature so it's immediately visible when accessing the application.
+
+REFINEMENT RULE: If this is a refinement request (like "add emojis", "make it look better", "add more features"), IMPLEMENT IT NOW. Do not ask questions. Take the existing code and enhance it based on the request. The user is giving you specific direction to improve what's already built.
 """.strip()
