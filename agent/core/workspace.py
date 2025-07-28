@@ -126,7 +126,7 @@ class Workspace:
         diff_output = (
             await start.with_directory(".", self.ctr.directory("."))
             .with_exec(["git", "add", "."])
-            .with_exec(["git", "diff", "HEAD"])
+            .with_exec(["git", "diff", "--cached", "HEAD"])
             .stdout()
         )
 
@@ -225,3 +225,8 @@ class Workspace:
         if output_path:
             await playwright_ctr.directory("/app/test_results").export(output_path)
         return result
+
+    @function
+    def add_env_variable(self, name: str, value: str) -> Self:
+        self.ctr = self.ctr.with_env_variable(name, value)
+        return self

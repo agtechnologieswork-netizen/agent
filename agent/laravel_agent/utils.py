@@ -60,6 +60,14 @@ async def create_workspace(client: dagger.Client, context: dagger.Directory, pro
         .with_exec(["npm", "install"])
     )
     ctr = ctr.with_env_variable("INSTANCE_ID", uuid.uuid4().hex)
+    
+    # Generate a secure APP_KEY for Laravel
+    import secrets
+    import base64
+    random_bytes = secrets.token_bytes(32)
+    app_key = f"base64:{base64.b64encode(random_bytes).decode('utf-8')}"
+    ctr = ctr.with_env_variable("APP_KEY", app_key)
+    
     return Workspace(
         client=client,
         ctr=ctr,
@@ -81,9 +89,28 @@ async def run_tests(ctr: dagger.Container) -> ExecResult:
     """
 
     try:
-        return await ExecResult.from_ctr(
-            ctr.with_exec(["npm", "run", "build"]).with_exec(["composer", "test"])
-        )
+        # First run npm build - this modifies the container with built assets
+        build_ctr = ctr.with_exec(["npm", "run", "build"], expect=dagger.ReturnType.ANY)
+        build_result = await ExecResult.from_ctr(build_ctr)
+        
+        if build_result.exit_code != 0:
+            # Return detailed npm build errors
+            return ExecResult(
+                exit_code=build_result.exit_code,
+                stdout=f"NPM Build Failed:\n{build_result.stdout}",
+                stderr=f"NPM Build Errors:\n{build_result.stderr}"
+            )
+        
+        # If build succeeds, run tests in the same container that has the built assets
+        test_ctr = build_ctr.with_exec(["composer", "test"], expect=dagger.ReturnType.ANY)
+        test_result = await ExecResult.from_ctr(test_ctr)
+        
+        # If tests fail but build succeeded, include build output for context
+        if test_result.exit_code != 0 and build_result.stdout:
+            test_result.stdout = f"Build Output:\n{build_result.stdout}\n\nTest Output:\n{test_result.stdout}"
+        
+        return test_result
+        
     except (dagger.TransportError, dagger.QueryError) as exc:
         # Map transport issues to a non-zero ExecResult so callers can
         # surface the error context without crashing the task-group.

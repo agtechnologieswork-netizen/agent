@@ -102,7 +102,7 @@ class FSMApplication:
         return cls(client, fsm)
 
     @classmethod
-    def base_execution_plan(cls) -> str:
+    def base_execution_plan(cls, settings: dict[str, Any] | None = None) -> str:
         return "\n".join(
             [
                 "1. Application generation - Implement UI components and application logic. ",
@@ -114,7 +114,13 @@ class FSMApplication:
 
     @classmethod
     def template_path(cls) -> str:
-        return "./laravel_agent/template"
+        import os
+
+        # Get the absolute path to avoid relative path issues
+        current_file = os.path.abspath(__file__)
+        parent_dir = os.path.dirname(current_file)
+        template_path = os.path.join(parent_dir, "template")
+        return template_path
 
     @classmethod
     async def start_fsm(
@@ -154,12 +160,12 @@ class FSMApplication:
             ctx: ApplicationContext, result: Node[BaseData]
         ) -> None:
             logger.info("Running final steps after application generation")
-            # TODO: Run composer lint and fix
+
+            # TODO: implement lint -- --fix for PHP filesß
 
         llm = get_best_coding_llm_client()
         workspace = await create_workspace(
-            client,
-            client.host().directory(cls.template_path())
+            client, client.host().directory(cls.template_path())
         )
 
         # Extract event_callback from settings if provided
@@ -168,10 +174,10 @@ class FSMApplication:
         app_actor = LaravelActor(
             llm=llm,
             workspace=workspace.clone(),
-            beam_width=3,
-            max_depth=50,
+            beam_width=5,
+            max_depth=100,  # Increased to 100 iterations as requested
             system_prompt=playbooks.APPLICATION_SYSTEM_PROMPT,
-            files_allowed=["resources/js/pages/", "app/Http/Controllers/Auth/"],
+            # files_allowed will use the default from actors.py
             event_callback=event_callback,
         )
 
@@ -185,7 +191,8 @@ class FSMApplication:
                 FSMState.APPLICATION_GENERATION: State(
                     invoke={
                         "src": app_actor,
-                        "input_fn": lambda ctx: (ctx.files,
+                        "input_fn": lambda ctx: (
+                            ctx.files,
                             ctx.feedback_data or ctx.user_prompt,
                         ),
                         "on_done": {
@@ -303,23 +310,36 @@ class FSMApplication:
         return actions
 
     async def get_diff_with(self, snapshot: dict[str, str]) -> str:
+        # TODO: Filter out binary files from diffs - https://github.com/appdotbuild/agent/issues/247
         logger.info(
             f"SERVER get_diff_with: Received snapshot with {len(snapshot)} files."
         )
+        
+        # Temporary fix: exclude .png and .ico files from diffs
+        def should_exclude_from_diff(file_path: str) -> bool:
+            return file_path.lower().endswith(('.png', '.ico'))
 
         # Start with empty directory and git init
         start = self.client.container().from_("alpine/git").with_workdir("/app")
         start = start.with_exec(["git", "init"]).with_exec(
             ["git", "config", "--global", "user.email", "agent@appbuild.com"]
         )
+
         if snapshot:
             # Sort keys for consistent sample logging, especially in tests
             sorted_snapshot_keys = sorted(snapshot.keys())
             logger.info(
                 f"SERVER get_diff_with: Snapshot sample paths (up to 5): {sorted_snapshot_keys[:5]}"
             )
+
+            # Create a directory with all snapshot files first
+            snapshot_dir = self.client.directory()
             for file_path, content in snapshot.items():
-                start = start.with_new_file(file_path, content)
+                if not should_exclude_from_diff(file_path):
+                    snapshot_dir = snapshot_dir.with_new_file(file_path, content)
+
+            # Now add the entire directory at once
+            start = start.with_directory(".", snapshot_dir)
             start = start.with_exec(["git", "add", "."]).with_exec(
                 ["git", "commit", "-m", "'snapshot'"]
             )
@@ -328,20 +348,29 @@ class FSMApplication:
                 "SERVER get_diff_with: Snapshot is empty. Diff will be against template + FSM context files."
             )
             # If no snapshot, create an empty initial commit
-            start = (
-                start.with_exec(["touch", "README.md"])
-                .with_exec(["git", "add", "."])
-                .with_exec(["git", "commit", "-m", "'initial'"])
+            start = start.with_exec(["git", "add", "."]).with_exec(
+                ["git", "commit", "-m", "'initial'", "--allow-empty"]
             )
 
         # Add template files (they will appear in diff if not in snapshot)
         template_dir = self.client.host().directory(self.template_path())
         start = start.with_directory(".", template_dir)
         logger.info("SERVER get_diff_with: Added template directory to workspace")
+        
+        # Exclude .png and .ico files from being tracked by git
+        # Using || true to prevent failures if no files are found
+        start = start.with_exec(["sh", "-c", "find . -name '*.png' -o -name '*.ico' | xargs -r git rm --cached || true"])
 
         # Add FSM context files on top
-        for file_path, content in self.fsm.context.files.items():
-            start = start.with_new_file(file_path, content)
+        if self.fsm.context.files:
+            # Create a directory with all FSM files
+            fsm_dir = self.client.directory()
+            for file_path, content in self.fsm.context.files.items():
+                if not should_exclude_from_diff(file_path):
+                    fsm_dir = fsm_dir.with_new_file(file_path, content)
+
+            # Add the entire FSM directory at once
+            start = start.with_directory(".", fsm_dir)
 
         logger.info(
             "SERVER get_diff_with: Calling workspace.diff() to generate final diff."

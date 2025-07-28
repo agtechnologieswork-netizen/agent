@@ -11,7 +11,7 @@ class TextRaw:
 class ToolUse:
     name: str
     input: object
-    id: str | None = None
+    id: str
 
 
 @dataclass
