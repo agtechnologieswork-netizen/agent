@@ -4,9 +4,10 @@
 import json
 import sys
 from pathlib import Path
-from typing import Dict, List, Any
+from typing import Dict, List, Any, Optional
 from datetime import datetime
 import re
+from fire import Fire
 
 
 def format_content(content, format="display"):
@@ -254,21 +255,33 @@ def display_summary(chains: List[List[Dict]]):
         print(f"Tools used: {', '.join(sorted(all_tools))}")
 
 
-def main():
-    if len(sys.argv) != 2:
-        print("🔍 LLM Conversation Chain Viewer")
-        print("Usage: llm_viewer.py <json_file>")
-        sys.exit(1)
-
-    file_path = Path(sys.argv[1])
+def process_trace_file(json_file: str, output: Optional[str] = None) -> None:
+    """Process a single trace file and display or save the conversation chains.
+    
+    Args:
+        json_file: Path to the JSON trace file
+        output: Optional output file path (if None, prints to stdout)
+    """
+    file_path = Path(json_file)
 
     if not file_path.exists():
-        print(f"❌ Error: File {file_path} not found")
-        sys.exit(1)
+        raise FileNotFoundError(f"File {file_path} not found")
 
+    # redirect output if specified
+    original_stdout = sys.stdout
+    output_file = None
+    
     try:
+        if output:
+            output_file = open(output, 'w')
+            sys.stdout = output_file
+        
         with open(file_path, "r") as f:
-            data = json.load(f)
+            contents = f.read()
+            if "nicegui" not in contents:
+                raise ValueError(f"Skipping {file_path.name}: not a NiceGUI trace file")
+
+            data = json.loads(contents)
 
         nodes = extract_nodes(data)
         chains = build_conversation_chains(nodes)
@@ -282,12 +295,27 @@ def main():
                 print("=" * 100)
                 print()
 
-    except json.JSONDecodeError as e:
-        print(f"❌ Error parsing JSON: {e}")
-        sys.exit(1)
+    except (json.JSONDecodeError, FileNotFoundError, ValueError) as e:
+        # restore stdout before re-raising
+        sys.stdout = original_stdout
+        if output_file:
+            output_file.close()
+        raise
     except Exception as e:
-        print(f"❌ Error: {e}")
-        sys.exit(1)
+        # restore stdout before re-raising
+        sys.stdout = original_stdout
+        if output_file:
+            output_file.close()
+        raise
+    finally:
+        sys.stdout = original_stdout
+        if output_file:
+            output_file.close()
+
+
+def main():
+    """Main entry point for Fire CLI"""
+    Fire(process_trace_file)
 
 
 if __name__ == "__main__":
