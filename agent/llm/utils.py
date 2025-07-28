@@ -7,7 +7,7 @@ from llm.common import AsyncLLM, Message, TextRaw, ContentBlock
 from llm.anthropic_client import AnthropicLLM
 from llm.cached import CachedLLM, CacheMode
 from llm.gemini import GeminiLLM
-from llm.models_config import MODELS_MAP, ALL_MODEL_NAMES, OLLAMA_MODEL_NAMES, ANTHROPIC_MODEL_NAMES, GEMINI_MODEL_NAMES, ModelCategory, get_model_for_category
+from llm.models_config import MODELS_MAP, ALL_MODEL_NAMES, OLLAMA_MODEL_NAMES, ANTHROPIC_MODEL_NAMES, GEMINI_MODEL_NAMES, GROQ_MODEL_NAMES, ModelCategory, get_model_for_category
 
 from log import get_logger
 from hashlib import md5
@@ -17,12 +17,13 @@ try:
 except ImportError:
     OllamaLLM = None
 
+from llm.groq_client import GroqLLM
 logger = get_logger(__name__)
 
 # Cache for LLM clients
 llm_clients_cache: Dict[str, AsyncLLM] = {}
 
-LLMBackend = Literal["bedrock", "anthropic", "gemini", "ollama"]
+LLMBackend = Literal["bedrock", "anthropic", "gemini", "groq", "ollama"]
 
 
 def merge_text(content: list[ContentBlock]) -> list[ContentBlock]:
@@ -70,6 +71,10 @@ def _guess_llm_backend(model_name: str) -> LLMBackend:
         if os.getenv("GEMINI_API_KEY"):
             return "gemini"
         raise ValueError("Gemini backend requires GEMINI_API_KEY to be set")
+    elif model_name in GROQ_MODEL_NAMES:
+        if os.getenv("GROQ_API_KEY"):
+            return "groq"
+        raise ValueError("Groq backend requires GROQ_API_KEY to be set")
     elif model_name in OLLAMA_MODEL_NAMES:
         # Default to localhost if no host is specified
         return "ollama"
@@ -100,7 +105,7 @@ def get_llm_client(
     If a client with the same parameters already exists, it will be returned.
 
     Args:
-        backend: LLM backend provider, either "bedrock", "anthropic", "gemini", or "ollama"
+        backend: LLM backend provider, either "bedrock", "anthropic", "gemini", "groq", or "ollama"
         model_name: Specific model name to use (overrides category)
         category: Model category ("best_coding", "universal", "ultra_fast", "vision") for automatic selection
         cache_mode: Cache mode, either "off", "record", or "replay"
@@ -147,6 +152,11 @@ def get_llm_client(
         case "gemini":
             client_params["model_name"] = chosen_model
             client = GeminiLLM(**client_params)
+        case "groq":
+            if GroqLLM is None:
+                raise ValueError("Groq backend requires groq package to be installed. Install with: uv add groq")
+            api_key = client_params.get("api_key") or os.getenv("GROQ_API_KEY")
+            client = GroqLLM(api_key=api_key, default_model=chosen_model)
         case "ollama":
             if OllamaLLM is None:
                 raise ValueError("Ollama backend requires ollama package to be installed. Install with: uv sync --group ollama")
