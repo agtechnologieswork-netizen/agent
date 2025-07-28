@@ -12,8 +12,8 @@ const publicProcedure = t.procedure;
 const router = t.router;
 
 const appRouter = router({
-  healthcheck: publicProcedure.query(({ ctx }) => {
-    return { status: 'ok', timestamp: new Date().toISOString(), user: ctx.user };
+  healthcheck: publicProcedure.query(() => {
+    return { status: 'ok', timestamp: new Date().toISOString() };
   }),
 });
 
