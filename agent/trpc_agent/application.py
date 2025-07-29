@@ -11,7 +11,7 @@ from core.base_node import Node
 from core.statemachine import MachineCheckpoint
 from core.workspace import Workspace
 from trpc_agent.diff_edit_actor import EditActor
-from trpc_agent.actors import DraftActor, HandlersActor, FrontendActor, ConcurrentActor
+from trpc_agent.actors import TrpcActor
 import dagger
 
 # Set up logging
@@ -23,9 +23,10 @@ for package in ['urllib3', 'httpx', 'google_genai.models']:
 
 
 class FSMState(str, enum.Enum):
-    DRAFT = "draft"
-    REVIEW_DRAFT = "review_draft"
-    APPLICATION = "application"
+    DATA_MODEL_GENERATION = "data_model_generation"
+    REVIEW_DATA_MODEL = "review_data_model" 
+    DATA_MODEL_APPLY_FEEDBACK = "data_model_apply_feedback"
+    APPLICATION_GENERATION = "application_generation"
     REVIEW_APPLICATION = "review_application"
     APPLY_FEEDBACK = "apply_feedback"
     COMPLETE = "complete"
@@ -95,10 +96,10 @@ class FSMApplication:
     @classmethod
     def base_execution_plan(cls, settings: dict[str, Any] | None = None) -> str:
         return "\n".join([
-            "1. Application draft. Contains types, database tables and handler declarations only.",
-            "2. Core backend implementations and application frontend.",
+            "1. Data model generation - Define TypeScript types, database schema, and API interface",
+            "2. Application generation - Implement backend handlers and React frontend",
             "",
-            "The result application will be based on Typescript, Drizzle, tRPC and React. The list of available libraries is limited but sufficient to build CRUD apps."
+            "The result application will be based on TypeScript, Drizzle, tRPC and React. The list of available libraries is limited but sufficient to build CRUD apps."
         ])
 
     @classmethod
@@ -116,30 +117,30 @@ class FSMApplication:
 
     @classmethod
     async def make_states(cls, client: dagger.Client, settings: Dict[str, Any] | None = None) -> State[ApplicationContext, FSMEvent]:
-        def agg_node_files(solution: Node[BaseData]) -> dict[str, str]:
+        def agg_node_files(solution: Node[BaseData] | dict[str, Node[BaseData]]) -> dict[str, str]:
             files = {}
-            for node in solution.get_trajectory():
-                files.update(node.data.files)
+            if isinstance(solution, Node):
+                for node in solution.get_trajectory():
+                    files.update(node.data.files)
+            elif isinstance(solution, dict):
+                for key, node_solution in solution.items():
+                    for node in node_solution.get_trajectory():
+                        files.update(node.data.files)
             return {k: v for k, v in files.items() if v is not None}
 
         # Define actions to update context
-        async def update_node_files(ctx: ApplicationContext, result: Node[BaseData] | Dict[str, Node[BaseData]]) -> None:
+        async def update_node_files(ctx: ApplicationContext, result: Node[BaseData]) -> None:
             logger.info("Updating context files from result")
-            if isinstance(result, Node):
-                ctx.files.update(agg_node_files(result))
-            elif isinstance(result, dict):
-                for key, node in result.items():
-                    ctx.files.update(agg_node_files(node))
+            ctx.files.update(agg_node_files(result))
 
         async def set_error(ctx: ApplicationContext, error: Exception) -> None:
             """Set error in context"""
-            # Use logger.exception to include traceback
             logger.exception("Setting error in context:", exc_info=error)
             ctx.error = str(error)
 
         llm = get_best_coding_llm_client()
         vlm = get_vision_llm_client()
-        model_params = settings or {}
+        
         workspace = await Workspace.create(
             client=client,
             base_image="oven/bun:1.2.5-alpine",
@@ -147,32 +148,51 @@ class FSMApplication:
             setup_cmd=[["bun", "install"]],
         )
 
-        if settings and "event_callback" in settings:
-            event_callback = settings.pop("event_callback")
-        else:
-            event_callback = None
-        model_params = settings or {}
-
-        draft_actor = DraftActor(llm, workspace.clone(), model_params, event_callback=event_callback)
-        application_actor = ConcurrentActor(
-            handlers=HandlersActor(llm, workspace.clone(), model_params, beam_width=3, event_callback=event_callback),
-            frontend=FrontendActor(llm, vlm, workspace.clone(), model_params, beam_width=1, max_depth=20, event_callback=event_callback)
+        event_callback = settings.get("event_callback") if settings else None
+        
+        # EditActor for feedback (already uses FileOperationsActor)
+        edit_actor = EditActor(
+            llm=llm,
+            vlm=vlm,
+            workspace=workspace,
+            event_callback=event_callback,
         )
-        edit_actor = EditActor(llm, vlm, workspace.clone(), event_callback=event_callback)
+
+        # Create separate actor instances for data model and application
+        data_model_actor = TrpcActor(
+            llm=llm,
+            vlm=vlm,
+            workspace=workspace.clone(),
+            beam_width=settings.get("beam_width", 1) if settings else 1,
+            max_depth=settings.get("max_depth", 10) if settings else 10,
+            event_callback=event_callback,
+        )
+        
+        app_actor = TrpcActor(
+            llm=llm,
+            vlm=vlm,
+            workspace=workspace.clone(),
+            beam_width=settings.get("beam_width", 3) if settings else 3,
+            max_depth=settings.get("max_depth", 30) if settings else 30,
+            event_callback=event_callback,
+        )
 
         # Define state machine states
         states = State[ApplicationContext, FSMEvent](
             on={
-                FSMEvent("CONFIRM"): FSMState.DRAFT,
+                FSMEvent("CONFIRM"): FSMState.DATA_MODEL_GENERATION,
                 FSMEvent("FEEDBACK"): FSMState.APPLY_FEEDBACK,
             },
             states={
-                FSMState.DRAFT: State(
+                FSMState.DATA_MODEL_GENERATION: State(
                     invoke={
-                        "src": draft_actor,
-                        "input_fn": lambda ctx: (ctx.feedback_data or ctx.user_prompt,),
+                        "src": data_model_actor,
+                        "input_fn": lambda ctx: (
+                            {},  # files - empty for data model generation
+                            ctx.feedback_data or ctx.user_prompt,
+                        ),
                         "on_done": {
-                            "target": FSMState.REVIEW_DRAFT,
+                            "target": FSMState.REVIEW_DATA_MODEL,
                             "actions": [update_node_files],
                         },
                         "on_error": {
@@ -181,16 +201,36 @@ class FSMApplication:
                         },
                     },
                 ),
-                FSMState.REVIEW_DRAFT: State(
+                FSMState.REVIEW_DATA_MODEL: State(
                     on={
-                        FSMEvent("CONFIRM"): FSMState.APPLICATION,
-                        FSMEvent("FEEDBACK"): FSMState.DRAFT,
+                        FSMEvent("CONFIRM"): FSMState.APPLICATION_GENERATION,
+                        FSMEvent("FEEDBACK"): FSMState.DATA_MODEL_APPLY_FEEDBACK,
                     },
                 ),
-                FSMState.APPLICATION: State(
+                FSMState.DATA_MODEL_APPLY_FEEDBACK: State(
                     invoke={
-                        "src": application_actor,
-                        "input_fn": lambda ctx: (ctx.user_prompt, ctx.files, ctx.feedback_data),
+                        "src": data_model_actor,
+                        "input_fn": lambda ctx: (
+                            ctx.files,
+                            ctx.feedback_data,
+                        ),
+                        "on_done": {
+                            "target": FSMState.REVIEW_DATA_MODEL,
+                            "actions": [update_node_files],
+                        },
+                        "on_error": {
+                            "target": FSMState.FAILURE,
+                            "actions": [set_error],
+                        },
+                    },
+                ),
+                FSMState.APPLICATION_GENERATION: State(
+                    invoke={
+                        "src": app_actor,
+                        "input_fn": lambda ctx: (
+                            ctx.files,
+                            ctx.feedback_data or ctx.user_prompt,
+                        ),
                         "on_done": {
                             "target": FSMState.REVIEW_APPLICATION,
                             "actions": [update_node_files],
@@ -221,7 +261,11 @@ class FSMApplication:
                         },
                     }
                 ),
-                FSMState.COMPLETE: State(),
+                FSMState.COMPLETE: State(
+                    on={
+                        FSMEvent("FEEDBACK"): FSMState.APPLY_FEEDBACK,
+                    }
+                ),
                 FSMState.FAILURE: State(),
             },
         )
@@ -259,8 +303,8 @@ class FSMApplication:
     @property
     def state_output(self) -> dict:
         match self.current_state:
-            case FSMState.REVIEW_DRAFT:
-                return {"draft": self.fsm.context.files}
+            case FSMState.REVIEW_DATA_MODEL:
+                return {"data_models": self.truncated_files}
             case FSMState.REVIEW_APPLICATION:
                 return {"application": self.truncated_files}
             case FSMState.COMPLETE:
@@ -275,7 +319,7 @@ class FSMApplication:
     def available_actions(self) -> dict[str, str]:
         actions = {}
         match self.current_state:
-            case FSMState.REVIEW_DRAFT | FSMState.REVIEW_APPLICATION:
+            case FSMState.REVIEW_DATA_MODEL | FSMState.REVIEW_APPLICATION:
                 actions = {"confirm": "Accept current output and continue"}
                 logger.debug(f"Review state detected: {self.current_state}, offering confirm action")
             case FSMState.COMPLETE:
@@ -283,7 +327,7 @@ class FSMApplication:
                     "complete": "Finalize and get all artifacts",
                     "change": "Submit feedback for the current FSM state and trigger revision",
                 }
-                logger.debug("FSM is in COMPLETE state, offering complete action")
+                logger.debug("FSM is in COMPLETE state, offering complete and change actions")
             case FSMState.FAILURE:
                 actions = {"get_error": "Get error details"}
                 logger.debug("FSM is in FAILURE state, offering get_error action")

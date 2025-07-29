@@ -1,518 +1,676 @@
-import os
 import anyio
-import logging
-from typing import Callable, Awaitable
-from anyio.streams.memory import MemoryObjectSendStream
 import jinja2
-from trpc_agent import playbooks
+import logging
+import os
+from typing import Optional, Callable, Awaitable
+
 from core.base_node import Node
 from core.workspace import Workspace
-from core.actors import BaseData, BaseActor, LLMActor
-from llm.common import AsyncLLM, Message, TextRaw, Tool, ToolUse, ToolUseResult, ContentBlock
+from core.actors import BaseData, FileOperationsActor
+from llm.common import AsyncLLM, Message, TextRaw, Tool
+from trpc_agent import playbooks
 from trpc_agent.playwright import PlaywrightRunner, drizzle_push
-from core.workspace import ExecResult
-
-from trpc_agent.utils import run_write_files, run_tsc_compile, run_frontend_build, run_tests
-from core.notification_utils import notify_if_callback
+from core.notification_utils import notify_if_callback, notify_stage
 
 logger = logging.getLogger(__name__)
 
 
-async def run_drizzle(node: Node[BaseData]) -> tuple[ExecResult, TextRaw | None]:
-    logger.info("Running Drizzle database schema push")
-    result = await drizzle_push(node.data.workspace.client, node.data.workspace.ctr, postgresdb=None)
-    if result.exit_code == 0 and not result.stderr:
-        logger.info("Drizzle schema push succeeded")
-        return result, None
-
-    logger.info(f"Drizzle schema push failed with exit code {result.exit_code}")
-    return result, TextRaw(f"Error running drizzle: {result.stderr}")
-
-
-
-class BaseTRPCActor(BaseActor, LLMActor):
-    model_params: dict
-
-    def __init__(self, llm: AsyncLLM, workspace: Workspace, model_params: dict, beam_width: int = 5, max_depth: int = 5, event_callback: Callable[[dict[str, str]], Awaitable[None]] | None = None):
-        self.llm = llm
-        self.workspace = workspace
-        self.model_params = model_params
-        self.beam_width = beam_width
-        self.max_depth = max_depth
+class TrpcActor(FileOperationsActor):
+    """Modern tRPC actor that generates full-stack TypeScript applications."""
+    
+    def __init__(
+        self,
+        llm: AsyncLLM,
+        vlm: AsyncLLM,
+        workspace: Workspace,
+        beam_width: int = 3,
+        max_depth: int = 30,
+        event_callback: Callable[[str, str], Awaitable[None]] | None = None,
+    ):
+        super().__init__(llm, workspace, beam_width, max_depth)
+        self.vlm = vlm
         self.event_callback = event_callback
-        logger.info(f"Initialized {self.__class__.__name__} with beam_width={beam_width}, max_depth={max_depth}")
-
-    async def search(self, node: Node[BaseData] | None) -> Node[BaseData] | None:
-        if node is None:
-            raise RuntimeError("Node cannot be None")
-        logger.info(f"Starting search from node at depth {node.depth}")
-        solution: Node[BaseData] | None = None
-        iteration = 0
-
-        while solution is None:
-            iteration += 1
-            candidates = self.select(node)
-            if not candidates:
-                logger.info("No candidates to evaluate, search terminated")
-                break
-
-            logger.info(f"Iteration {iteration}: Running LLM on {len(candidates)} candidates")
-            nodes = await self.run_llm(candidates, **self.model_params)
-            logger.info(f"Received {len(nodes)} nodes from LLM")
-
-            for i, new_node in enumerate(nodes):
-                logger.info(f"Evaluating node {i+1}/{len(nodes)}")
-                if await self.eval_node(new_node):
-                    logger.info(f"Found solution at depth {new_node.depth}")
-                    solution = new_node
-                    break
-
-        return solution
-
-    def select(self, node: Node[BaseData]) -> list[Node[BaseData]]:
-        if node.is_leaf:
-            logger.info(f"Selecting root node {self.beam_width} times (beam search)")
-            return [node] * self.beam_width
-
-        candidates = [n for n in node.get_all_children() if n.is_leaf and n.depth <= self.max_depth]
-        logger.info(f"Selected {len(candidates)} leaf nodes for evaluation")
-        return candidates
-
-    async def eval_node(self, node: Node[BaseData]) -> bool:
-        ...
-
-
-class DraftActor(BaseTRPCActor):
-    root: Node[BaseData] | None = None
-
-    def __init__(self, llm: AsyncLLM, workspace: Workspace, model_params: dict, beam_width: int = 1, max_depth: int = 5, event_callback: Callable[[dict[str, str]], Awaitable[None]] | None = None):
-        super().__init__(llm, workspace, model_params, beam_width=beam_width, max_depth=max_depth, event_callback=event_callback)
-        self.root = None
-
-    async def execute(self, user_prompt: str) -> Node[BaseData]:
-        logger.info(f"Executing DraftActor with user prompt: '{user_prompt}'")
+        self.playwright = PlaywrightRunner(vlm)
         
-        await notify_if_callback(self.event_callback, "🎯 Starting application draft generation...", "draft start")
+        # Sub-nodes for parallel execution
+        self.handler_nodes: dict[str, Node[BaseData]] = {}
+        self.frontend_node: Optional[Node[BaseData]] = None
+        self.draft_node: Optional[Node[BaseData]] = None
         
-        await self.cmd_create(user_prompt)
-        solution = await self.search(self.root)
-        if solution is None:
-            logger.error("Draft actor failed to find a solution")
-            raise ValueError("No solution found")
+        # Context for validation
+        self._current_context: str = "draft"
+        self._user_prompt: str = ""
         
-        await notify_if_callback(self.event_callback, "✅ Application draft generated successfully!", "draft completion")
+        # Files configuration
+        self._files_allowed_draft = [
+            "server/src/schema.ts",
+            "server/src/db/schema.ts", 
+            "server/src/handlers/",
+            "server/src/index.ts"
+        ]
+        self._files_allowed_frontend = [
+            "client/src/App.tsx",
+            "client/src/components/",
+            "client/src/App.css"
+        ]
+        self._files_protected_frontend = [
+            "client/src/components/ui/"
+        ]
+        self._files_relevant_draft = [
+            "server/src/db/index.ts",
+            "server/package.json"
+        ]
+        self._files_relevant_handlers = [
+            "server/src/helpers/index.ts",
+            "server/src/schema.ts",
+            "server/src/db/schema.ts"
+        ]
+        self._files_relevant_frontend = [
+            "server/src/schema.ts",
+            "server/src/index.ts",
+            "client/src/utils/trpc.ts"
+        ]
+        self._files_inherit_handlers = [
+            "server/src/db/schema.ts",
+            "server/src/schema.ts"
+        ]
+
+    async def execute(
+        self,
+        files: dict[str, str],
+        user_prompt: str,
+    ) -> Node[BaseData]:
+        """Execute tRPC generation."""
+        self._user_prompt = user_prompt
         
-        logger.info("Draft actor completed successfully")
-        return solution
+        # Update workspace with input files
+        workspace = self.workspace.clone()
+        for file_path, content in files.items():
+            workspace.write_file(file_path, content)
+        self.workspace = workspace
+        
+        # Determine what to generate based on existing files
+        has_schema = any(f in files for f in ["server/src/schema.ts", "server/src/db/schema.ts"])
+        
+        if not has_schema:
+            # Stage 1: Generate data model only
+            await notify_stage(
+                self.event_callback,
+                "🎯 Starting data model generation",
+                "in_progress"
+            )
+            
+            solution = await self._generate_draft(user_prompt)
+            if not solution:
+                raise ValueError("Data model generation failed")
+                
+            await notify_stage(
+                self.event_callback,
+                "✅ Data model generated successfully",
+                "completed"
+            )
+            return solution
+            
+        else:
+            # Stage 2: Generate application based on existing schema
+            await notify_stage(
+                self.event_callback,
+                "🚀 Starting application generation",
+                "in_progress"
+            )
+            
+            # Create a single node to collect all results
+            root_workspace = self.workspace.clone().permissions(
+                allowed=self._files_allowed_draft + self._files_allowed_frontend
+            )
+            message = Message(role="user", content=[TextRaw(f"Generate application for: {user_prompt}")])
+            root_node = Node(BaseData(root_workspace, [message], {}, True))
+            
+            # Copy existing files to root node
+            for file_path, content in files.items():
+                root_node.data.files[file_path] = content
+            
+            # Generate implementation
+            results = await self._generate_implementation(files, None)
+            
+            # Merge all results into root node
+            for key, node in results.items():
+                if node:
+                    for file_path, content in node.data.files.items():
+                        root_node.data.files[file_path] = content
+            
+            await notify_stage(
+                self.event_callback,
+                "✅ Application generated successfully",
+                "completed"
+            )
+            return root_node
 
-    async def cmd_create(self, user_prompt: str):
-        logger.info("Creating initial draft node")
-        workspace = self.workspace.clone().permissions(allowed=self.files_allowed)
-        context = []
-
-        # Collect relevant files for context
-        logger.info(f"Collecting {len(self.files_relevant)} relevant files for context")
-
-        for path in self.files_relevant:
-            content = await workspace.read_file(path)
-            context.append(f"\n<file path=\"{path}\">\n{content.strip()}\n</file>\n")
-            logger.debug(f"Added {path} to context")
-
-        context.extend([
-            "APP_DATABASE_URL=postgres://postgres:postgres@postgres:5432/postgres",
-            f"Allowed paths and directories: {self.files_allowed}",
-        ])
-
-        # Prepare prompt for LLM
-        logger.info("Preparing prompt template for LLM")
+    async def _generate_draft(self, user_prompt: str) -> Optional[Node[BaseData]]:
+        """Generate schema and type definitions."""
+        self._current_context = "draft"
+        
+        await notify_if_callback(
+            self.event_callback,
+            "🎯 Generating application schema and types...",
+            "draft start"
+        )
+        
+        # Create draft workspace
+        workspace = self.workspace.clone().permissions(allowed=self._files_allowed_draft)
+        
+        # Build context
+        context = await self._build_draft_context(workspace)
+        
+        # Prepare prompt
         jinja_env = jinja2.Environment()
         user_prompt_template = jinja_env.from_string(playbooks.BACKEND_DRAFT_USER_PROMPT)
         user_prompt_rendered = user_prompt_template.render(
-            project_context="\n".join(context),
+            project_context=context,
             user_prompt=user_prompt,
         )
-
-        # Store system prompt separately
-        self.model_params["system_prompt"] = playbooks.BACKEND_DRAFT_SYSTEM_PROMPT
-
+        
         # Create root node
         message = Message(role="user", content=[TextRaw(user_prompt_rendered)])
-        self.root = Node(BaseData(workspace, [message], {}))
-        logger.info("Created root node for draft")
-
-    async def eval_node(self, node: Node[BaseData]) -> bool:
-        logger.info("Evaluating draft node")
-
-        # Process and write files
-        files_err = await run_write_files(node, self.event_callback)
-        if files_err:
-            logger.info("File writing errors detected")
-            node.data.messages.append(Message(role="user", content=[files_err]))
-            return False
-
-        # TypeScript compilation check
-        _, tsc_err = await run_tsc_compile(node, self.event_callback)
-        if tsc_err:
-            logger.info("TypeScript compilation errors detected")
-            node.data.messages.append(Message(role="user", content=[tsc_err]))
-            return False
-
-        # Drizzle schema validation check
-        _, drizzle_err = await run_drizzle(node)
-        if drizzle_err:
-            logger.info("Drizzle schema errors detected")
-            node.data.messages.append(Message(role="user", content=[drizzle_err]))
-            return False
-
-        logger.info("Node evaluation succeeded")
-        return True
-
-    @property
-    def files_relevant(self) -> list[str]:
-        return ["server/src/db/index.ts", "server/package.json"]
-
-    @property
-    def files_allowed(self) -> list[str]:
-        return ["server/src/schema.ts", "server/src/db/schema.ts", "server/src/handlers/", "server/src/index.ts"]
-
-    async def dump(self) -> object:
-        if self.root is None:
-            return []
-        return await self.dump_node(self.root)
-
-    async def load(self, data: object):
-        if not isinstance(data, list):
-            raise ValueError(f"Expected list got {type(data)}")
-        if not data:
-            return
-        self.root = await self.load_node(data)
-
-
-class HandlersActor(BaseTRPCActor):
-    handlers: dict[str, Node[BaseData]]
-
-    def __init__(self, llm: AsyncLLM, workspace: Workspace, model_params: dict, beam_width: int = 1, max_depth: int = 5, event_callback: Callable[[dict[str, str]], Awaitable[None]] | None = None):
-        super().__init__(llm, workspace, model_params, beam_width=beam_width, max_depth=max_depth, event_callback=event_callback)
-        self.handlers = {}
-
-    async def execute(self, files: dict[str, str], feedback_data: str | None) -> dict[str, Node[BaseData]]:
-        logger.info(f"Executing HandlersActor with {len(files)} input files")
-
-        await notify_if_callback(self.event_callback, "🔧 Generating backend API handlers...", "handlers start")
-
-        async def task_fn(node: Node[BaseData], key: str, tx: MemoryObjectSendStream[tuple[str, Node[BaseData] | None]]):
-            logger.info(f"Starting search for handler: {key}")
-            await notify_if_callback(self.event_callback, f"⚡ Working on {key} handler...", "handler progress")
-            result = await self.search(node)
-            logger.info(f"Completed search for handler: {key}")
-            async with tx:
-                await tx.send((key, result))
-
-        await self.cmd_create(files, feedback_data)
-
-        logger.info(f"Starting parallel processing of {len(self.handlers)} handlers")
-        solution: dict[str, Node[BaseData]] = {}
-        tx, rx = anyio.create_memory_object_stream[tuple[str, Node[BaseData] | None]]()
-
-        async with anyio.create_task_group() as tg:
-            for name, node in self.handlers.items():
-                logger.info(f"Scheduling task for handler: {name}")
-                tg.start_soon(task_fn, node, name, tx.clone())
-            tx.close()
-
-            async with rx:
-                async for (key, node) in rx:
-                    if not node:
-                        # FixMe: should we expose this to top level?
-                        logger.warning(f"Handler {key} returned no solution or an empty node, skipping")
-                    else:
-                        solution[key] = node
-                        logger.info(f"Received solution for handler: {key}")
-
-        await notify_if_callback(self.event_callback, "✅ All backend handlers generated!", "handlers completion")
-
-        logger.info(f"HandlersActor completed with {len(solution)} solutions")
+        self.draft_node = Node(BaseData(workspace, [message], {}, True))
+        
+        # Search for solution
+        solution = await self._search_single_node(
+            self.draft_node,
+            playbooks.BACKEND_DRAFT_SYSTEM_PROMPT
+        )
+        
+        if solution:
+            await notify_if_callback(
+                self.event_callback,
+                "✅ Schema and types generated!",
+                "draft complete"
+            )
+        
         return solution
 
-    async def cmd_create(self, files: dict[str, str], feedback_data: str | None):
-        logger.info("Creating handler nodes")
-        self.handlers = {}
+    async def _generate_implementation(
+        self,
+        draft_files: dict[str, str],
+        feedback_data: Optional[str] = None,
+    ) -> dict[str, Node[BaseData]]:
+        """Generate handlers and frontend in parallel."""
+        
+        results: dict[str, Node[BaseData]] = {}
+        
+        async with anyio.create_task_group() as tg:
+            # Start frontend generation
+            tg.start_soon(
+                self._generate_frontend_task,
+                draft_files,
+                feedback_data,
+                results
+            )
+            
+            # Start parallel handler generation
+            tg.start_soon(
+                self._generate_handlers_parallel,
+                draft_files,
+                feedback_data,
+                results
+            )
+        
+        return results
+    
+    async def _generate_handlers_parallel(
+        self,
+        draft_files: dict[str, str],
+        feedback_data: Optional[str],
+        results: dict[str, Node[BaseData]],
+    ):
+        """Generate all handlers in parallel."""
+        self._current_context = "handler"
+        
+        await notify_if_callback(
+            self.event_callback,
+            "🔧 Generating backend API handlers...",
+            "handlers start"
+        )
+        
+        # Create handler nodes
+        handler_files = {
+            path: content
+            for path, content in draft_files.items()
+            if path.startswith("server/src/handlers/") and path.endswith(".ts")
+        }
+        
+        if not handler_files:
+            logger.warning("No handler files found in draft")
+            return
+        
+        # Create nodes for each handler
+        await self._create_handler_nodes(handler_files, draft_files, feedback_data)
+        
+        # Process all handlers in parallel
+        tx, rx = anyio.create_memory_object_stream[tuple[str, Optional[Node[BaseData]]]](100)
+        
+        async def search_handler(name: str, node: Node[BaseData], tx_channel):
+            await notify_if_callback(
+                self.event_callback,
+                f"⚡ Working on {name} handler...",
+                "handler progress"
+            )
+            solution = await self._search_single_node(
+                node,
+                playbooks.BACKEND_HANDLER_SYSTEM_PROMPT
+            )
+            async with tx_channel:
+                await tx_channel.send((name, solution))
+        
+        async with anyio.create_task_group() as tg:
+            for name, node in self.handler_nodes.items():
+                tg.start_soon(search_handler, name, node, tx.clone())
+            tx.close()
+            
+            async with rx:
+                async for (handler_name, solution) in rx:
+                    if solution:
+                        results[f"handler_{handler_name}"] = solution
+                        logger.info(f"Handler {handler_name} completed")
+        
+        await notify_if_callback(
+            self.event_callback,
+            "✅ All backend handlers generated!",
+            "handlers complete"
+        )
 
+    async def _generate_frontend_task(
+        self,
+        draft_files: dict[str, str],
+        feedback_data: Optional[str],
+        results: dict[str, Node[BaseData]],
+    ):
+        """Generate frontend application."""
+        self._current_context = "frontend"
+        
+        await notify_if_callback(
+            self.event_callback,
+            "🎨 Starting frontend application generation...",
+            "frontend start"
+        )
+        
+        # Create frontend workspace
+        workspace = self.workspace.clone()
+        for file, content in draft_files.items():
+            workspace.write_file(file, content)
+        workspace = workspace.permissions(
+            protected=self._files_protected_frontend,
+            allowed=self._files_allowed_frontend
+        )
+        
+        # Build context
+        context = []
+        for path in self._files_relevant_frontend:
+            content = await workspace.read_file(path)
+            context.append(f"\n<file path=\"{path}\">\n{content.strip()}\n</file>\n")
+        
+        ui_files = await self.workspace.ls("client/src/components/ui")
+        context.extend([
+            f"UI components in client/src/components/ui: {ui_files}",
+            f"Allowed paths and directories: {self._files_allowed_frontend}",
+            f"Protected paths and directories: {self._files_protected_frontend}",
+        ])
+        
+        # Prepare prompt
+        jinja_env = jinja2.Environment()
+        user_prompt_template = jinja_env.from_string(playbooks.FRONTEND_USER_PROMPT)
+        user_prompt_rendered = user_prompt_template.render(
+            project_context="\n".join(context),
+            user_prompt=feedback_data or self._user_prompt,
+        )
+        
+        # Create frontend node
+        message = Message(role="user", content=[TextRaw(user_prompt_rendered)])
+        self.frontend_node = Node(BaseData(workspace, [message], {}, True))
+        
+        # Search for solution
+        solution = await self._search_single_node(
+            self.frontend_node,
+            playbooks.FRONTEND_SYSTEM_PROMPT
+        )
+        
+        if solution:
+            results["frontend"] = solution
+            await notify_if_callback(
+                self.event_callback,
+                "✅ Frontend application generated!",
+                "frontend complete"
+            )
+
+    async def _search_single_node(self, root_node: Node[BaseData], system_prompt: str) -> Optional[Node[BaseData]]:
+        """Search for solution from a single node."""
+        solution: Optional[Node[BaseData]] = None
+        iteration = 0
+        
+        while solution is None:
+            iteration += 1
+            candidates = self._select_candidates(root_node)
+            if not candidates:
+                logger.info("No candidates to evaluate, search terminated")
+                break
+            
+            logger.info(f"Iteration {iteration}: Running LLM on {len(candidates)} candidates")
+            nodes = await self.run_llm(
+                candidates,
+                system_prompt=system_prompt,
+                tools=self.tools,
+                max_tokens=8192
+            )
+            logger.info(f"Received {len(nodes)} nodes from LLM")
+            
+            for i, new_node in enumerate(nodes):
+                logger.info(f"Evaluating node {i+1}/{len(nodes)}")
+                if await self.eval_node(new_node, self._user_prompt):
+                    logger.info(f"Found solution at depth {new_node.depth}")
+                    solution = new_node
+                    break
+        
+        return solution
+
+    def _select_candidates(self, node: Node[BaseData]) -> list[Node[BaseData]]:
+        """Select candidate nodes for evaluation."""
+        if node.is_leaf and node.data.should_branch:
+            logger.info(f"Selecting root node {self.beam_width} times (beam search)")
+            return [node] * self.beam_width
+        
+        all_children = node.get_all_children()
+        candidates = []
+        for n in all_children:
+            if n.is_leaf and n.depth <= self.max_depth:
+                if n.data.should_branch:
+                    effective_beam_width = 1 if len(all_children) > (n.depth + 1) else self.beam_width
+                    logger.info(f"Selecting candidates with effective beam width: {effective_beam_width}, current depth: {n.depth}/{self.max_depth}")
+                    candidates.extend([n] * effective_beam_width)
+                else:
+                    candidates.append(n)
+        
+        logger.info(f"Selected {len(candidates)} leaf nodes for evaluation")
+        return candidates
+
+    async def eval_node(self, node: Node[BaseData], user_prompt: str) -> bool:
+        """Context-aware node evaluation."""
+        
+        # First, process any tool uses
+        tool_results, _ = await self.run_tools(node, user_prompt)
+        if tool_results:
+            node.data.messages.append(Message(role="user", content=tool_results))
+            return False
+        
+        # Then run context-specific validation
+        match self._current_context:
+            case "draft":
+                return await self._eval_draft(node)
+            case "handler":
+                return await self._eval_handler(node)
+            case "frontend":
+                return await self._eval_frontend(node)
+            case _:
+                logger.warning(f"Unknown context: {self._current_context}")
+                return True
+
+    async def _eval_draft(self, node: Node[BaseData]) -> bool:
+        """Validate draft: TypeScript compilation + Drizzle schema."""
+        errors = []
+        
+        async with anyio.create_task_group() as tg:
+            async def check_tsc():
+                result = await node.data.workspace.exec(
+                    ["bun", "run", "tsc", "--noEmit"],
+                    cwd="server"
+                )
+                if result.exit_code != 0:
+                    errors.append(f"TypeScript errors:\n{result.stdout}")
+            
+            async def check_drizzle():
+                result = await drizzle_push(
+                    node.data.workspace.client,
+                    node.data.workspace.ctr,
+                    postgresdb=None
+                )
+                if result.exit_code != 0:
+                    errors.append(f"Drizzle errors:\n{result.stderr}")
+            
+            tg.start_soon(check_tsc)
+            tg.start_soon(check_drizzle)
+        
+        if errors:
+            error_msg = await self.compact_error_message("\n".join(errors))
+            node.data.messages.append(
+                Message(role="user", content=[TextRaw(error_msg)])
+            )
+            return False
+        
+        return True
+    
+    async def _eval_handler(self, node: Node[BaseData]) -> bool:
+        """Validate handler: TypeScript + tests only."""
+        errors = []
+        
+        async with anyio.create_task_group() as tg:
+            async def check_tsc():
+                result = await node.data.workspace.exec(
+                    ["bun", "run", "tsc", "--noEmit"],
+                    cwd="server"
+                )
+                if result.exit_code != 0:
+                    errors.append(f"TypeScript errors:\n{result.stdout}")
+            
+            async def check_tests():
+                # Run only tests for this specific handler
+                handler_name = self._get_handler_name(node)
+                result = await node.data.workspace.exec(
+                    ["bun", "test", f"src/tests/{handler_name}.test.ts"],
+                    cwd="server"
+                )
+                if result.exit_code != 0:
+                    errors.append(f"Test failures:\n{result.stdout}")
+            
+            tg.start_soon(check_tsc)
+            tg.start_soon(check_tests)
+        
+        if errors:
+            error_msg = await self.compact_error_message("\n".join(errors))
+            node.data.messages.append(
+                Message(role="user", content=[TextRaw(error_msg)])
+            )
+            return False
+        
+        return True
+    
+    async def _eval_frontend(self, node: Node[BaseData]) -> bool:
+        """Validate frontend: TypeScript + build + Playwright."""
+        errors = []
+        
+        # First, TypeScript and build checks in parallel
+        async with anyio.create_task_group() as tg:
+            async def check_tsc():
+                result = await node.data.workspace.exec(
+                    ["bun", "run", "tsc", "-p", "tsconfig.app.json", "--noEmit"],
+                    cwd="client"
+                )
+                if result.exit_code != 0:
+                    errors.append(f"TypeScript errors:\n{result.stdout}")
+            
+            async def check_build():
+                result = await node.data.workspace.exec(
+                    ["bun", "run", "build"],
+                    cwd="client"
+                )
+                if result.exit_code != 0:
+                    errors.append(f"Build errors:\n{result.stdout}")
+            
+            tg.start_soon(check_tsc)
+            tg.start_soon(check_build)
+        
+        if errors:
+            error_msg = await self.compact_error_message("\n".join(errors))
+            node.data.messages.append(
+                Message(role="user", content=[TextRaw(error_msg)])
+            )
+            return False
+        
+        # Then Playwright validation (requires built app)
+        playwright_feedback = await self.playwright.evaluate(
+            node,
+            self._user_prompt,
+            mode="client"
+        )
+        if playwright_feedback:
+            node.data.messages.append(
+                Message(role="user", content=[TextRaw(x) for x in playwright_feedback])
+            )
+            return False
+        
+        return True
+
+    async def run_checks(self, node: Node[BaseData], user_prompt: str) -> str | None:
+        """Run validation checks based on context."""
+        # This is handled by eval_node with context awareness
+        return None
+
+    async def _build_draft_context(self, workspace: Workspace) -> str:
+        """Build context for draft generation."""
+        context = []
+        
+        for path in self._files_relevant_draft:
+            content = await workspace.read_file(path)
+            context.append(f"\n<file path=\"{path}\">\n{content.strip()}\n</file>\n")
+            logger.debug(f"Added {path} to context")
+        
+        context.extend([
+            "APP_DATABASE_URL=postgres://postgres:postgres@postgres:5432/postgres",
+            f"Allowed paths and directories: {self._files_allowed_draft}",
+        ])
+        
+        return "\n".join(context)
+
+    async def _create_handler_nodes(
+        self,
+        handler_files: dict[str, str],
+        draft_files: dict[str, str],
+        feedback_data: Optional[str]
+    ):
+        """Create nodes for each handler."""
+        self.handler_nodes = {}
+        
         # Set up workspace with inherited files
         workspace = self.workspace.clone()
-        for file in self.files_inherit:
-            if file in files:
-                workspace.write_file(file, files[file])
+        for file in self._files_inherit_handlers:
+            if file in draft_files:
+                workspace.write_file(file, draft_files[file])
                 logger.debug(f"Copied inherited file: {file}")
-
+        
         # Prepare jinja template
         jinja_env = jinja2.Environment()
         user_prompt_template = jinja_env.from_string(playbooks.BACKEND_HANDLER_USER_PROMPT)
-
+        
         # Process handler files
-        handler_count = 0
-        for file, content in files.items():
-            if not file.startswith("server/src/handlers/") or not file.endswith(".ts"):
-                continue
-
+        for file, content in handler_files.items():
             handler_name, _ = os.path.splitext(os.path.basename(file))
             logger.info(f"Processing handler: {handler_name}")
-
+            
             # Create workspace with permissions
             allowed = [file, f"server/src/tests/{handler_name}.test.ts"]
             handler_ws = workspace.clone().permissions(allowed=allowed).write_file(file, content)
-
+            
             # Build context with relevant files
             context = []
-            for path in self.files_relevant + [file]:
+            for path in self._files_relevant_handlers + [file]:
                 file_content = await handler_ws.read_file(path)
                 context.append(f"\n<file path=\"{path}\">\n{file_content.strip()}\n</file>\n")
-
+            
             context.append(f"Allowed paths and directories: {allowed}")
-
+            
             # Render user prompt and create node
             user_prompt_rendered = user_prompt_template.render(
                 project_context="\n".join(context),
                 handler_name=handler_name,
                 feedback_data=feedback_data,
             )
-
-            # Store system prompt separately in model_params
-            self.model_params["system_prompt"] = playbooks.BACKEND_HANDLER_SYSTEM_PROMPT
-
+            
             message = Message(role="user", content=[TextRaw(user_prompt_rendered)])
-            node = Node(BaseData(handler_ws, [message], {}))
-            self.handlers[handler_name] = node
-            handler_count += 1
+            node = Node(BaseData(handler_ws, [message], {}, True))
+            self.handler_nodes[handler_name] = node
 
-        logger.info(f"Created {handler_count} handler nodes")
+    def _extract_files_from_node(self, node: Node[BaseData]) -> dict[str, str]:
+        """Extract generated files from a node."""
+        return node.data.files
 
-    async def eval_node(self, node):
-        logger.info("Evaluating handler node")
-
-        # Process and write files
-        files_err = await run_write_files(node, self.event_callback)
-        if files_err:
-            logger.info("File writing errors detected")
-            node.data.messages.append(Message(role="user", content=[files_err]))
-            return False
-
-        # TypeScript compilation check
-        _, tsc_err = await run_tsc_compile(node)
-        if tsc_err:
-            logger.info("TypeScript compilation errors detected")
-            node.data.messages.append(Message(role="user", content=[tsc_err]))
-            return False
-
-        # Run tests
-        _, test_err = await run_tests(node, self.event_callback)
-        if test_err:
-            logger.info("Test failures detected")
-            node.data.messages.append(Message(role="user", content=[test_err]))
-            return False
-
-        logger.info("Handler node evaluation succeeded")
-        return True
+    def _get_handler_name(self, node: Node[BaseData]) -> str:
+        """Extract handler name from node's workspace."""
+        for file_path in node.data.files:
+            if file_path.startswith("server/src/handlers/") and file_path.endswith(".ts"):
+                return os.path.splitext(os.path.basename(file_path))[0]
+        return "unknown"
 
     @property
-    def files_inherit(self) -> list[str]:
-        return ["server/src/db/schema.ts", "server/src/schema.ts"]
-
-    @property
-    def files_relevant(self) -> list[str]:
-        return ["server/src/helpers/index.ts", "server/src/schema.ts", "server/src/db/schema.ts"]
-
-    async def dump(self) -> object:
-        if not self.handlers:
-            return {}
-        return {name: await self.dump_node(node) for name, node in self.handlers.items()}
-
-    async def load(self, data: object):
-        if not isinstance(data, dict):
-            raise ValueError(f"Expected dict got {type(data)}")
-        self.handlers = {}
-        for name, node_data in data.items():
-            node = await self.load_node(node_data)
-            self.handlers[name] = node
+    def additional_tools(self) -> list[Tool]:
+        """Additional tools specific to tRPC actor."""
+        # Base tools from FileOperationsActor are sufficient
+        return []
 
 
-class FrontendActor(BaseTRPCActor):
-    root: Node[BaseData] | None = None
-
-    def __init__(self, llm: AsyncLLM, vlm: AsyncLLM, workspace: Workspace, model_params: dict, beam_width: int = 1, max_depth: int = 5, event_callback: Callable[[dict[str, str]], Awaitable[None]] | None = None):
-        super().__init__(llm, workspace, {**model_params, "tools": self.tools}, beam_width=beam_width, max_depth=max_depth, event_callback=event_callback)
-        self.root = None
-        self.playwright_runner = PlaywrightRunner(vlm=vlm)
-        self._user_prompt = None
-
-    async def execute(self, user_prompt: str, server_files: dict[str, str]) -> Node[BaseData]:
-        logger.info(f"Executing frontend actor with user prompt: {user_prompt}")
-        
-        await notify_if_callback(self.event_callback, "🎨 Starting frontend application generation...", "frontend start")
-        
-        self._user_prompt = user_prompt
-        await self.cmd_create(user_prompt, server_files)
-        solution = await self.search(self.root)
-        if solution is None:
-            raise ValueError("No solution found")
-        
-        await notify_if_callback(self.event_callback, "✅ Frontend application generated!", "frontend completion")
-        
-        return solution
-
-    async def cmd_create(self, user_prompt: str, server_files: dict[str, str]):
-        workspace = self.workspace.clone()
-        for file, content in server_files.items():
-            workspace.write_file(file, content)
-        workspace = workspace.permissions(protected=self.files_protected, allowed=self.files_allowed)
-        context = []
-        for path in self.files_relevant:
-            content = await workspace.read_file(path)
-            context.append(f"\n<file path=\"{path}\">\n{content.strip()}\n</file>\n")
-        ui_files = await self.workspace.ls("client/src/components/ui")
-        context.extend([
-            f"UI components in client/src/components/ui: {ui_files}",
-            f"Allowed paths and directories: {self.files_allowed}",
-            f"Protected paths and directories: {self.files_protected}",
-        ])
-        jinja_env = jinja2.Environment()
-        user_prompt_template = jinja_env.from_string(playbooks.FRONTEND_USER_PROMPT)
-        user_prompt_rendered = user_prompt_template.render(
-            project_context="\n".join(context),
-            user_prompt=user_prompt,
-        )
-        self.model_params["system_prompt"] = playbooks.FRONTEND_SYSTEM_PROMPT
-
-        message = Message(role="user", content=[TextRaw(user_prompt_rendered)])
-        self.root = Node(BaseData(workspace, [message], {}))
+# Utility functions for diff_edit_actor compatibility
+async def run_tsc_compile(node: Node[BaseData], event_callback=None) -> tuple[None, Optional[TextRaw]]:
+    """Run TypeScript compilation on server."""
+    if event_callback:
+        await notify_if_callback(event_callback, "🔧 Compiling backend TypeScript...", "tsc start")
+    
+    result = await node.data.workspace.exec(
+        ["bun", "run", "tsc", "--noEmit"],
+        cwd="server"
+    )
+    
+    if result.exit_code != 0:
+        if event_callback:
+            await notify_if_callback(event_callback, "❌ Backend TypeScript compilation failed", "tsc failure")
+        return None, TextRaw(f"TypeScript compile errors: {result.stdout}")
+    
+    if event_callback:
+        await notify_if_callback(event_callback, "✅ Backend TypeScript compilation passed", "tsc success")
+    return None, None
 
 
-    async def eval_node(self, node: Node[BaseData]) -> bool:
-        content: list[ContentBlock] = []
-        content.extend(await self.run_tools(node))
-        files_err = await run_write_files(node, self.event_callback)
-        if files_err:
-            content.append(files_err)
-        if node.data.files:
-            tsc_result = await node.data.workspace.exec(["bun", "run", "tsc", "-p", "tsconfig.app.json", "--noEmit"], cwd="client")
-            if tsc_result.exit_code != 0:
-                content.append(TextRaw(f"Error running tsc: {tsc_result.stdout}"))
-        if content:
-            node.data.messages.append(Message(role="user", content=content))
-            return False
-
-        build_err = await run_frontend_build(node, self.event_callback)
-        if build_err:
-            content.append(TextRaw(build_err))
-            node.data.messages.append(Message(role="user", content=content))
-            return False
-
-        playwright_feedback = await self.playwright_runner.evaluate(node, self._user_prompt or "", mode="client")
-        if playwright_feedback:
-            content += [TextRaw(x) for x in playwright_feedback]
-            node.data.messages.append(Message(role="user", content=content))
-            return False
-
-        return True
-
-    async def run_tools(self, node: Node[BaseData]) -> list[ToolUseResult]:
-        result = []
-        for block in node.data.head().content:
-            if not isinstance(block, ToolUse):
-                continue
-            match block.name:
-                case "read_file":
-                    try:
-                        tool_content = await node.data.workspace.read_file(block.input["path"]) # pyright: ignore[reportIndexIssue]
-                        result.append(ToolUseResult.from_tool_use(block, tool_content))
-                    except FileNotFoundError as e:
-                        result.append(ToolUseResult.from_tool_use(block, str(e), is_error=True))
-                case unknown:
-                    result.append(ToolUseResult.from_tool_use(block, f"Unknown tool: {unknown}", is_error=True))
-        return result
-
-    @property
-    def files_relevant(self) -> list[str]:
-        return ["server/src/schema.ts", "server/src/index.ts", "client/src/utils/trpc.ts"]
-
-    @property
-    def files_protected(self) -> list[str]:
-        return ["client/src/components/ui/"]
-
-    @property
-    def files_allowed(self) -> list[str]:
-        return ["client/src/App.tsx", "client/src/components/", "client/src/App.css"]
-
-    @property
-    def tools(self) -> list[Tool]:
-        return [
-            {
-                "name": "read_file",
-                "description": "Read a file",
-                "input_schema": {
-                    "type": "object",
-                    "properties": {
-                        "path": {"type": "string"},
-                    },
-                    "required": ["path"],
-                }
-            },
-        ]
-
-    async def dump(self) -> object:
-        if self.root is None:
-            node = []
-        else:
-            node = await self.dump_node(self.root)
-        return {
-            "node": node,
-            "user_prompt": self._user_prompt,
-        }
-
-    async def load(self, data: object):
-        match data:
-            case dict():
-                node = data.get("node")
-                if not node:
-                    return
-                if not isinstance(node, list):
-                    raise ValueError(f"Expected list got {type(node)}")
-                self.root = await self.load_node(node)
-                self._user_prompt = data.get("user_prompt")
-            case _:
-                raise ValueError(f"Expected dict got {type(data)}")
+async def run_tests(node: Node[BaseData], event_callback=None) -> tuple[None, Optional[TextRaw]]:
+    """Run backend tests."""
+    if event_callback:
+        await notify_if_callback(event_callback, "🧪 Running backend tests...", "tests start")
+    
+    result = await node.data.workspace.exec(
+        ["bun", "test"],
+        cwd="server"
+    )
+    
+    if result.exit_code != 0:
+        if event_callback:
+            await notify_if_callback(event_callback, "❌ Backend tests failed", "tests failure")
+        return None, TextRaw(f"Test failures: {result.stdout}")
+    
+    if event_callback:
+        await notify_if_callback(event_callback, "✅ Backend tests passed", "tests success")
+    return None, None
 
 
-class ConcurrentActor(BaseTRPCActor):
-    handlers: HandlersActor
-    frontend: FrontendActor
-
-    def __init__(self, handlers: HandlersActor, frontend: FrontendActor):
-        self.handlers = handlers
-        self.frontend = frontend
-
-    async def execute(self, user_prompt: str, server_files: dict[str, str], feedback_data: str | None) -> dict[str, Node[BaseData]]:
-        result: dict[str, Node[BaseData]] = {}
-        async def solve_frontend():
-            result["frontend"] = await self.frontend.execute(feedback_data or user_prompt, server_files)
-        async def solve_handlers():
-            handlers_solution = await self.handlers.execute(server_files, feedback_data)
-            result.update(handlers_solution)
-        async with anyio.create_task_group() as tg:
-            tg.start_soon(solve_frontend)
-            tg.start_soon(solve_handlers)
-        return result
-
-    async def dump(self) -> object:
-        return {
-            "frontend": await self.frontend.dump(),
-            "handlers": await self.handlers.dump(),
-        }
-
-    async def load(self, data: object):
-        if not isinstance(data, dict):
-            raise ValueError(f"Expected dict got {type(data)}")
-        if not data:
-            return
-        await self.handlers.load(data["handlers"])
-        await self.frontend.load(data["frontend"])
+async def run_frontend_build(node: Node[BaseData], event_callback=None) -> Optional[str]:
+    """Run frontend build."""
+    if event_callback:
+        await notify_if_callback(event_callback, "🏗️ Building frontend application...", "build start")
+    
+    result = await node.data.workspace.exec(
+        ["bun", "run", "build"],
+        cwd="client"
+    )
+    
+    if result.exit_code != 0:
+        if event_callback:
+            await notify_if_callback(event_callback, "❌ Frontend build failed", "build failure")
+        return f"Frontend build errors: {result.stdout}"
+    
+    if event_callback:
+        await notify_if_callback(event_callback, "✅ Frontend build successful", "build success")
+    return None
