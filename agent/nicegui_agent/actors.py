@@ -505,12 +505,16 @@ class NiceguiActor(FileOperationsActor):
 
             async def run_and_store(key, coro):
                 """Helper to run a coroutine and store its result in the results dict."""
+                start_time = anyio.current_time()
                 try:
                     results[key] = await coro
                 except Exception as e:
                     # Catch unexpected exceptions during check execution
                     logger.error(f"Error running check {key}: {e}")
                     results[key] = f"Internal error running check {key}: {e}"
+                finally:
+                    duration = anyio.current_time() - start_time
+                    logger.info(f"Check '{key}' completed in {duration:.2f} seconds")
 
             tg.start_soon(run_and_store, "lint", self.run_lint_checks(node))
             tg.start_soon(run_and_store, "type_check", self.run_type_checks(node))

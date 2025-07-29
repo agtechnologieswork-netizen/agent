@@ -10,6 +10,7 @@ services:
       - APP_DATABASE_URL=${APP_DATABASE_URL:-postgresql://postgres:postgres@postgres:5432/postgres}
       - DATABRICKS_HOST=${DATABRICKS_HOST}
       - DATABRICKS_TOKEN=${DATABRICKS_TOKEN}
+    command: ${APP_COMMAND:-}
     depends_on:
       postgres:
         condition: service_healthy
