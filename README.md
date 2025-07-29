@@ -55,13 +55,6 @@ npx @app.build/cli --template=python
 ### Locally
 Local usage and development instructions are available in [CONTRIBUTING.md](CONTRIBUTING.md).
 
-For Laravel agent development:
-```bash
-# Run the Laravel agent locally
-cd agent/laravel_agent
-python main.py --prompt "Create a personal CRM application"
-```
-
 ### Local Models with Ollama (expreimental)
 
 Want to run everything locally without API keys? We  added experimental support [Ollama](https://ollama.ai) for local model inference. Set up Ollama, pull your preferred models, and run the agent completely offline. See [PROJECT_GUIDELINES.md](PROJECT_GUIDELINES.md) for detailed setup instructions and recommended models.
