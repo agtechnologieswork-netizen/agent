@@ -79,10 +79,16 @@ class TrpcActor(FileOperationsActor):
         self,
         files: dict[str, str],
         user_prompt: str,
+        feedback: str = None,
     ) -> Node[BaseData]:
-        """Execute tRPC generation."""
+        """Execute tRPC generation or editing based on parameters."""
         self._user_prompt = user_prompt
         
+        # If feedback is provided, route to edit functionality
+        if feedback is not None:
+            return await self.execute_edit(files, user_prompt, feedback)
+        
+        # Otherwise, proceed with normal generation
         # Update workspace with input files
         workspace = self.workspace.clone()
         for file_path, content in files.items():

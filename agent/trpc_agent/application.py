@@ -23,7 +23,7 @@ for package in ['urllib3', 'httpx', 'google_genai.models']:
 
 class FSMState(str, enum.Enum):
     DATA_MODEL_GENERATION = "data_model_generation"
-    REVIEW_DATA_MODEL = "review_data_model" 
+    REVIEW_DATA_MODEL = "review_data_model"
     DATA_MODEL_APPLY_FEEDBACK = "data_model_apply_feedback"
     APPLICATION_GENERATION = "application_generation"
     REVIEW_APPLICATION = "review_application"
@@ -139,7 +139,7 @@ class FSMApplication:
 
         llm = get_best_coding_llm_client()
         vlm = get_vision_llm_client()
-        
+
         workspace = await Workspace.create(
             client=client,
             base_image="oven/bun:1.2.5-alpine",
@@ -148,32 +148,32 @@ class FSMApplication:
         )
 
         event_callback = settings.get("event_callback") if settings else None
-        
+
         # Create separate actor instances for data model, application, and editing
         data_model_actor = TrpcActor(
             llm=llm,
             vlm=vlm,
             workspace=workspace.clone(),
             beam_width=settings.get("beam_width", 1) if settings else 1,
-            max_depth=settings.get("max_depth", 10) if settings else 10,
+            max_depth=settings.get("max_depth", 20) if settings else 20,
             event_callback=event_callback,
         )
-        
+
         app_actor = TrpcActor(
             llm=llm,
             vlm=vlm,
             workspace=workspace.clone(),
-            beam_width=settings.get("beam_width", 3) if settings else 3,
-            max_depth=settings.get("max_depth", 30) if settings else 30,
+            beam_width=settings.get("beam_width", 1) if settings else 1,
+            max_depth=settings.get("max_depth", 50) if settings else 50,
             event_callback=event_callback,
         )
-        
+
         edit_actor = TrpcActor(
             llm=llm,
             vlm=vlm,
             workspace=workspace.clone(),
             beam_width=1,  # Use narrower beam for edits
-            max_depth=15,  # Shorter depth for focused edits
+            max_depth=50,  # Shorter depth for focused edits
             event_callback=event_callback,
         )
 
@@ -249,7 +249,7 @@ class FSMApplication:
                 ),
                 FSMState.APPLY_FEEDBACK: State(
                     invoke={
-                        "src": edit_actor.execute_edit,
+                        "src": edit_actor,
                         "input_fn": lambda ctx: (ctx.files, ctx.user_prompt, ctx.feedback_data),
                         "on_done": {
                             "target": FSMState.COMPLETE,
