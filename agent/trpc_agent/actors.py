@@ -146,6 +146,73 @@ class TrpcActor(FileOperationsActor):
             )
             return root_node
 
+    async def execute_edit(
+        self,
+        files: dict[str, str],
+        user_prompt: str,
+        feedback: str,
+    ) -> Node[BaseData]:
+        """Execute edit/feedback-based modifications."""
+        self._user_prompt = user_prompt
+        
+        await notify_stage(
+            self.event_callback,
+            "🛠️ Applying requested changes...",
+            "in_progress"
+        )
+        
+        # Update workspace with input files
+        workspace = self.workspace.clone()
+        for file_path, content in files.items():
+            workspace.write_file(file_path, content)
+        
+        # Set permissions for editing (allow both frontend and backend)
+        workspace = workspace.permissions(
+            allowed=self._files_allowed_draft + self._files_allowed_frontend,
+            protected=self._files_protected_frontend
+        )
+        self.workspace = workspace
+        
+        # Build context with relevant files
+        context = await self._build_edit_context(workspace, files)
+        
+        # Prepare edit prompt
+        jinja_env = jinja2.Environment()
+        user_prompt_template = jinja_env.from_string(playbooks.EDIT_ACTOR_USER_PROMPT)
+        user_prompt_rendered = user_prompt_template.render(
+            project_context=context,
+            user_prompt=user_prompt,
+            feedback=feedback
+        )
+        
+        # Create root node for editing
+        message = Message(role="user", content=[TextRaw(user_prompt_rendered)])
+        root_node = Node(BaseData(workspace, [message], {}, True))
+        
+        # Copy existing files to root node
+        for file_path, content in files.items():
+            root_node.data.files[file_path] = content
+        
+        # Set context for edit validation
+        self._current_context = "edit"
+        
+        # Search for solution
+        solution = await self._search_single_node(
+            root_node,
+            playbooks.EDIT_ACTOR_SYSTEM_PROMPT
+        )
+        
+        if not solution:
+            raise ValueError("Edit failed to find a solution")
+        
+        await notify_stage(
+            self.event_callback,
+            "✅ Changes applied successfully!",
+            "completed"
+        )
+        
+        return solution
+
     async def _generate_draft(self, user_prompt: str) -> Optional[Node[BaseData]]:
         """Generate schema and type definitions."""
         self._current_context = "draft"
@@ -409,6 +476,8 @@ class TrpcActor(FileOperationsActor):
                 return await self._eval_handler(node)
             case "frontend":
                 return await self._eval_frontend(node)
+            case "edit":
+                return await self._eval_edit(node)
             case _:
                 logger.warning(f"Unknown context: {self._current_context}")
                 return True
@@ -528,6 +597,103 @@ class TrpcActor(FileOperationsActor):
         
         return True
 
+    async def _eval_edit(self, node: Node[BaseData]) -> bool:
+        """Validate edit: Full validation including TypeScript, tests, build, and Playwright."""
+        errors = []
+        
+        await notify_if_callback(
+            self.event_callback,
+            "🔍 Validating changes...",
+            "validation start"
+        )
+        
+        # Run comprehensive validation in parallel
+        async with anyio.create_task_group() as tg:
+            async def check_backend_tsc():
+                result = await node.data.workspace.exec(
+                    ["bun", "run", "tsc", "--noEmit"],
+                    cwd="server"
+                )
+                if result.exit_code != 0:
+                    errors.append(f"TypeScript compile errors (backend):\n{result.stdout}")
+            
+            async def check_frontend_tsc():
+                await notify_if_callback(
+                    self.event_callback,
+                    "🔧 Compiling frontend TypeScript...",
+                    "frontend compile start"
+                )
+                result = await node.data.workspace.exec(
+                    ["bun", "run", "tsc", "-p", "tsconfig.app.json", "--noEmit"],
+                    cwd="client"
+                )
+                if result.exit_code != 0:
+                    await notify_if_callback(
+                        self.event_callback,
+                        "❌ Frontend TypeScript compilation failed",
+                        "frontend compile failure"
+                    )
+                    errors.append(f"TypeScript compile errors (frontend): {result.stdout}")
+            
+            async def check_tests():
+                result = await node.data.workspace.exec(
+                    ["bun", "test"],
+                    cwd="server"
+                )
+                if result.exit_code != 0:
+                    errors.append(f"Test errors:\n{result.stdout}")
+            
+            async def check_frontend_build():
+                result = await node.data.workspace.exec(
+                    ["bun", "run", "build"],
+                    cwd="client"
+                )
+                if result.exit_code != 0:
+                    errors.append(f"Frontend build errors: {result.stdout}")
+            
+            tg.start_soon(check_backend_tsc)
+            tg.start_soon(check_frontend_tsc)
+            tg.start_soon(check_tests)
+            tg.start_soon(check_frontend_build)
+        
+        if errors:
+            error_msg = await self.compact_error_message("\n".join(errors))
+            node.data.messages.append(
+                Message(role="user", content=[TextRaw(error_msg)])
+            )
+            return False
+        
+        # Then Playwright validation (requires built app)
+        await notify_if_callback(
+            self.event_callback,
+            "🎭 Running UI validation...",
+            "playwright start"
+        )
+        
+        playwright_feedback = await self.playwright.evaluate(
+            node,
+            self._user_prompt,
+            mode="full"
+        )
+        if playwright_feedback:
+            await notify_if_callback(
+                self.event_callback,
+                "❌ UI validation failed - adjusting...",
+                "playwright failure"
+            )
+            node.data.messages.append(
+                Message(role="user", content=[TextRaw(x) for x in playwright_feedback])
+            )
+            return False
+        
+        await notify_if_callback(
+            self.event_callback,
+            "✅ All validations passed!",
+            "validation success"
+        )
+        
+        return True
+
     async def run_checks(self, node: Node[BaseData], user_prompt: str) -> str | None:
         """Run validation checks based on context."""
         # This is handled by eval_node with context awareness
@@ -545,6 +711,39 @@ class TrpcActor(FileOperationsActor):
         context.extend([
             "APP_DATABASE_URL=postgres://postgres:postgres@postgres:5432/postgres",
             f"Allowed paths and directories: {self._files_allowed_draft}",
+        ])
+        
+        return "\n".join(context)
+
+    async def _build_edit_context(self, workspace: Workspace, files: dict[str, str]) -> str:
+        """Build context for edit operations."""
+        context = []
+        
+        # Add all relevant files from both draft and frontend contexts
+        relevant_files = list(set(
+            self._files_relevant_draft + 
+            self._files_relevant_handlers + 
+            self._files_relevant_frontend
+        ))
+        
+        for path in relevant_files:
+            try:
+                content = await workspace.read_file(path)
+                context.append(f"\n<file path=\"{path}\">\n{content.strip()}\n</file>\n")
+            except Exception:
+                # File might not exist, skip it
+                pass
+        
+        # Add UI components info
+        try:
+            ui_files = await workspace.ls("client/src/components/ui")
+            context.append(f"UI components in client/src/components/ui: {ui_files}")
+        except Exception:
+            pass
+        
+        context.extend([
+            f"Allowed paths and directories: {self._files_allowed_draft + self._files_allowed_frontend}",
+            f"Protected paths and directories: {self._files_protected_frontend}",
         ])
         
         return "\n".join(context)
@@ -614,63 +813,3 @@ class TrpcActor(FileOperationsActor):
         # Base tools from FileOperationsActor are sufficient
         return []
 
-
-# Utility functions for diff_edit_actor compatibility
-async def run_tsc_compile(node: Node[BaseData], event_callback=None) -> tuple[None, Optional[TextRaw]]:
-    """Run TypeScript compilation on server."""
-    if event_callback:
-        await notify_if_callback(event_callback, "🔧 Compiling backend TypeScript...", "tsc start")
-    
-    result = await node.data.workspace.exec(
-        ["bun", "run", "tsc", "--noEmit"],
-        cwd="server"
-    )
-    
-    if result.exit_code != 0:
-        if event_callback:
-            await notify_if_callback(event_callback, "❌ Backend TypeScript compilation failed", "tsc failure")
-        return None, TextRaw(f"TypeScript compile errors: {result.stdout}")
-    
-    if event_callback:
-        await notify_if_callback(event_callback, "✅ Backend TypeScript compilation passed", "tsc success")
-    return None, None
-
-
-async def run_tests(node: Node[BaseData], event_callback=None) -> tuple[None, Optional[TextRaw]]:
-    """Run backend tests."""
-    if event_callback:
-        await notify_if_callback(event_callback, "🧪 Running backend tests...", "tests start")
-    
-    result = await node.data.workspace.exec(
-        ["bun", "test"],
-        cwd="server"
-    )
-    
-    if result.exit_code != 0:
-        if event_callback:
-            await notify_if_callback(event_callback, "❌ Backend tests failed", "tests failure")
-        return None, TextRaw(f"Test failures: {result.stdout}")
-    
-    if event_callback:
-        await notify_if_callback(event_callback, "✅ Backend tests passed", "tests success")
-    return None, None
-
-
-async def run_frontend_build(node: Node[BaseData], event_callback=None) -> Optional[str]:
-    """Run frontend build."""
-    if event_callback:
-        await notify_if_callback(event_callback, "🏗️ Building frontend application...", "build start")
-    
-    result = await node.data.workspace.exec(
-        ["bun", "run", "build"],
-        cwd="client"
-    )
-    
-    if result.exit_code != 0:
-        if event_callback:
-            await notify_if_callback(event_callback, "❌ Frontend build failed", "build failure")
-        return f"Frontend build errors: {result.stdout}"
-    
-    if event_callback:
-        await notify_if_callback(event_callback, "✅ Frontend build successful", "build success")
-    return None

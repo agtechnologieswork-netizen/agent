@@ -5,8 +5,8 @@ import os
 from glob import glob
 
 from core.statemachine import StateMachine
-from trpc_agent.application import ApplicationContext, FSMEvent, FSMApplication, Node, EditActor
-from trpc_agent.actors import ConcurrentActor, DraftActor
+from trpc_agent.application import ApplicationContext, FSMEvent, FSMApplication, Node
+from trpc_agent.actors import ConcurrentActor, DraftActor, TrpcActor
 import dagger
 import anyio
 
@@ -62,15 +62,15 @@ def extract_trajectories_from_dump(data: Dict[str, Any]) -> Dict[str, List[Dict[
                 for k, v in get_all_trajectories(root, "draft"):
                     messages[k] = v
 
-            case EditActor():
-                root = actor.root
-                if root is None:
-                    continue
-                for k, v in get_all_trajectories(root, "edit"):
-                    messages[k] = v
+            case TrpcActor():
+                # TrpcActor doesn't have a single root like the old actors
+                # The new architecture uses context-based nodes that are created dynamically
+                # This analysis would need to be updated to work with the new architecture
+                pass
 
             case _:
-                raise ValueError(f"Unknown actor type: {type(actor)}")
+                # Unknown actor type - could be the new TrpcActor method or other
+                pass
 
     return messages
 

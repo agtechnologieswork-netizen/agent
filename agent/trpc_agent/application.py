@@ -10,7 +10,6 @@ from core.actors import BaseData
 from core.base_node import Node
 from core.statemachine import MachineCheckpoint
 from core.workspace import Workspace
-from trpc_agent.diff_edit_actor import EditActor
 from trpc_agent.actors import TrpcActor
 import dagger
 
@@ -150,15 +149,7 @@ class FSMApplication:
 
         event_callback = settings.get("event_callback") if settings else None
         
-        # EditActor for feedback (already uses FileOperationsActor)
-        edit_actor = EditActor(
-            llm=llm,
-            vlm=vlm,
-            workspace=workspace,
-            event_callback=event_callback,
-        )
-
-        # Create separate actor instances for data model and application
+        # Create separate actor instances for data model, application, and editing
         data_model_actor = TrpcActor(
             llm=llm,
             vlm=vlm,
@@ -174,6 +165,15 @@ class FSMApplication:
             workspace=workspace.clone(),
             beam_width=settings.get("beam_width", 3) if settings else 3,
             max_depth=settings.get("max_depth", 30) if settings else 30,
+            event_callback=event_callback,
+        )
+        
+        edit_actor = TrpcActor(
+            llm=llm,
+            vlm=vlm,
+            workspace=workspace.clone(),
+            beam_width=1,  # Use narrower beam for edits
+            max_depth=15,  # Shorter depth for focused edits
             event_callback=event_callback,
         )
 
@@ -249,7 +249,7 @@ class FSMApplication:
                 ),
                 FSMState.APPLY_FEEDBACK: State(
                     invoke={
-                        "src": edit_actor,
+                        "src": edit_actor.execute_edit,
                         "input_fn": lambda ctx: (ctx.files, ctx.user_prompt, ctx.feedback_data),
                         "on_done": {
                             "target": FSMState.COMPLETE,
