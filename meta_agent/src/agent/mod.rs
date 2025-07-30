@@ -36,10 +36,10 @@ pub trait Notify<T>: Clone + Send {
 }
 
 pub trait Checker: Send + Sync {
-    fn run(
-        &self,
-        workspace: &mut Box<dyn WorkspaceDyn>,
-    ) -> Pin<Box<dyn Future<Output = eyre::Result<Option<serde_json::Value>>> + Send + Sync + '_>>;
+    fn run<'a>(
+        &'a self,
+        workspace: &'a mut Box<dyn WorkspaceDyn>,
+    ) -> Pin<Box<dyn Future<Output = eyre::Result<Option<serde_json::Value>>> + Send + Sync + 'a>>;
 }
 
 pub trait Tool: Sized + Send + Sync {
