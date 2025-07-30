@@ -1,0 +1,16 @@
+[package]
+name = "rust_agent"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+dagger-sdk = "0.18.12"
+eyre = "0.6.12"
+kameo = "0.17.2"
+rig-core = "0.15.1"
+serde = "1.0.219"
+serde_json = "1.0.140"
+tempdir = "0.3.7"
+tokio = { version = "1.46.1", features = ["full"] }
+tracing = "0.1.41"
+tracing-subscriber = "0.3.19"
