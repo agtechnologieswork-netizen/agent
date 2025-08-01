@@ -273,7 +273,7 @@ class FSMApplication:
             llm=llm,
             workspace=workspace.clone(),
             beam_width=3,
-            max_depth=50,
+            max_depth=100,
             system_prompt=playbooks.get_data_model_system_prompt(
                 use_databricks=use_databricks
             ),
