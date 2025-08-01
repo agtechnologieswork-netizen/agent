@@ -233,9 +233,20 @@ class BaseAgentSession(AgentInterface, ABC):
                         )
                     case FSMStatus.FAILED:
                         logger.info("Got FAILED status, sending runtime error message")
+                        # Get the actual error from the FSM if available
+                        error_details = "Unknown error"
+                        if self.processor_instance.fsm_app:
+                            error_details = self.processor_instance.fsm_app.maybe_error() or "Unknown error"
+                        
+                        logger.error(f"FSM failed with error: {error_details}")
+                        
+                        error_message = f"Error: {error_details}"
+                        if "No solutions found" in error_details:
+                            error_message = "The agent was unable to generate a solution after exhausting all attempts. This usually means the request is too complex or ambiguous. Please try simplifying your request or providing more specific details."
+                        
                         runtime_error_message = InternalMessage(
                                     role="assistant",
-                                    content=[TextRaw("Runtime error occurred, please try again. If the problem persists, please create an issue on GitHub.")]
+                                    content=[TextRaw(error_message)]
                                 )
                         await self.send_event(
                             event_tx=event_tx,
