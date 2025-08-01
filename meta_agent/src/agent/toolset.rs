@@ -81,7 +81,7 @@ impl Tool for WriteFileTool {
                         "type": "string",
                         "description": "Path to the file",
                     },
-                    "content": {
+                    "contents": {
                         "type": "string",
                         "description": "Content to write to the file",
                     }

@@ -71,7 +71,11 @@ impl Workspace for DaggerWorkspace {
     async fn bash(&mut self, cmd: Bash) -> eyre::Result<ExecResult> {
         let ctr = self.ctr.clone();
         let (res, ctr) = tokio::spawn(async move {
-            let ctr = ctr.with_exec(cmd.0);
+            let opts = dagger_sdk::ContainerWithExecOptsBuilder::default()
+                .expect(dagger_sdk::ReturnType::Any)
+                .build()
+                .unwrap();
+            let ctr = ctr.with_exec_opts(cmd.0, opts);
             let res = DaggerWorkspace::exec_res(&ctr).await;
             (res, ctr)
         })

@@ -54,7 +54,7 @@ pub trait Tool: Sized + Send + Sync {
     fn call(
         &self,
         args: Self::Args,
-        workspace: &mut Box<dyn crate::workspace::WorkspaceDyn>,
+        workspace: &mut Box<dyn WorkspaceDyn>,
     ) -> impl Future<Output = Result<Result<Self::Output, Self::Error>>> + Send + Sync;
 }
 
@@ -90,7 +90,7 @@ impl<T: Tool> ToolDyn for T {
         args: serde_json::Value,
         workspace: &'a mut Box<dyn WorkspaceDyn>,
     ) -> Pin<Box<dyn Future<Output = ToolDynResult> + Send + Sync + 'a>> {
-        Box::pin(async move {
+        Box::pin(async {
             match serde_json::from_value::<<Self as Tool>::Args>(args) {
                 Ok(args) => {
                     let result = Tool::call(self, args, workspace).await?;
@@ -131,5 +131,27 @@ where
         _workspace: &mut Box<dyn WorkspaceDyn>,
     ) -> Result<Result<Self::Output, Self::Error>> {
         Ok(T::call(self, args).await)
+    }
+}
+
+pub struct ToolResult;
+
+impl ToolResult {
+    pub fn as_result(
+        call: &rig::message::ToolCall,
+        text: impl Into<String>,
+    ) -> rig::message::ToolResult {
+        rig::message::ToolResult {
+            id: call.id.clone(),
+            call_id: call.call_id.clone(),
+            content: rig::OneOrMany::one(rig::message::ToolResultContent::text(text.into())),
+        }
+    }
+
+    pub fn as_content(
+        call: &rig::message::ToolCall,
+        text: impl Into<String>,
+    ) -> rig::message::UserContent {
+        rig::message::UserContent::ToolResult(Self::as_result(call, text))
     }
 }
