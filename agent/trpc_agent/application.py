@@ -107,21 +107,13 @@ class FSMApplication:
 
     @classmethod
     async def make_states(cls, client: dagger.Client, settings: Dict[str, Any] | None = None) -> State[ApplicationContext, FSMEvent]:
-        def agg_node_files(solution: Node[BaseData] | dict[str, Node[BaseData]]) -> dict[str, str]:
-            files = {}
-            if isinstance(solution, Node):
-                for node in solution.get_trajectory():
-                    files.update(node.data.files)
-            elif isinstance(solution, dict):
-                for key, node_solution in solution.items():
-                    for node in node_solution.get_trajectory():
-                        files.update(node.data.files)
-            return {k: v for k, v in files.items() if v is not None}
-
         # Define actions to update context
         async def update_node_files(ctx: ApplicationContext, result: Node[BaseData]) -> None:
             logger.info("Updating context files from result")
-            ctx.files.update(agg_node_files(result))
+            files = {}
+            for node in result.get_trajectory():
+                files.update(node.data.files)
+            ctx.files.update({k: v for k, v in files.items() if v is not None})
 
         async def set_error(ctx: ApplicationContext, error: Exception) -> None:
             """Set error in context"""
@@ -281,7 +273,7 @@ class FSMApplication:
 
     def maybe_error(self) -> str | None:
         return self.fsm.context.error
-    
+
     def is_agent_search_failed_error(self) -> bool:
         """Check if the error is an AgentSearchFailedException"""
         return self.fsm.context.error_type == "AgentSearchFailedException"
@@ -382,6 +374,7 @@ class FSMApplication:
         logger.info(
             f"SERVER get_diff_with: workspace.diff() Succeeded. Diff length: {len(diff)}"
         )
+        breakpoint()
         if not diff:
             logger.warning(
                 "SERVER get_diff_with: Diff output is EMPTY. This might be expected if states match or an issue."
