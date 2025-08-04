@@ -2,7 +2,7 @@ import jinja2
 import logging
 from core.base_node import Node
 from core.workspace import Workspace
-from core.actors import BaseData, FileOperationsActor
+from core.actors import BaseData, FileOperationsActor, AgentSearchFailedException
 from llm.common import AsyncLLM, Message, TextRaw
 from trpc_agent import playbooks
 from trpc_agent.actors import run_tests, run_tsc_compile, run_frontend_build
@@ -69,8 +69,12 @@ class EditActor(FileOperationsActor):
             iteration += 1
             candidates = self.select(self.root)
             if not candidates:
-                logger.info("No candidates to evaluate, search terminated")
-                break
+                logger.error("No candidates to evaluate, search terminated")
+                await notify_if_callback(self.event_callback, "❌ Edit failed: No candidates to evaluate", "edit failure")
+                raise AgentSearchFailedException(
+                    agent_name="EditActor",
+                    message="No candidates to evaluate, search terminated"
+                )
 
             await notify_if_callback(self.event_callback, f"🔄 Working on changes (iteration {iteration})...", "iteration progress")
 
@@ -92,7 +96,11 @@ class EditActor(FileOperationsActor):
                     break
         if solution is None:
             logger.error("EditActor failed to find a solution")
-            raise ValueError("No solutions found")
+            await notify_if_callback(self.event_callback, "❌ Edit failed: No solution found", "edit failure")
+            raise AgentSearchFailedException(
+                agent_name="EditActor",
+                message="Failed to find a solution after all iterations"
+            )
         return solution
 
     def select(self, node: Node[BaseData]) -> list[Node[BaseData]]:

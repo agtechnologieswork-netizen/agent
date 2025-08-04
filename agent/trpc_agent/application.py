@@ -3,8 +3,9 @@ import anyio
 import logging
 import enum
 from typing import Dict, Self, Optional, Literal, Any
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from core.statemachine import StateMachine, State, Context
+from core.application import BaseApplicationContext
 from llm.utils import get_vision_llm_client, get_best_coding_llm_client
 from core.actors import BaseData
 from core.base_node import Node
@@ -54,23 +55,13 @@ class FSMEvent:
 
 
 @dataclass
-class ApplicationContext(Context):
+class ApplicationContext(BaseApplicationContext, Context):
     """Context for the fullstack application state machine"""
-    user_prompt: str
-    feedback_data: Optional[str] = None
-    files: Dict[str, str] = field(default_factory=dict)
-    error: Optional[str] = None
 
     def dump(self) -> dict:
         """Dump context to a serializable dictionary"""
-        # Convert dataclass to dictionary
-        data = {
-            "user_prompt": self.user_prompt,
-            "feedback_data":self.feedback_data,
-            "files": self.files,
-            "error": self.error
-        }
-        return data
+        # Use base dump method
+        return self.dump_base()
 
     @classmethod
     def load(cls, data: object) -> Self:
@@ -136,6 +127,7 @@ class FSMApplication:
             # Use logger.exception to include traceback
             logger.exception("Setting error in context:", exc_info=error)
             ctx.error = str(error)
+            ctx.error_type = error.__class__.__name__
 
         llm = get_best_coding_llm_client()
         vlm = get_vision_llm_client()
@@ -245,6 +237,10 @@ class FSMApplication:
 
     def maybe_error(self) -> str | None:
         return self.fsm.context.error
+    
+    def is_agent_search_failed_error(self) -> bool:
+        """Check if the error is an AgentSearchFailedException"""
+        return self.fsm.context.error_type == "AgentSearchFailedException"
 
     @property
     def current_state(self) -> str:

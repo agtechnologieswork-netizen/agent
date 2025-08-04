@@ -235,14 +235,21 @@ class BaseAgentSession(AgentInterface, ABC):
                         logger.info("Got FAILED status, sending runtime error message")
                         # Get the actual error from the FSM if available
                         error_details = "Unknown error"
+                        is_agent_search_failed = False
+                        
                         if self.processor_instance.fsm_app:
                             error_details = self.processor_instance.fsm_app.maybe_error() or "Unknown error"
+                            if hasattr(self.processor_instance.fsm_app, 'is_agent_search_failed_error'):
+                                is_agent_search_failed = self.processor_instance.fsm_app.is_agent_search_failed_error()
                         
                         logger.error(f"FSM failed with error: {error_details}")
                         
-                        error_message = f"Error: {error_details}"
-                        if "No solutions found" in error_details:
-                            error_message = "The agent was unable to generate a solution after exhausting all attempts. This usually means the request is too complex or ambiguous. Please try simplifying your request or providing more specific details."
+                        if is_agent_search_failed:
+                            # User-friendly message from AgentSearchFailedException
+                            error_message = error_details
+                        else:
+                            # Other errors - show with context
+                            error_message = f"An error occurred during processing: {error_details}"
                         
                         runtime_error_message = InternalMessage(
                                     role="assistant",

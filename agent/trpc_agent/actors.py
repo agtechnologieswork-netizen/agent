@@ -7,7 +7,7 @@ import jinja2
 from trpc_agent import playbooks
 from core.base_node import Node
 from core.workspace import Workspace
-from core.actors import BaseData, BaseActor, LLMActor
+from core.actors import BaseData, BaseActor, LLMActor, AgentSearchFailedException
 from llm.common import AsyncLLM, Message, TextRaw, Tool, ToolUse, ToolUseResult, ContentBlock
 from trpc_agent.playwright import PlaywrightRunner, drizzle_push
 from core.workspace import ExecResult
@@ -98,7 +98,10 @@ class DraftActor(BaseTRPCActor):
         solution = await self.search(self.root)
         if solution is None:
             logger.error("Draft actor failed to find a solution")
-            raise ValueError("No solution found")
+            raise AgentSearchFailedException(
+                agent_name="DraftActor",
+                message="Failed to find a solution after all iterations"
+            )
         
         await notify_if_callback(self.event_callback, "✅ Application draft generated successfully!", "draft completion")
         
