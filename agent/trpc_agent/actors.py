@@ -146,11 +146,7 @@ class TrpcActor(FileOperationsActor):
                 allowed=self.paths.files_allowed_draft + self.paths.files_allowed_frontend
             )
             message = Message(role="user", content=[TextRaw(f"Generate application for: {user_prompt}")])
-            root_node = Node(BaseData(root_workspace, [message], {}, True))
-
-            # Copy existing files to root node
-            for file_path, content in files.items():
-                root_node.data.files[file_path] = content
+            root_node = self._create_node_with_files(root_workspace, message, files)
 
             # Generate implementation
             results = await self._generate_implementation(files, None)
@@ -195,9 +191,8 @@ class TrpcActor(FileOperationsActor):
         context = await self._build_context(workspace, "edit")
 
         # Prepare edit prompt
-        jinja_env = jinja2.Environment()
-        user_prompt_template = jinja_env.from_string(playbooks.EDIT_ACTOR_USER_PROMPT)
-        user_prompt_rendered = user_prompt_template.render(
+        user_prompt_rendered = self._render_prompt(
+            "EDIT_ACTOR_USER_PROMPT",
             project_context=context,
             user_prompt=user_prompt,
             feedback=feedback
@@ -205,11 +200,7 @@ class TrpcActor(FileOperationsActor):
 
         # Create root node for editing
         message = Message(role="user", content=[TextRaw(user_prompt_rendered)])
-        root_node = Node(BaseData(workspace, [message], {}, True))
-
-        # Copy existing files to root node
-        for file_path, content in files.items():
-            root_node.data.files[file_path] = content
+        root_node = self._create_node_with_files(workspace, message, files)
 
         # Set context for edit validation
         self._current_context = "edit"
@@ -248,11 +239,10 @@ class TrpcActor(FileOperationsActor):
         context = await self._build_context(workspace, "draft")
 
         # Prepare prompt
-        jinja_env = jinja2.Environment()
-        user_prompt_template = jinja_env.from_string(playbooks.BACKEND_DRAFT_USER_PROMPT)
-        user_prompt_rendered = user_prompt_template.render(
+        user_prompt_rendered = self._render_prompt(
+            "BACKEND_DRAFT_USER_PROMPT",
             project_context=context,
-            user_prompt=user_prompt,
+            user_prompt=user_prompt
         )
 
         # Create root node
@@ -390,11 +380,10 @@ class TrpcActor(FileOperationsActor):
         context = await self._build_context(workspace, "frontend")
 
         # Prepare prompt
-        jinja_env = jinja2.Environment()
-        user_prompt_template = jinja_env.from_string(playbooks.FRONTEND_USER_PROMPT)
-        user_prompt_rendered = user_prompt_template.render(
+        user_prompt_rendered = self._render_prompt(
+            "FRONTEND_USER_PROMPT",
             project_context=context,
-            user_prompt=feedback_data or self._user_prompt,
+            user_prompt=feedback_data or self._user_prompt
         )
 
         # Create frontend node
@@ -504,11 +493,7 @@ class TrpcActor(FileOperationsActor):
             tg.start_soon(check_tsc)
             tg.start_soon(check_drizzle)
         
-        if errors:
-            error_msg = await self.compact_error_message("\n".join(errors))
-            node.data.messages.append(Message(role="user", content=[TextRaw(error_msg)]))
-            return False
-        return True
+        return await self._handle_validation_errors(node, errors)
 
     async def _validate_handler(self, node: Node[BaseData]) -> bool:
         """Validate handler: TypeScript + tests only."""
@@ -527,11 +512,7 @@ class TrpcActor(FileOperationsActor):
             tg.start_soon(check_tsc)
             tg.start_soon(check_tests)
         
-        if errors:
-            error_msg = await self.compact_error_message("\n".join(errors))
-            node.data.messages.append(Message(role="user", content=[TextRaw(error_msg)]))
-            return False
-        return True
+        return await self._handle_validation_errors(node, errors)
 
     async def _validate_frontend(self, node: Node[BaseData]) -> bool:
         """Validate frontend: TypeScript + build + Playwright."""
@@ -550,9 +531,7 @@ class TrpcActor(FileOperationsActor):
             tg.start_soon(check_tsc)
             tg.start_soon(check_build)
         
-        if errors:
-            error_msg = await self.compact_error_message("\n".join(errors))
-            node.data.messages.append(Message(role="user", content=[TextRaw(error_msg)]))
+        if not await self._handle_validation_errors(node, errors):
             return False
         
         # Then Playwright (slow)
@@ -593,9 +572,7 @@ class TrpcActor(FileOperationsActor):
             tg.start_soon(check_tests)
             tg.start_soon(check_build)
         
-        if errors:
-            error_msg = await self.compact_error_message("\n".join(errors))
-            node.data.messages.append(Message(role="user", content=[TextRaw(error_msg)]))
+        if not await self._handle_validation_errors(node, errors):
             return False
         
         # Then Playwright (slow)
@@ -679,6 +656,27 @@ class TrpcActor(FileOperationsActor):
         # This is handled by eval_node with context awareness
         return None
 
+    def _render_prompt(self, template_name: str, **kwargs) -> str:
+        """Render Jinja template with given parameters."""
+        jinja_env = jinja2.Environment()
+        template = jinja_env.from_string(getattr(playbooks, template_name))
+        return template.render(**kwargs)
+
+    def _create_node_with_files(self, workspace: Workspace, message: Message, files: dict[str, str]) -> Node[BaseData]:
+        """Create a Node with BaseData and copy files to it."""
+        node = Node(BaseData(workspace, [message], {}, True))
+        for file_path, content in files.items():
+            node.data.files[file_path] = content
+        return node
+
+    async def _handle_validation_errors(self, node: Node[BaseData], errors: list[str]) -> bool:
+        """Handle validation errors by adding to node messages."""
+        if errors:
+            error_msg = await self.compact_error_message("\n".join(errors))
+            node.data.messages.append(Message(role="user", content=[TextRaw(error_msg)]))
+            return False
+        return True
+
     def _create_workspace_with_permissions(self, files: dict[str, str], allowed: list[str], protected: list[str] | None = None) -> Workspace:
         """Create workspace with files and permissions."""
         workspace = self.workspace.clone()
@@ -760,9 +758,7 @@ class TrpcActor(FileOperationsActor):
                 workspace.write_file(file, draft_files[file])
                 logger.debug(f"Copied inherited file: {file}")
 
-        # Prepare jinja template
-        jinja_env = jinja2.Environment()
-        user_prompt_template = jinja_env.from_string(playbooks.BACKEND_HANDLER_USER_PROMPT)
+        # Template will be rendered per handler
 
         # Process handler files
         for file, content in handler_files.items():
@@ -777,19 +773,16 @@ class TrpcActor(FileOperationsActor):
             context = await self._build_context(handler_ws, "handler", [file])
 
             # Render user prompt and create node
-            user_prompt_rendered = user_prompt_template.render(
+            user_prompt_rendered = self._render_prompt(
+                "BACKEND_HANDLER_USER_PROMPT",
                 project_context=context,
                 handler_name=handler_name,
-                feedback_data=feedback_data,
+                feedback_data=feedback_data
             )
 
             message = Message(role="user", content=[TextRaw(user_prompt_rendered)])
             node = Node(BaseData(handler_ws, [message], {}, True))
             self.handler_nodes[handler_name] = node
-
-    def _extract_files_from_node(self, node: Node[BaseData]) -> dict[str, str]:
-        """Extract generated files from a node."""
-        return node.data.files
 
     def _get_handler_name(self, node: Node[BaseData]) -> str:
         """Extract handler name from node's workspace."""
