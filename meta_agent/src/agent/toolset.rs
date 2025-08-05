@@ -1,5 +1,5 @@
 use crate::{
-    agent::{Checker, Tool},
+    agent::{Checker, CheckerDyn, Tool},
     workspace::WorkspaceDyn,
 };
 use serde::Deserialize;
@@ -302,13 +302,13 @@ impl Tool for EditFileTool {
 
 #[derive(Clone)]
 pub struct DoneTool {
-    pub check: Arc<dyn Checker>,
+    pub checker: Arc<dyn CheckerDyn>,
 }
 
 impl DoneTool {
-    pub fn new(check: impl Checker + 'static) -> Self {
+    pub fn new(checker: impl Checker + 'static) -> Self {
         Self {
-            check: Arc::new(check),
+            checker: Arc::new(checker),
         }
     }
 }
@@ -338,7 +338,7 @@ impl Tool for DoneTool {
         _args: Self::Args,
         workspace: &mut Box<dyn WorkspaceDyn>,
     ) -> eyre::Result<eyre::Result<Self::Output, Self::Error>> {
-        self.check.run(workspace).await.map(|value| match value {
+        self.checker.run(workspace).await.map(|value| match value {
             Some(error) => Err(error),
             None => Ok(()),
         })

@@ -1,5 +1,5 @@
 use crate::{
-    agent::{Checker, Rollout, Search, ToolDyn, ToolResult, Tree},
+    agent::{Checker, NodeTool, NodeToolDyn, Rollout, Search, Tool, ToolDyn, ToolResult, Tree},
     llm::{Completion, CompletionResponse, LLMClientDyn},
     workspace::WorkspaceDyn,
 };
@@ -8,7 +8,7 @@ use rig::{
     OneOrMany,
     message::{Message, UserContent},
 };
-use std::{collections::HashSet, pin::Pin, sync::Arc};
+use std::{collections::HashSet, sync::Arc};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PlanItem {
@@ -29,10 +29,26 @@ pub struct Node {
     pub workspace: Box<dyn WorkspaceDyn>,
 }
 
+impl NodeTool<Node> for crate::agent::toolset::DoneTool {
+    async fn call_node(
+        &self,
+        args: Self::Args,
+        node: &mut Node,
+    ) -> Result<Result<Self::Output, Self::Error>> {
+        use crate::agent::Tool;
+        let result = Tool::call(self, args, &mut node.workspace).await?;
+        if result.is_ok() {
+            node.kind = NodeKind::Done;
+        }
+        Ok(result)
+    }
+}
+
 #[derive(Clone)]
 pub struct AgentActor {
     pub llm: Arc<dyn LLMClientDyn>,
     pub tools: Arc<Vec<Box<dyn ToolDyn>>>,
+    pub node_tools: Arc<Vec<Box<dyn NodeToolDyn<Node>>>>,
     pub model: String,
     pub preamble: String,
 }
@@ -61,15 +77,14 @@ impl AgentActor {
                 let result = match tool {
                     Some(tool) => {
                         let args = call.function.arguments.clone();
-                        let value = match tool.call(args, &mut node.workspace).await? {
-                            Ok(value) => value,
-                            Err(error) => serde_json::json!({"error": error}),
-                        };
-                        serde_json::to_string(&value)?
+                        tool.call(args, &mut node.workspace).await?
                     }
-                    None => format!("Tool {} not found", call.function.name),
+                    None => {
+                        let error = format!("Tool {} not found", call.function.name);
+                        Err(serde_json::json!(error))
+                    }
                 };
-                results.push(ToolResult::as_result(call, result));
+                results.push(ToolResult(call.clone(), result).into());
             }
         }
         Ok((!results.is_empty()).then_some(results))
@@ -175,14 +190,14 @@ impl Search<Node> for SearchActor {
 pub struct PythonChecker;
 
 impl Checker for PythonChecker {
-    fn run<'a>(
-        &'a self,
-        workspace: &'a mut Box<dyn WorkspaceDyn>,
-    ) -> Pin<Box<dyn Future<Output = eyre::Result<Option<serde_json::Value>>> + Send + Sync + 'a>>
-    {
-        Box::pin(async {
-            let _ = workspace.bash("uv run pytest").await;
-            Ok(None)
+    async fn run(
+        &self,
+        workspace: &mut Box<dyn WorkspaceDyn>,
+    ) -> Result<Option<serde_json::Value>> {
+        let result = workspace.bash("uv run main.py").await?;
+        Ok(match result.exit_code {
+            0 => None,
+            _ => Some(serde_json::json!({"stdout": result.stdout, "stderr": result.stderr})),
         })
     }
 }
@@ -226,21 +241,25 @@ pub async fn run_demo_agent() -> Result<()> {
 You are a python software engineer.
 Workspace is already set up using uv init.
 Use uv package manager if you need to add extra libraries.
+Program will be run using uv run main.py command.
 "
     .to_string();
     let model = "claude-sonnet-4-20250514".to_string();
     let tools: Vec<Box<dyn ToolDyn>> = vec![
-        Box::new(toolset::BashTool),
-        Box::new(toolset::WriteFileTool),
-        Box::new(toolset::ReadFileTool),
-        Box::new(toolset::LsDirTool),
-        Box::new(toolset::RmFileTool),
-        Box::new(toolset::EditFileTool),
+        toolset::BashTool.boxed(),
+        toolset::WriteFileTool.boxed(),
+        toolset::ReadFileTool.boxed(),
+        toolset::LsDirTool.boxed(),
+        toolset::RmFileTool.boxed(),
+        toolset::EditFileTool.boxed(),
     ];
+    let node_tools: Vec<Box<dyn NodeToolDyn<Node>>> =
+        vec![Box::new(toolset::DoneTool::new(PythonChecker))];
     let search = SearchActor::new();
     let rollout = AgentActor {
         llm: Arc::new(client),
         tools: Arc::new(tools),
+        node_tools: Arc::new(node_tools),
         model,
         preamble,
     };

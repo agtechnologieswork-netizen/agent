@@ -35,11 +35,33 @@ pub trait Notify<T>: Clone + Send {
     ) -> impl Future<Output = Result<()>> + Send;
 }
 
-pub trait Checker: Send + Sync {
+pub trait Checker: Sized + Send + Sync {
     fn run<'a>(
         &'a self,
         workspace: &'a mut Box<dyn WorkspaceDyn>,
-    ) -> Pin<Box<dyn Future<Output = eyre::Result<Option<serde_json::Value>>> + Send + Sync + 'a>>;
+    ) -> impl Future<Output = Result<Option<serde_json::Value>>> + Send + Sync + 'a;
+    fn boxed(self) -> Box<dyn CheckerDyn>
+    where
+        Self: Sized + 'static,
+    {
+        Box::new(self)
+    }
+}
+
+pub trait CheckerDyn: Send + Sync {
+    fn run<'a>(
+        &'a self,
+        workspace: &'a mut Box<dyn WorkspaceDyn>,
+    ) -> Pin<Box<dyn Future<Output = Result<Option<serde_json::Value>>> + Send + Sync + 'a>>;
+}
+
+impl<T: Checker> CheckerDyn for T {
+    fn run<'a>(
+        &'a self,
+        workspace: &'a mut Box<dyn WorkspaceDyn>,
+    ) -> Pin<Box<dyn Future<Output = Result<Option<serde_json::Value>>> + Send + Sync + 'a>> {
+        Box::pin(self.run(workspace))
+    }
 }
 
 pub trait Tool: Sized + Send + Sync {
@@ -56,6 +78,12 @@ pub trait Tool: Sized + Send + Sync {
         args: Self::Args,
         workspace: &mut Box<dyn WorkspaceDyn>,
     ) -> impl Future<Output = Result<Result<Self::Output, Self::Error>>> + Send + Sync;
+    fn boxed(self) -> Box<Self>
+    where
+        Self: Sized + 'static,
+    {
+        Box::new(self)
+    }
 }
 
 type ToolDynResult = Result<Result<serde_json::Value, serde_json::Value>>;
@@ -106,7 +134,59 @@ impl<T: Tool> ToolDyn for T {
     }
 }
 
-// Automatically implement the Tool trait for any type that implements rig::tool::Tool
+pub trait NodeTool<T>: Tool {
+    fn call_node(
+        &self,
+        args: Self::Args,
+        node: &mut T,
+    ) -> impl Future<Output = Result<Result<Self::Output, Self::Error>>> + Send + Sync;
+}
+
+pub trait NodeToolDyn<T>: Send + Sync {
+    fn name(&self) -> String;
+    fn definition(
+        &self,
+        prompt: String,
+    ) -> Pin<Box<dyn Future<Output = rig::completion::ToolDefinition> + Send + Sync + '_>>;
+    fn call<'a>(
+        &'a self,
+        args: serde_json::Value,
+        node: &'a mut T,
+    ) -> Pin<Box<dyn Future<Output = ToolDynResult> + Send + Sync + 'a>>;
+}
+
+impl<T: Send + Sync, U: Tool + NodeTool<T>> NodeToolDyn<T> for U {
+    fn name(&self) -> String {
+        Tool::name(self)
+    }
+
+    fn definition(
+        &self,
+        prompt: String,
+    ) -> Pin<Box<dyn Future<Output = rig::completion::ToolDefinition> + Send + Sync + '_>> {
+        Box::pin(Tool::definition(self, prompt))
+    }
+
+    fn call<'a>(
+        &'a self,
+        args: serde_json::Value,
+        node: &'a mut T,
+    ) -> Pin<Box<dyn Future<Output = ToolDynResult> + Send + Sync + 'a>> {
+        Box::pin(async {
+            match serde_json::from_value::<<Self as Tool>::Args>(args) {
+                Ok(args) => {
+                    let result = NodeTool::call_node(self, args, node).await?;
+                    let result = match result {
+                        Ok(output) => Ok(serde_json::to_value(output)?),
+                        Err(error) => Err(serde_json::to_value(error)?),
+                    };
+                    Ok(result)
+                }
+                Err(error) => Ok(Err(serde_json::to_value(error.to_string())?)),
+            }
+        })
+    }
+}
 
 impl<T: rig::tool::Tool> Tool for T
 where
@@ -134,24 +214,23 @@ where
     }
 }
 
-pub struct ToolResult;
+pub struct ToolResult(
+    rig::message::ToolCall,
+    Result<serde_json::Value, serde_json::Value>,
+);
 
-impl ToolResult {
-    pub fn as_result(
-        call: &rig::message::ToolCall,
-        text: impl Into<String>,
-    ) -> rig::message::ToolResult {
+impl std::convert::From<ToolResult> for rig::message::ToolResult {
+    fn from(value: ToolResult) -> Self {
+        use rig::message::ToolResultContent;
+        let inner = match value.1 {
+            Ok(value) => value,
+            Err(error) => serde_json::json!({"error": error}),
+        };
+        let inner = serde_json::to_string(&inner).unwrap();
         rig::message::ToolResult {
-            id: call.id.clone(),
-            call_id: call.call_id.clone(),
-            content: rig::OneOrMany::one(rig::message::ToolResultContent::text(text.into())),
+            id: value.0.id,
+            call_id: value.0.call_id,
+            content: rig::OneOrMany::one(ToolResultContent::Text(inner.into())),
         }
-    }
-
-    pub fn as_content(
-        call: &rig::message::ToolCall,
-        text: impl Into<String>,
-    ) -> rig::message::UserContent {
-        rig::message::UserContent::ToolResult(Self::as_result(call, text))
     }
 }
