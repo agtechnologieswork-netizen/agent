@@ -3,6 +3,7 @@ from abc import ABC
 from typing import Dict, Any, Optional, TypedDict, List, Union, Type
 from datetime import datetime
 from uuid import uuid4
+from hashlib import md5
 import dagger
 
 from anyio.streams.memory import MemoryObjectSendStream
@@ -386,7 +387,7 @@ class BaseAgentSession(AgentInterface, ABC):
                     "metadata": agent_state["metadata"],
                 } if agent_state else None,
                 unifiedDiff=unified_diff,
-                complete_diff_hash=None,
+                complete_diff_hash=md5((unified_diff.encode() if unified_diff else b"")).hexdigest() if unified_diff else None,
                 diff_stat=None,
                 app_name=app_name,
                 commit_message=commit_message
