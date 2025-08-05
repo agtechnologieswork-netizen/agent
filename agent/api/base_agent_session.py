@@ -158,7 +158,6 @@ class BaseAgentSession(AgentInterface, ABC):
                 "metadata": metadata,
             }
             snapshot_files = {**fsm_state["context"]["files"]} if fsm_state else {}  # pyright: ignore
-            breakpoint()
 
             # Processing
             logger.info(f"Last user message: {fsm_message_history[-1].content}")
