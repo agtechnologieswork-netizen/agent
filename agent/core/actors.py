@@ -32,6 +32,7 @@ class BaseData:
     messages: list[Message]
     files: dict[str, str | None] = dataclasses.field(default_factory=dict)
     should_branch: bool = False
+    context: str = "default"
 
     def head(self) -> Message:
         if (num_messages := len(self.messages)) != 1:
@@ -123,6 +124,9 @@ class LLMActor(Protocol):
                             self.llm, history, system_prompt=system_prompt, **kwargs
                         )
                     ],
+                    files={},
+                    should_branch=False,
+                    context=getattr(node.data, 'context', 'default')
                 ),
                 parent=node,
             )

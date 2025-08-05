@@ -87,8 +87,7 @@ class TrpcActor(FileOperationsActor):
         self.frontend_node: Optional[Node[BaseData]] = None
         self.draft_node: Optional[Node[BaseData]] = None
 
-        # Context for validation
-        self._current_context: str = "draft"
+        # User prompt for validation
         self._user_prompt: str = ""
 
         # File path configuration
@@ -149,7 +148,7 @@ class TrpcActor(FileOperationsActor):
                 allowed=self.paths.files_allowed_draft + self.paths.files_allowed_frontend
             )
             message = Message(role="user", content=[TextRaw(f"Generate application for: {user_prompt}")])
-            root_node = self._create_node_with_files(root_workspace, message, files)
+            root_node = self._create_node_with_files(root_workspace, message, files, "draft")
 
             # Generate implementation
             results = await self._generate_implementation(files, None)
@@ -203,10 +202,8 @@ class TrpcActor(FileOperationsActor):
 
         # Create root node for editing
         message = Message(role="user", content=[TextRaw(user_prompt_rendered)])
-        root_node = self._create_node_with_files(workspace, message, files)
+        root_node = self._create_node_with_files(workspace, message, files, "edit")
 
-        # Set context for edit validation
-        self._current_context = "edit"
 
         # Search for solution
         solution = await self._search_single_node(
@@ -230,7 +227,6 @@ class TrpcActor(FileOperationsActor):
 
     async def _generate_draft(self, user_prompt: str) -> Optional[Node[BaseData]]:
         """Generate schema and type definitions."""
-        self._current_context = "draft"
 
         await notify_if_callback(
             self.event_callback,
@@ -253,7 +249,7 @@ class TrpcActor(FileOperationsActor):
 
         # Create root node
         message = Message(role="user", content=[TextRaw(user_prompt_rendered)])
-        self.draft_node = Node(BaseData(workspace, [message], {}, True))
+        self.draft_node = Node(BaseData(workspace, [message], {}, True, "draft"))
 
         # Search for solution
         solution = await self._search_single_node(
@@ -305,7 +301,6 @@ class TrpcActor(FileOperationsActor):
         results: dict[str, Node[BaseData]],
     ):
         """Generate all handlers in parallel."""
-        self._current_context = "handler"
 
         await notify_if_callback(
             self.event_callback,
@@ -367,7 +362,6 @@ class TrpcActor(FileOperationsActor):
         results: dict[str, Node[BaseData]],
     ):
         """Generate frontend application."""
-        self._current_context = "frontend"
 
         await notify_if_callback(
             self.event_callback,
@@ -394,7 +388,7 @@ class TrpcActor(FileOperationsActor):
 
         # Create frontend node
         message = Message(role="user", content=[TextRaw(user_prompt_rendered)])
-        self.frontend_node = Node(BaseData(workspace, [message], {}, True))
+        self.frontend_node = Node(BaseData(workspace, [message], {}, True, "frontend"))
 
         # Search for solution
         solution = await self._search_single_node(
@@ -461,15 +455,18 @@ class TrpcActor(FileOperationsActor):
         return candidates
 
     async def eval_node(self, node: Node[BaseData], user_prompt: str) -> bool:
-        """Context-aware node evaluation."""
+        """Context-aware node evaluation using node-stored context."""
         # First, process any tool uses
         tool_results, _ = await self.run_tools(node, user_prompt)
         if tool_results:
             node.data.messages.append(Message(role="user", content=tool_results))
             return False
 
+        # Get context from node data (with fallback)
+        context = getattr(node.data, 'context', 'draft')
+        
         # Then run context-specific validation
-        match self._current_context:
+        match context:
             case "draft":
                 return await self._validate_draft(node)
             case "handler":
@@ -479,7 +476,7 @@ class TrpcActor(FileOperationsActor):
             case "edit":
                 return await self._validate_edit(node)
             case _:
-                logger.warning(f"Unknown context: {self._current_context}")
+                logger.warning(f"Unknown context: {context}")
                 return True
 
     async def _validate_draft(self, node: Node[BaseData]) -> bool:
@@ -667,9 +664,9 @@ class TrpcActor(FileOperationsActor):
         template = jinja_env.from_string(getattr(playbooks, template_name))
         return template.render(**kwargs)
 
-    def _create_node_with_files(self, workspace: Workspace, message: Message, files: dict[str, str]) -> Node[BaseData]:
+    def _create_node_with_files(self, workspace: Workspace, message: Message, files: dict[str, str], context: str = "default") -> Node[BaseData]:
         """Create a Node with BaseData and copy files to it."""
-        node = Node(BaseData(workspace, [message], {}, True))
+        node = Node(BaseData(workspace, [message], {}, True, context))
         for file_path, content in files.items():
             node.data.files[file_path] = content
         return node
@@ -786,7 +783,7 @@ class TrpcActor(FileOperationsActor):
             )
 
             message = Message(role="user", content=[TextRaw(user_prompt_rendered)])
-            node = Node(BaseData(handler_ws, [message], {}, True))
+            node = Node(BaseData(handler_ws, [message], {}, True, "handler"))
             self.handler_nodes[handler_name] = node
 
     def _get_handler_name(self, node: Node[BaseData]) -> str:
