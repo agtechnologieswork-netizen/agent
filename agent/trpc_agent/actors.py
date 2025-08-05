@@ -23,16 +23,16 @@ class TrpcPaths:
     files_allowed_frontend: list[str]
     files_protected_frontend: list[str]
     files_relevant_draft: list[str]
-    files_relevant_handlers: list[str] 
+    files_relevant_handlers: list[str]
     files_relevant_frontend: list[str]
     files_inherit_handlers: list[str]
-    
+
     @classmethod
     def default(cls) -> "TrpcPaths":
         return cls(
             files_allowed_draft=[
                 "server/src/schema.ts",
-                "server/src/db/schema.ts", 
+                "server/src/db/schema.ts",
                 "server/src/handlers/",
                 "server/src/index.ts"
             ],
@@ -154,10 +154,10 @@ class TrpcActor(FileOperationsActor):
             results = await self._generate_implementation(files, None)
 
             # Merge all results into root node
-            for key, node in results.items():
-                if node:
-                    for file_path, content in node.data.files.items():
-                        root_node.data.files[file_path] = content
+            for _, final_node in results.items():
+                if final_node:
+                    for node in final_node.get_trajectory():
+                        root_node.data.files.update(node.data.files)
 
             await notify_stage(
                 self.event_callback,
@@ -464,7 +464,7 @@ class TrpcActor(FileOperationsActor):
 
         # Get context from node data (with fallback)
         context = getattr(node.data, 'context', 'draft')
-        
+
         # Then run context-specific validation
         match context:
             case "draft":
@@ -482,108 +482,108 @@ class TrpcActor(FileOperationsActor):
     async def _validate_draft(self, node: Node[BaseData]) -> bool:
         """Validate draft: TypeScript compilation + Drizzle schema."""
         errors = []
-        
+
         async with anyio.create_task_group() as tg:
             async def check_tsc():
                 if error := await self.run_tsc_backend_check(node):
                     errors.append(error)
-            
+
             async def check_drizzle():
                 if error := await self.run_drizzle_check(node):
                     errors.append(error)
-            
+
             tg.start_soon(check_tsc)
             tg.start_soon(check_drizzle)
-        
+
         return await self._handle_validation_errors(node, errors)
 
     async def _validate_handler(self, node: Node[BaseData]) -> bool:
         """Validate handler: TypeScript + tests only."""
         errors = []
         handler_name = self._get_handler_name(node)
-        
+
         async with anyio.create_task_group() as tg:
             async def check_tsc():
                 if error := await self.run_tsc_backend_check(node):
                     errors.append(error)
-            
+
             async def check_tests():
                 if error := await self.run_test_check(node, handler_name):
                     errors.append(error)
-            
+
             tg.start_soon(check_tsc)
             tg.start_soon(check_tests)
-        
+
         return await self._handle_validation_errors(node, errors)
 
     async def _validate_frontend(self, node: Node[BaseData]) -> bool:
         """Validate frontend: TypeScript + build + Playwright."""
         errors = []
-        
+
         # Quick checks first
         async with anyio.create_task_group() as tg:
             async def check_tsc():
                 if error := await self.run_tsc_frontend_check(node):
                     errors.append(error)
-            
+
             async def check_build():
                 if error := await self.run_build_check(node):
                     errors.append(error)
-            
+
             tg.start_soon(check_tsc)
             tg.start_soon(check_build)
-        
+
         if not await self._handle_validation_errors(node, errors):
             return False
-        
+
         # Then Playwright (slow)
         if feedback := await self.run_playwright_check(node, "client"):
             node.data.messages.append(Message(role="user", content=[TextRaw(x) for x in feedback]))
             return False
-        
+
         return True
 
     async def _validate_edit(self, node: Node[BaseData]) -> bool:
         """Validate edit: Full validation including TypeScript, tests, build, and Playwright."""
         await notify_if_callback(self.event_callback, "🔍 Validating changes...", "validation start")
-        
+
         errors = []
-        
-        # Quick checks first  
+
+        # Quick checks first
         async with anyio.create_task_group() as tg:
             async def check_backend_tsc():
                 if error := await self.run_tsc_backend_check(node):
                     errors.append(error)
-            
+
             async def check_frontend_tsc():
                 await notify_if_callback(self.event_callback, "🔧 Compiling frontend TypeScript...", "frontend compile start")
                 if error := await self.run_tsc_frontend_check(node):
                     await notify_if_callback(self.event_callback, "❌ Frontend TypeScript compilation failed", "frontend compile failure")
                     errors.append(error)
-            
+
             async def check_tests():
                 if error := await self.run_test_check(node):
                     errors.append(error)
-            
+
             async def check_build():
                 if error := await self.run_build_check(node):
                     errors.append(error)
-            
+
             tg.start_soon(check_backend_tsc)
             tg.start_soon(check_frontend_tsc)
             tg.start_soon(check_tests)
             tg.start_soon(check_build)
-        
+
         if not await self._handle_validation_errors(node, errors):
             return False
-        
+
         # Then Playwright (slow)
         await notify_if_callback(self.event_callback, "🎭 Running UI validation...", "playwright start")
         if feedback := await self.run_playwright_check(node, "full"):
             await notify_if_callback(self.event_callback, "❌ UI validation failed - adjusting...", "playwright failure")
             node.data.messages.append(Message(role="user", content=[TextRaw(x) for x in feedback]))
             return False
-        
+
         await notify_if_callback(self.event_callback, "✅ All validations passed!", "validation success")
         return True
 
@@ -689,7 +689,7 @@ class TrpcActor(FileOperationsActor):
     async def _build_context(self, workspace: Workspace, context_type: str, extra_files: list[str] | None = None) -> str:
         """Build context for different generation phases."""
         context = []
-        
+
         # Select relevant files based on context type
         match context_type:
             case "draft":
@@ -714,7 +714,7 @@ class TrpcActor(FileOperationsActor):
                 protected_files = []
             case _:
                 raise ValueError(f"Unknown context type: {context_type}")
-        
+
         # Add relevant files to context
         for path in relevant_files:
             try:
@@ -724,7 +724,7 @@ class TrpcActor(FileOperationsActor):
             except Exception:
                 # File might not exist, skip it
                 pass
-        
+
         # Add UI components info for frontend/edit contexts
         if context_type in ["frontend", "edit"]:
             try:
@@ -732,16 +732,16 @@ class TrpcActor(FileOperationsActor):
                 context.append(f"UI components in client/src/components/ui: {ui_files}")
             except Exception:
                 pass
-        
+
         # Add configuration info
         if context_type == "draft":
             context.append("APP_DATABASE_URL=postgres://postgres:postgres@postgres:5432/postgres")
-        
+
         if allowed_files:
             context.append(f"Allowed paths and directories: {allowed_files}")
         if protected_files:
             context.append(f"Protected paths and directories: {protected_files}")
-            
+
         return "\n".join(context)
 
     async def _create_handler_nodes(
