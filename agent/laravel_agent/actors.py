@@ -157,7 +157,15 @@ class LaravelActor(FileOperationsActor):
                                 "request", "resource", "middleware", "provider", "command",
                                 "event", "listener", "job", "mail", "notification", "observer",
                                 "policy", "rule", "scope", "cast", "channel", "exception",
-                                "test", "component", "view", "trait", "interface", "enum", "class"
+                                "test", "component", "view", "trait", "interface", "enum", "class",
+                                "cache-table", "channel", "job-middleware", "livewire", "livewire-form",
+                                "livewire-table", "notifications-table", "queue-batches-table",
+                                "queue-failed-table", "queue-table", "session-table", "volt",
+                                "filament-cluster", "filament-exporter", "filament-importer",
+                                "filament-page", "filament-panel", "filament-relation-manager",
+                                "filament-resource", "filament-theme", "filament-user", "filament-widget",
+                                "folio", "form-field", "form-layout", "infolist-entry", "infolist-layout",
+                                "table-column"
                             ],
                             "description": "The type of file to create"
                         },
@@ -223,9 +231,80 @@ class LaravelActor(FileOperationsActor):
                         "force": {"type": "boolean", "description": "Force run in production"}
                     }
                 }
+            },
+            {
+                "name": "run_pint",
+                "description": "Run Laravel Pint to automatically fix code style issues",
+                "input_schema": {
+                    "type": "object",
+                    "properties": {
+                        "path": {
+                            "type": "string",
+                            "description": "Specific file or directory to format (optional, defaults to entire project)"
+                        },
+                        "preset": {
+                            "type": "string",
+                            "enum": ["laravel", "psr12", "symfony"],
+                            "description": "The preset to use (optional, uses project config by default)"
+                        }
+                    }
+                }
+            },
+            {
+                "name": "run_artisan_command",
+                "description": "Run any Laravel Artisan command not covered by specific tools",
+                "input_schema": {
+                    "type": "object",
+                    "properties": {
+                        "command": {
+                            "type": "string",
+                            "description": "The artisan command to run (without 'php artisan' prefix)"
+                        },
+                        "arguments": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "Additional arguments for the command"
+                        }
+                    },
+                    "required": ["command"]
+                }
             }
         ]
 
+    async def run_tools(
+        self, node: Node[BaseData], user_prompt: str
+    ) -> tuple[list[ToolUseResult], bool]:
+        """Execute tools for a given node with automatic Pint formatting for PHP files."""
+        # First, run the parent's tool execution
+        results, should_branch = await super().run_tools(node, user_prompt)
+        
+        # Check if any PHP files were created or modified
+        php_files_modified = False
+        for msg in node.data.messages:
+            if hasattr(msg, 'content') and isinstance(msg.content, list):
+                for block in msg.content:
+                    # Check if it's a ToolUse block
+                    if isinstance(block, ToolUse):
+                        # Check for write_file or edit_file operations on PHP files
+                        if block.name in ["write_file", "edit_file"] and isinstance(block.input, dict) and "path" in block.input:
+                            path = block.input["path"]
+                            if isinstance(path, str) and path.endswith('.php'):
+                                php_files_modified = True
+                                break
+        
+        # Run Pint if any PHP files were modified
+        if php_files_modified:
+            try:
+                pint_result = await node.data.workspace.exec(["vendor/bin/pint", "--quiet"])
+                if pint_result.exit_code != 0:
+                    logger.warning(f"Pint formatting failed: {pint_result.stderr}")
+                else:
+                    logger.info("Pint formatting applied successfully")
+            except Exception as e:
+                logger.warning(f"Failed to run Pint: {e}")
+        
+        return results, should_branch
+    
     async def handle_custom_tool(
         self, tool_use: ToolUse, node: Node[BaseData]
     ) -> ToolUseResult:
@@ -285,6 +364,16 @@ class LaravelActor(FileOperationsActor):
                 result = await node.data.workspace.exec(command)
                 
                 if result.exit_code == 0:
+                    # Automatically run Pint after creating PHP files
+                    if make_type in ["controller", "model", "request", "resource", "middleware", 
+                                   "provider", "command", "event", "listener", "job", "mail", 
+                                   "notification", "observer", "policy", "rule", "scope", "cast", 
+                                   "channel", "exception", "trait", "interface", "enum", "class"]:
+                        # Run Pint to format the newly created file
+                        pint_result = await node.data.workspace.exec(["vendor/bin/pint", "--quiet"])
+                        if pint_result.exit_code != 0:
+                            logger.warning(f"Pint formatting failed: {pint_result.stderr}")
+                    
                     # Read the generated file and add it to the workspace
                     # Parse the output to find the created file path
                     output = result.stdout
@@ -311,6 +400,11 @@ class LaravelActor(FileOperationsActor):
                 result = await node.data.workspace.exec(command)
                 
                 if result.exit_code == 0:
+                    # Automatically run Pint after creating migration
+                    pint_result = await node.data.workspace.exec(["vendor/bin/pint", "--quiet"])
+                    if pint_result.exit_code != 0:
+                        logger.warning(f"Pint formatting failed: {pint_result.stderr}")
+                    
                     # After creating migration, read it and validate syntax
                     output = result.stdout
                     
@@ -364,6 +458,45 @@ class LaravelActor(FileOperationsActor):
                     return ToolUseResult.from_tool_use(tool_use, result.stdout)
                 else:
                     error_msg = f"Migration failed: {result.stderr or result.stdout}"
+                    return ToolUseResult.from_tool_use(tool_use, error_msg, is_error=True)
+                    
+            elif tool_use.name == "run_pint":
+                # Run Laravel Pint for code formatting
+                command = ["vendor/bin/pint"]
+                
+                # Add path if specified
+                if path := tool_use.input.get("path"):  # pyright: ignore[reportAttributeAccessIssue]
+                    command.append(path)
+                
+                # Add preset if specified
+                if preset := tool_use.input.get("preset"):  # pyright: ignore[reportAttributeAccessIssue]
+                    command.extend(["--preset", preset])
+                
+                # Execute pint
+                result = await node.data.workspace.exec(command)
+                
+                if result.exit_code == 0:
+                    return ToolUseResult.from_tool_use(tool_use, f"Code formatting completed:\n{result.stdout}")
+                else:
+                    error_msg = f"Pint formatting failed: {result.stderr or result.stdout}"
+                    return ToolUseResult.from_tool_use(tool_use, error_msg, is_error=True)
+                    
+            elif tool_use.name == "run_artisan_command":
+                # Run any artisan command
+                artisan_cmd = tool_use.input.get("command")  # pyright: ignore[reportAttributeAccessIssue]
+                command = ["php", "artisan", artisan_cmd]
+                
+                # Add additional arguments if provided
+                if args := tool_use.input.get("arguments"):  # pyright: ignore[reportAttributeAccessIssue]
+                    command.extend(args)
+                
+                # Execute the command
+                result = await node.data.workspace.exec(command)
+                
+                if result.exit_code == 0:
+                    return ToolUseResult.from_tool_use(tool_use, result.stdout)
+                else:
+                    error_msg = f"Artisan command failed: {result.stderr or result.stdout}"
                     return ToolUseResult.from_tool_use(tool_use, error_msg, is_error=True)
             
             # If not a custom tool, call parent implementation
