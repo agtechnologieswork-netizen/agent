@@ -314,7 +314,7 @@ impl DoneTool {
 }
 
 impl Tool for DoneTool {
-    type Args = ();
+    type Args = serde_json::Value;
     type Output = ();
     type Error = serde_json::Value;
 

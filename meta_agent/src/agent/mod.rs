@@ -188,6 +188,50 @@ impl<T: Send + Sync, U: Tool + NodeTool<T>> NodeToolDyn<T> for U {
     }
 }
 
+pub trait AgentNode {
+    fn workspace_mut(&mut self) -> &mut Box<dyn WorkspaceDyn>;
+}
+
+pub enum AgentTool<N> {
+    Regular(Box<dyn ToolDyn>),
+    Node(Box<dyn NodeToolDyn<N>>),
+}
+
+impl<N: AgentNode> AgentTool<N> {
+    pub fn name(&self) -> String {
+        match self {
+            AgentTool::Regular(tool) => tool.name(),
+            AgentTool::Node(tool) => tool.name(),
+        }
+    }
+
+    pub async fn definition(&self, prompt: String) -> rig::completion::ToolDefinition {
+        match self {
+            AgentTool::Regular(tool) => tool.definition(prompt).await,
+            AgentTool::Node(tool) => tool.definition(prompt).await,
+        }
+    }
+
+    pub async fn call(
+        &self,
+        args: serde_json::Value,
+        node: &mut N,
+    ) -> Result<Result<serde_json::Value, serde_json::Value>> {
+        match self {
+            AgentTool::Regular(tool) => tool.call(args, node.workspace_mut()).await,
+            AgentTool::Node(tool) => tool.call(args, node).await,
+        }
+    }
+
+    pub fn regular<T: ToolDyn + 'static>(tool: T) -> Self {
+        AgentTool::Regular(Box::new(tool))
+    }
+
+    pub fn node<T: NodeToolDyn<N> + 'static>(tool: T) -> Self {
+        AgentTool::Node(Box::new(tool))
+    }
+}
+
 impl<T: rig::tool::Tool> Tool for T
 where
     T::Output: Send + Sync,
@@ -214,23 +258,62 @@ where
     }
 }
 
-pub struct ToolResult(
-    rig::message::ToolCall,
-    Result<serde_json::Value, serde_json::Value>,
-);
+pub trait ToolCallExt {
+    fn to_result(
+        &self,
+        result: Result<serde_json::Value, serde_json::Value>,
+    ) -> rig::message::ToolResult;
+}
 
-impl std::convert::From<ToolResult> for rig::message::ToolResult {
-    fn from(value: ToolResult) -> Self {
+impl ToolCallExt for rig::message::ToolCall {
+    fn to_result(
+        &self,
+        result: Result<serde_json::Value, serde_json::Value>,
+    ) -> rig::message::ToolResult {
         use rig::message::ToolResultContent;
-        let inner = match value.1 {
+        let inner = match result {
             Ok(value) => value,
             Err(error) => serde_json::json!({"error": error}),
         };
         let inner = serde_json::to_string(&inner).unwrap();
         rig::message::ToolResult {
-            id: value.0.id,
-            call_id: value.0.call_id,
+            id: self.id.clone(),
+            call_id: self.call_id.clone(),
             content: rig::OneOrMany::one(ToolResultContent::Text(inner.into())),
         }
     }
+}
+
+#[macro_export]
+macro_rules! tools_vec {
+    () => {
+        Vec::<$crate::agent::AgentTool<_>>::new()
+    };
+
+    // Handle a single node tool
+    (node: $tool:expr) => {
+        vec![$crate::agent::AgentTool::node($tool)]
+    };
+
+    // Handle a single regular tool
+    ($tool:expr) => {
+        vec![$crate::agent::AgentTool::regular($tool)]
+    };
+
+    // Handle multiple items recursively
+    (node: $tool:expr, $($rest:tt)*) => {
+        {
+            let mut tools = vec![$crate::agent::AgentTool::node($tool)];
+            tools.extend(tools_vec!($($rest)*));
+            tools
+        }
+    };
+
+    ($tool:expr, $($rest:tt)*) => {
+        {
+            let mut tools = vec![$crate::agent::AgentTool::regular($tool)];
+            tools.extend(tools_vec!($($rest)*));
+            tools
+        }
+    };
 }
