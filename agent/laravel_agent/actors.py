@@ -274,9 +274,44 @@ class LaravelActor(FileOperationsActor):
     async def run_tools(
         self, node: Node[BaseData], user_prompt: str
     ) -> tuple[list[ToolUseResult], bool]:
-        """Execute tools for a given node with automatic Pint formatting for PHP files."""
+        """Execute tools for a given node with automatic Pint formatting and Laravel-specific validation."""
         # First, run the parent's tool execution
         results, should_branch = await super().run_tools(node, user_prompt)
+        
+        # Check for migration files and validate them
+        for i, block in enumerate(node.data.head().content):
+            if isinstance(block, ToolUse) and block.name in ["write_file", "edit_file"]:
+                path = block.input.get("path", "")  # pyright: ignore[reportAttributeAccessIssue]
+                
+                # Validate migration files
+                if "/migrations/" in path and path.endswith(".php"):
+                    # Find the corresponding result
+                    tool_result = None
+                    for j, res in enumerate(results):
+                        if res.tool_use.id == block.id:
+                            tool_result = res
+                            break
+                    
+                    # If the operation was successful, validate the migration syntax
+                    if tool_result and not tool_result.tool_result.is_error:
+                        try:
+                            # Read the current file content
+                            file_content = await node.data.workspace.read_file(path)
+                            if not validate_migration_syntax(file_content):
+                                error_msg = (
+                                    f"Invalid Laravel migration syntax in {path}. "
+                                    "The opening brace after 'extends Migration' must be on a new line.\n\n"
+                                    "Use this pattern:\n"
+                                    f"{MIGRATION_SYNTAX_EXAMPLE}"
+                                )
+                                logger.warning(f"Migration validation failed for {path}")
+                                # Replace the success result with an error
+                                results[j] = ToolUseResult.from_tool_use(block, error_msg, is_error=True)
+                                # Also remove the file from node.data.files if it was added
+                                if path in node.data.files:
+                                    del node.data.files[path]
+                        except Exception as e:
+                            logger.error(f"Error validating migration {path}: {e}")
         
         # Check if any PHP files were created or modified
         php_files_modified = False
@@ -751,47 +786,3 @@ class LaravelActor(FileOperationsActor):
                 continue
                 
         return sorted(list(repo_files))
-    
-    async def run_tools(
-        self, node: Node[BaseData], user_prompt: str
-    ) -> tuple[list[ToolUseResult], bool]:
-        """Execute tools for a given node with Laravel-specific validation."""
-        # First, call the parent implementation
-        result, is_completed = await super().run_tools(node, user_prompt)
-        
-        # Then, check if any migration files were written/edited and validate them
-        for i, block in enumerate(node.data.head().content):
-            if isinstance(block, ToolUse) and block.name in ["write_file", "edit_file"]:
-                path = block.input.get("path", "")  # pyright: ignore[reportAttributeAccessIssue]
-                
-                # Validate migration files
-                if "/migrations/" in path and path.endswith(".php"):
-                    # Find the corresponding result
-                    tool_result = None
-                    for j, res in enumerate(result):
-                        if res.tool_use.id == block.id:
-                            tool_result = res
-                            break
-                    
-                    # If the operation was successful, validate the migration syntax
-                    if tool_result and not tool_result.tool_result.is_error:
-                        try:
-                            # Read the current file content
-                            file_content = await node.data.workspace.read_file(path)
-                            if not validate_migration_syntax(file_content):
-                                error_msg = (
-                                    f"Invalid Laravel migration syntax in {path}. "
-                                    "The opening brace after 'extends Migration' must be on a new line.\n\n"
-                                    "Use this pattern:\n"
-                                    f"{MIGRATION_SYNTAX_EXAMPLE}"
-                                )
-                                logger.warning(f"Migration validation failed for {path}")
-                                # Replace the success result with an error
-                                result[j] = ToolUseResult.from_tool_use(block, error_msg, is_error=True)
-                                # Also remove the file from node.data.files if it was added
-                                if path in node.data.files:
-                                    del node.data.files[path]
-                        except Exception as e:
-                            logger.error(f"Error validating migration {path}: {e}")
-                
-        return result, is_completed
