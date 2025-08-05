@@ -158,6 +158,7 @@ class BaseAgentSession(AgentInterface, ABC):
                 "metadata": metadata,
             }
             snapshot_files = {**fsm_state["context"]["files"]} if fsm_state else {}  # pyright: ignore
+            breakpoint()
 
             # Processing
             logger.info(f"Last user message: {fsm_message_history[-1].content}")
@@ -236,21 +237,21 @@ class BaseAgentSession(AgentInterface, ABC):
                         # Get the actual error from the FSM if available
                         error_details = "Unknown error"
                         is_agent_search_failed = False
-                        
+
                         if self.processor_instance.fsm_app:
                             error_details = self.processor_instance.fsm_app.maybe_error() or "Unknown error"
                             if hasattr(self.processor_instance.fsm_app, 'is_agent_search_failed_error'):
                                 is_agent_search_failed = self.processor_instance.fsm_app.is_agent_search_failed_error()
-                        
+
                         logger.error(f"FSM failed with error: {error_details}")
-                        
+
                         if is_agent_search_failed:
                             # User-friendly message from AgentSearchFailedException
                             error_message = error_details
                         else:
                             # Other errors - show with context
                             error_message = f"An error occurred during processing: {error_details}"
-                        
+
                         runtime_error_message = InternalMessage(
                                     role="assistant",
                                     content=[TextRaw(error_message)]

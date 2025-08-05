@@ -374,7 +374,6 @@ class FSMApplication:
         logger.info(
             f"SERVER get_diff_with: workspace.diff() Succeeded. Diff length: {len(diff)}"
         )
-        breakpoint()
         if not diff:
             logger.warning(
                 "SERVER get_diff_with: Diff output is EMPTY. This might be expected if states match or an issue."
