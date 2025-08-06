@@ -74,6 +74,18 @@ class WidgetRenderer:
         """Render a metric/KPI widget"""
         config = widget.config
         
+        # Check if widget has a data source
+        if config.get("data_source"):
+            from app.data_source_service import DataSourceService
+            data = DataSourceService.execute_widget_query(widget)
+            if data and data.get("rows"):
+                # Use first row's first value for metric
+                row = data["rows"][0] if data["rows"] else {}
+                if row:
+                    # Get first numeric value
+                    value = next((v for v in row.values() if isinstance(v, (int, float))), 0)
+                    config["value"] = value
+        
         with ui.column().classes("items-center justify-center"):
             if config.get("icon"):
                 ui.icon(config["icon"], size="2rem")
@@ -99,11 +111,25 @@ class WidgetRenderer:
         if config.get("title"):
             ui.label(config["title"]).classes("text-lg font-semibold mb-2")
         
-        # Sample data - in real app, this would come from config or data source
-        data = config.get("data", {
-            "x": ["Jan", "Feb", "Mar", "Apr", "May"],
-            "y": [10, 15, 13, 17, 22]
-        })
+        # Check if widget has a data source
+        if config.get("data_source"):
+            from app.data_source_service import DataSourceService
+            query_data = DataSourceService.execute_widget_query(widget)
+            if query_data:
+                # Use data from query
+                data = query_data
+            else:
+                # Fallback to config data
+                data = config.get("data", {
+                    "x": ["No Data"],
+                    "y": [0]
+                })
+        else:
+            # Use static data from config
+            data = config.get("data", {
+                "x": ["Jan", "Feb", "Mar", "Apr", "May"],
+                "y": [10, 15, 13, 17, 22]
+            })
         
         if chart_type == "line":
             fig = go.Figure(data=go.Scatter(x=data["x"], y=data["y"], mode='lines+markers'))
@@ -130,15 +156,33 @@ class WidgetRenderer:
         if config.get("title"):
             ui.label(config["title"]).classes("text-lg font-semibold mb-2")
         
-        columns = config.get("columns", [
-            {"name": "id", "label": "ID", "field": "id"},
-            {"name": "name", "label": "Name", "field": "name"}
-        ])
-        
-        rows = config.get("rows", [
-            {"id": 1, "name": "Sample Item 1"},
-            {"id": 2, "name": "Sample Item 2"}
-        ])
+        # Check if widget has a data source
+        if config.get("data_source"):
+            from app.data_source_service import DataSourceService
+            data = DataSourceService.execute_widget_query(widget)
+            if data and data.get("rows"):
+                rows = data["rows"]
+                # Auto-generate columns from first row
+                if rows:
+                    columns = [
+                        {"name": key, "label": key.replace("_", " ").title(), "field": key}
+                        for key in rows[0].keys()
+                    ]
+                else:
+                    columns = []
+            else:
+                columns = config.get("columns", [])
+                rows = config.get("rows", [])
+        else:
+            columns = config.get("columns", [
+                {"name": "id", "label": "ID", "field": "id"},
+                {"name": "name", "label": "Name", "field": "name"}
+            ])
+            
+            rows = config.get("rows", [
+                {"id": 1, "name": "Sample Item 1"},
+                {"id": 2, "name": "Sample Item 2"}
+            ])
         
         ui.table(columns=columns, rows=rows).classes("w-full")
     

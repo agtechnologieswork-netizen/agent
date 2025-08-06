@@ -106,7 +106,38 @@ class WidgetManager:
                 value=WidgetSize.MEDIUM
             )
             
+            # Data source configuration
+            ui.label("Data Source").classes("text-sm font-medium text-gray-700 mt-4 mb-2")
+            
+            from app.data_source_service import DataSourceService
+            tables = DataSourceService.get_available_tables()
+            table_options = {"none": "Static Data"}
+            for table in tables:
+                table_options[table["name"]] = f"{table['name']} ({table['row_count']} rows)"
+            
+            data_source_select = ui.select(
+                label="Select Table",
+                options=table_options,
+                value="none"
+            ).classes("w-full")
+            
+            # Dynamic data source configuration
+            data_config_container = ui.column().classes("w-full mt-2")
+            
+            def update_data_config():
+                data_config_container.clear()
+                with data_config_container:
+                    if data_source_select.value != "none":
+                        selected_table = next((t for t in tables if t["name"] == data_source_select.value), None)
+                        if selected_table:
+                            ui.label(f"Columns in {selected_table['name']}:").classes("text-sm")
+                            for col in selected_table["columns"][:5]:  # Show first 5 columns
+                                ui.label(f"  • {col['name']} ({col['type']})").classes("text-xs text-gray-600")
+            
+            data_source_select.on("update:model-value", update_data_config)
+            
             # Dynamic configuration based on widget type
+            ui.label("Widget Configuration").classes("text-sm font-medium text-gray-700 mt-4 mb-2")
             config_container = ui.column().classes("w-full")
             
             def update_config_fields():
@@ -150,13 +181,14 @@ class WidgetManager:
                         name_input.value,
                         type_select.value,
                         size_select.value,
-                        dialog
+                        dialog,
+                        data_source=data_source_select.value
                     )
                 ).props("color=primary")
         
         dialog.open()
     
-    def add_widget(self, name: str, widget_type: WidgetType, size: WidgetSize, dialog):
+    def add_widget(self, name: str, widget_type: WidgetType, size: WidgetSize, dialog, data_source=None, data_config=None):
         """Add a new widget"""
         if not name:
             ui.notify("Please enter a widget name", type="warning")
@@ -164,6 +196,15 @@ class WidgetManager:
         
         # Create widget with basic config
         config = self.get_default_config(widget_type)
+        
+        # Add data source configuration if provided
+        if data_source and data_source != "none":
+            config["data_source"] = {
+                "type": "table",
+                "table": data_source,
+                "columns": data_config.get("columns", []) if data_config else [],
+                "limit": data_config.get("limit", 100) if data_config else 100
+            }
         
         widget = self.widget_service.create_widget(
             name=name,
