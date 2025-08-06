@@ -735,12 +735,21 @@ async def monitor_existing_project_loop(monitor_state, container_names):
                     error_found = True
                     break
             
-            if not error_found:
+            # Also check if the web app is actually responding properly
+            app_healthy = await check_app_health(monitor_state["project_dir"])
+            
+            if not error_found and app_healthy:
                 consecutive_clean_checks += 1
                 if consecutive_clean_checks == 1:
-                    print("\n✅ Application running without errors")
+                    print("\n✅ Application running without errors and responding to HTTP")
                 elif consecutive_clean_checks == max_clean_checks:
                     print("🎉 Application stable - reducing monitoring frequency")
+            elif not app_healthy and not error_found:
+                # App not responding but no errors in logs - might be a client-side issue
+                print("\n⚠️ App not responding properly but no backend errors detected")
+                print("   Checking for client-side or configuration issues...")
+                # Force an error to trigger fixing
+                error_found = True
                     
         except asyncio.CancelledError:
             monitoring = False
@@ -748,6 +757,31 @@ async def monitor_existing_project_loop(monitor_state, container_names):
         except Exception as e:
             logger.error(f"Error in monitoring loop: {e}")
             await anyio.sleep(5)
+
+
+async def check_app_health(project_dir: str) -> bool:
+    """Check if the app is actually functioning (not just running)"""
+    try:
+        import httpx
+        async with httpx.AsyncClient() as client:
+            # Check if we can get the main page
+            response = await client.get("http://localhost:80", timeout=5)
+            if response.status_code != 200:
+                return False
+            
+            # Check if the page has actual content (not just error page)
+            content = response.text
+            if "Connection lost" in content or "Error" in content:
+                return False
+            
+            # Check if NiceGUI is loaded
+            if "nicegui" not in content.lower():
+                return False
+                
+            return True
+    except Exception as e:
+        logger.debug(f"Health check failed: {e}")
+        return False
 
 
 async def apply_fix_to_existing_project(monitor_state, fix_prompt, container_names):
