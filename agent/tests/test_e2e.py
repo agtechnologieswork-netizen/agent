@@ -2,6 +2,7 @@ import os
 import pytest
 import tempfile
 import anyio
+import asyncio
 import contextlib
 import subprocess
 
@@ -432,7 +433,7 @@ async def monitor_and_fix_errors(client, monitor_state, temp_dir, container_name
                 elif consecutive_clean_checks == max_clean_checks:
                     print("🎉 Application stable - reducing monitoring frequency")
                         
-        except anyio.CancelledError:
+        except asyncio.CancelledError:
             monitoring = False
             logger.info("Monitoring cancelled")
             break

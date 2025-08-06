@@ -93,6 +93,7 @@ def _run_edit_mode(prompt, input_folder, template_id, use_databricks):
         # Read all files from the input folder
         input_folder_abs = os.path.abspath(input_folder)
         logger.info(f"Running in edit mode on folder: {input_folder_abs}")
+        logger.info(f"Using prompt: {prompt}")
         
         files_for_snapshot = get_all_files_from_project_dir(input_folder_abs)
         all_files = [f.model_dump() for f in files_for_snapshot]
@@ -178,7 +179,9 @@ def _run_edit_mode(prompt, input_folder, template_id, use_databricks):
 def _generate(prompt=None, template_id=None, with_edit=True, use_databricks=False, edit_mode=False, input_folder=None, monitor=False):
     from tests.test_e2e import DEFAULT_APP_REQUEST
     coloredlogs.install(level="INFO")
+    print(f"DEBUG: Received prompt parameter: {repr(prompt)}")
     if prompt is None:
+        print(f"DEBUG: Using default prompt: {DEFAULT_APP_REQUEST}")
         prompt = DEFAULT_APP_REQUEST
     
     if edit_mode:
