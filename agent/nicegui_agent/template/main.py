@@ -17,7 +17,11 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         response.headers["X-XSS-Protection"] = "1; mode=block"
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
-        response.headers["Content-Security-Policy"] = "default-src 'self' http: https: data: blob: 'unsafe-inline'; frame-ancestors https://app.build/ https://www.app.build/ https://staging.app.build/"
+        response.headers["Content-Security-Policy"] = (
+            "default-src 'self' http: https: data: blob: 'unsafe-inline' 'unsafe-eval'; "
+            "script-src 'self' 'unsafe-inline' 'unsafe-eval'; "
+            "frame-ancestors https://app.build/ https://www.app.build/ https://staging.app.build/"
+        )
         return response
 
 
