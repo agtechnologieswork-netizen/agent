@@ -3,15 +3,17 @@ message: Exception handlers should include logging for observability
 severity: error
 language: python
 rule:
-  pattern: |
-    try:
-      $$$
-    except $$$:
-      $$$BODY
-  not:
-    has:
-      pattern: $$$BODY
-      any:
-        - regex: ".*log.*"
-        - regex: ".*logger.*"
-        - regex: ".*raise.*"
+  all:
+    - pattern: |
+        try:
+          $$$
+        except $$$:
+          $$$BODY
+    - not:
+        has:
+          pattern: $$$BODY
+          any:
+            - regex: ".*log.*"
+            - regex: ".*logger.*"
+            - regex: ".*raise.*"
+            - regex: ".*pytest\\.fail.*"

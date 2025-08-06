@@ -4,7 +4,7 @@ import anyio
 from typing import Callable, Awaitable
 from core.base_node import Node
 from core.workspace import Workspace
-from core.actors import BaseData, FileOperationsActor
+from core.actors import BaseData, FileOperationsActor, AgentSearchFailedException
 from llm.common import AsyncLLM, Message, TextRaw, Tool, ToolUse, ToolUseResult
 from nicegui_agent import playbooks
 from core.notification_utils import notify_if_callback, notify_stage
@@ -60,9 +60,8 @@ class NiceguiActor(FileOperationsActor):
 
         workspace = self.workspace.clone()
         if self.databricks_client:
-            await workspace.exec_mut(
-                ["uv", "add", "databricks-sdk>=0.57.0"]
-            )
+            logger.info("Adding databricks-sdk dependency to the workspace")
+            await workspace.exec_mut(["uv", "add", "databricks-sdk>=0.57.0"])
 
         logger.info(
             f"Start {self.__class__.__name__} execution with files: {files.keys()}"
@@ -97,8 +96,16 @@ class NiceguiActor(FileOperationsActor):
             iteration += 1
             candidates = self.select(self.root)
             if not candidates:
-                logger.info("No candidates to evaluate, search terminated")
-                break
+                logger.error("No candidates to evaluate, search terminated")
+                await notify_stage(
+                    self.event_callback,
+                    "❌ NiceGUI agent failed: No candidates to evaluate",
+                    "failed"
+                )
+                raise AgentSearchFailedException(
+                    agent_name="NiceguiActor",
+                    message="No candidates to evaluate, search terminated"
+                )
 
             await notify_if_callback(
                 self.event_callback,
@@ -135,7 +142,10 @@ class NiceguiActor(FileOperationsActor):
                 "❌ NiceGUI application generation failed",
                 "failed",
             )
-            raise ValueError("No solutions found")
+            raise AgentSearchFailedException(
+                agent_name="NiceguiActor",
+                message="Failed to find a solution after all iterations"
+            )
         return solution
 
     def select(self, node: Node[BaseData]) -> list[Node[BaseData]]:
@@ -506,12 +516,16 @@ class NiceguiActor(FileOperationsActor):
 
             async def run_and_store(key, coro):
                 """Helper to run a coroutine and store its result in the results dict."""
+                start_time = anyio.current_time()
                 try:
                     results[key] = await coro
                 except Exception as e:
                     # Catch unexpected exceptions during check execution
                     logger.error(f"Error running check {key}: {e}")
                     results[key] = f"Internal error running check {key}: {e}"
+                finally:
+                    duration = anyio.current_time() - start_time
+                    logger.info(f"Check '{key}' completed in {duration:.2f} seconds")
 
             tg.start_soon(run_and_store, "lint", self.run_lint_checks(node))
             tg.start_soon(run_and_store, "type_check", self.run_type_checks(node))
@@ -548,7 +562,6 @@ class NiceguiActor(FileOperationsActor):
             self.event_callback, "✅ All validation checks passed", "completed"
         )
         return None
-
 
     async def get_repo_files(
         self, workspace: Workspace, files: dict[str, str]

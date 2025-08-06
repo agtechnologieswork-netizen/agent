@@ -3,6 +3,7 @@ from abc import ABC
 from typing import Dict, Any, Optional, TypedDict, List, Union, Type
 from datetime import datetime
 from uuid import uuid4
+from hashlib import md5
 import dagger
 
 from anyio.streams.memory import MemoryObjectSendStream
@@ -233,9 +234,27 @@ class BaseAgentSession(AgentInterface, ABC):
                         )
                     case FSMStatus.FAILED:
                         logger.info("Got FAILED status, sending runtime error message")
+                        # Get the actual error from the FSM if available
+                        error_details = "Unknown error"
+                        is_agent_search_failed = False
+
+                        if self.processor_instance.fsm_app:
+                            error_details = self.processor_instance.fsm_app.maybe_error() or "Unknown error"
+                            if hasattr(self.processor_instance.fsm_app, 'is_agent_search_failed_error'):
+                                is_agent_search_failed = self.processor_instance.fsm_app.is_agent_search_failed_error()
+
+                        logger.error(f"FSM failed with error: {error_details}")
+
+                        if is_agent_search_failed:
+                            # User-friendly message from AgentSearchFailedException
+                            error_message = error_details
+                        else:
+                            # Other errors - show with context
+                            error_message = f"An error occurred during processing: {error_details}"
+
                         runtime_error_message = InternalMessage(
                                     role="assistant",
-                                    content=[TextRaw("Runtime error occurred, please try again. If the problem persists, please create an issue on GitHub.")]
+                                    content=[TextRaw(error_message)]
                                 )
                         await self.send_event(
                             event_tx=event_tx,
@@ -368,7 +387,7 @@ class BaseAgentSession(AgentInterface, ABC):
                     "metadata": agent_state["metadata"],
                 } if agent_state else None,
                 unifiedDiff=unified_diff,
-                complete_diff_hash=None,
+                complete_diff_hash=md5((unified_diff.encode() if unified_diff else b"")).hexdigest() if unified_diff else None,
                 diff_stat=None,
                 app_name=app_name,
                 commit_message=commit_message
