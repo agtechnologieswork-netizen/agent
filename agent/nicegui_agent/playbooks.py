@@ -929,6 +929,175 @@ Before solving a task, begin by articulating a comprehensive plan that explicitl
 """.strip()
 
 
+WIDGET_SYSTEM_RULES = """
+# Dynamic Widget System
+
+The application includes a powerful widget system for creating customizable dashboards. Widgets are stored in the database and can be dynamically added, edited, and removed by users.
+
+## Available Widget Types
+1. **TEXT** - Display text or markdown content
+2. **METRIC** - Show KPIs with icons and change indicators  
+3. **CHART** - Interactive charts using Plotly (line, bar, pie)
+4. **TABLE** - Data tables with columns and rows
+5. **BUTTON** - Interactive buttons with actions
+6. **IMAGE** - Display images with captions
+7. **CARD** - Custom cards with title, subtitle, and content
+8. **CUSTOM** - Raw HTML/JavaScript for advanced use cases
+
+## Widget Sizes
+- SMALL (25% width)
+- MEDIUM (50% width)  
+- LARGE (75% width)
+- FULL (100% width)
+
+## Using the Widget System
+
+### 1. Import Widget Components
+```python
+from app.widget_service import WidgetService
+from app.widget_renderer import WidgetRenderer, WidgetGrid
+from app.widget_models import Widget, WidgetType, WidgetSize
+from app.widget_ui import WidgetManager
+```
+
+### 2. Create Widgets Programmatically
+```python
+# Create a metric widget
+metric_widget = WidgetService.create_widget(
+    name="Revenue",
+    type=WidgetType.METRIC,
+    size=WidgetSize.SMALL,
+    config={
+        "title": "Monthly Revenue",
+        "value": 125000,
+        "icon": "attach_money",
+        "change": 12.5
+    }
+)
+
+# Create a chart widget
+chart_widget = WidgetService.create_widget(
+    name="Sales Trend",
+    type=WidgetType.CHART,
+    size=WidgetSize.LARGE,
+    config={
+        "chart_type": "line",
+        "title": "Sales Over Time",
+        "data": {
+            "x": ["Jan", "Feb", "Mar", "Apr"],
+            "y": [100, 150, 130, 180]
+        }
+    }
+)
+```
+
+### 3. Render Widget Dashboard
+```python
+@ui.page("/dashboard")
+def dashboard_page():
+    # Use the built-in widget manager
+    manager = WidgetManager()
+    manager.render_dashboard()
+```
+
+### 4. Custom Widget Rendering
+```python
+@ui.page("/custom-dashboard")
+def custom_dashboard():
+    widgets = WidgetService.get_widgets_for_page("custom")
+    
+    grid = WidgetGrid()
+    grid.render(widgets, editable=True)
+```
+
+### 5. Widget Configuration Examples
+
+#### Metric Widget Config
+```python
+{
+    "title": "Active Users",
+    "value": 1234,
+    "icon": "people",
+    "change": 5.2  # Percentage change
+}
+```
+
+#### Chart Widget Config
+```python
+{
+    "chart_type": "bar",  # or "line", "pie"
+    "title": "Monthly Sales",
+    "data": {
+        "x": ["Jan", "Feb", "Mar"],
+        "y": [100, 150, 200]
+    },
+    "show_legend": True
+}
+```
+
+#### Table Widget Config
+```python
+{
+    "title": "Recent Orders",
+    "columns": [
+        {"name": "id", "label": "Order ID", "field": "id"},
+        {"name": "customer", "label": "Customer", "field": "customer"},
+        {"name": "total", "label": "Total", "field": "total"}
+    ],
+    "rows": [
+        {"id": 1, "customer": "John Doe", "total": "$150"},
+        {"id": 2, "customer": "Jane Smith", "total": "$200"}
+    ]
+}
+```
+
+## Best Practices
+1. Initialize default widgets on app startup using `WidgetService.initialize_default_widgets()`
+2. Use appropriate widget sizes for content type
+3. Keep widget configs lightweight - fetch data dynamically when possible
+4. Use the edit mode toggle for admin users to manage widgets
+5. Leverage widget templates for consistent styling
+
+## Integration with Data Models
+Widgets can display data from your SQLModel models:
+
+```python
+from app.models import Order
+from app.database import get_session
+
+def create_orders_widget():
+    with get_session() as session:
+        recent_orders = session.exec(
+            select(Order).order_by(desc(Order.created_at)).limit(5)
+        ).all()
+        
+        WidgetService.create_widget(
+            name="Recent Orders",
+            type=WidgetType.TABLE,
+            config={
+                "columns": [
+                    {"name": "id", "label": "ID", "field": "id"},
+                    {"name": "customer", "label": "Customer", "field": "customer"},
+                    {"name": "total", "label": "Total", "field": "total"}
+                ],
+                "rows": [
+                    {"id": o.id, "customer": o.customer_name, "total": f"${o.total}"}
+                    for o in recent_orders
+                ]
+            }
+        )
+```
+
+## Widget System Architecture
+- **widget_models.py** - Database models for widgets
+- **widget_service.py** - CRUD operations and business logic
+- **widget_renderer.py** - UI rendering engine
+- **widget_ui.py** - Management interface
+- **startup.py** - Initialize widgets on app start
+
+The widget system is automatically initialized when the application starts and provides a complete solution for dynamic, database-backed dashboards.
+"""
+
 NICEGUI_UI_GUIDELINES = """
 ## UI Design Guidelines
 
@@ -1134,6 +1303,8 @@ Don't be chatty, keep on solving the problem, not describing what you are doing.
 {get_tool_usage_rules(use_databricks)}
 
 {NICEGUI_UI_GUIDELINES}
+
+{WIDGET_SYSTEM_RULES}
 
 # Additional Notes for Application Development
 
