@@ -11,16 +11,9 @@ use rig::{
 use std::{collections::HashSet, sync::Arc};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct PlanItem {
-    pub guidance: String,
-    pub files: Vec<String>,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum NodeKind {
     Step,
     Done,
-    Plan { items: Vec<PlanItem> },
 }
 
 pub struct Node {

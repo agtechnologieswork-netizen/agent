@@ -106,10 +106,9 @@ impl Workspace for DaggerWorkspace {
         Ok(())
     }
 
-    async fn fork(&self) -> eyre::Result<Box<dyn WorkspaceDyn>> {
+    async fn fork(&self) -> eyre::Result<Self> {
         let ctr = self.ctr.clone();
-        let new_workspace = DaggerWorkspace { ctr };
-        Ok(Box::new(new_workspace))
+        Ok(DaggerWorkspace { ctr })
     }
 }
 
