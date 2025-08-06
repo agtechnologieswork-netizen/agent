@@ -68,6 +68,9 @@ class ModelCategory:
     VISION = "vision"            # vision tasks
 
 ANTHROPIC_MODELS = {
+    "opus": {
+        "anthropic": "claude-opus-4-1-20250805"
+    },
     "sonnet": {
         "bedrock": "us.anthropic.claude-sonnet-4-20250514-v1:0",
         "anthropic": "claude-sonnet-4-20250514"
@@ -120,7 +123,7 @@ MODELS_MAP: Dict[str, Dict[str, str]] = {
 }
 
 DEFAULT_MODELS = {
-    ModelCategory.BEST_CODING: "sonnet",           # slow, high quality
+    ModelCategory.BEST_CODING: "opus",             # slow, high quality
     ModelCategory.UNIVERSAL: "gemini-flash",       # medium speed for FSM tools
     ModelCategory.ULTRA_FAST: "gemini-flash-lite", # ultra fast for commit names
     ModelCategory.VISION: "gemini-flash-lite",     # vision tasks
