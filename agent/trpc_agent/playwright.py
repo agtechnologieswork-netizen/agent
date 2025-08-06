@@ -155,7 +155,7 @@ class PlaywrightRunner:
                 case _:
                     raise ValueError(f"Unknown mode: {mode}")
 
-            result, err = await self.run(node, log_dir=temp_dir, mode=mode)
+            _, err = await self.run(node, log_dir=temp_dir, mode=mode)
             if err:
                 errors.append(err)
             else:

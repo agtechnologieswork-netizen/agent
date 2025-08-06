@@ -450,22 +450,21 @@ class TrpcActor(FileOperationsActor):
             node.data.messages.append(Message(role="user", content=tool_results))
             return False
 
-        # Get context from node data (with fallback)
-        context = getattr(node.data, "context", "draft")
+        # Get context from node data
+        context = node.data.context
 
         # Then run context-specific validation
-        match context:
-            case "draft":
-                return await self._validate_draft(node)
-            case "handler":
-                return await self._validate_handler(node)
-            case "frontend":
-                return await self._validate_frontend(node)
-            case "edit":
-                return await self._validate_edit(node)
-            case _:
-                logger.warning(f"Unknown context: {context}")
-                return True
+        if context == "draft":
+            return await self._validate_draft(node)
+        elif context.startswith("handler:"):
+            return await self._validate_handler(node)
+        elif context == "frontend":
+            return await self._validate_frontend(node)
+        elif context == "edit":
+            return await self._validate_edit(node)
+        else:
+            logger.warning(f"Unknown context: {context}")
+            return True
 
     async def _validate_draft(self, node: Node[BaseData]) -> bool:
         """Validate draft: TypeScript compilation + Drizzle schema."""
@@ -607,7 +606,8 @@ class TrpcActor(FileOperationsActor):
             ["bun", "run", "tsc", "--noEmit"], cwd="server"
         )
         if result.exit_code != 0:
-            return f"TypeScript errors (backend):\n{result.stdout}"
+            error_output = result.stdout or result.stderr
+            return f"TypeScript errors (backend):\n{error_output}"
         return None
 
     async def run_tsc_frontend_check(self, node: Node[BaseData]) -> str | None:
@@ -616,7 +616,8 @@ class TrpcActor(FileOperationsActor):
             ["bun", "run", "tsc", "-p", "tsconfig.app.json", "--noEmit"], cwd="client"
         )
         if result.exit_code != 0:
-            return f"TypeScript errors (frontend):\n{result.stdout}"
+            error_output = result.stdout or result.stderr
+            return f"TypeScript errors (frontend):\n{error_output}"
         return None
 
     async def run_drizzle_check(self, node: Node[BaseData]) -> str | None:
@@ -625,28 +626,38 @@ class TrpcActor(FileOperationsActor):
             node.data.workspace.client, node.data.workspace.ctr, postgresdb=None
         )
         if result.exit_code != 0:
-            return f"Drizzle errors:\n{result.stderr}"
+            error_output = result.stderr or result.stdout
+            return f"Drizzle errors:\n{error_output}"
         return None
 
     async def run_build_check(self, node: Node[BaseData]) -> str | None:
         """Run frontend build check."""
         result = await node.data.workspace.exec(["bun", "run", "build"], cwd="client")
         if result.exit_code != 0:
-            return f"Build errors:\n{result.stdout}"
+            error_output = result.stdout or result.stderr
+            return f"Build errors:\n{error_output}"
         return None
 
     async def run_test_check(
         self, node: Node[BaseData], handler_name: str | None = None
     ) -> str | None:
-        """Run test checks - specific handler or all tests."""
+        """Run test checks - specific handler or all tests with real database."""
+
+        # prepare test command
         if handler_name:
-            result = await node.data.workspace.exec(
-                ["bun", "test", f"src/tests/{handler_name}.test.ts"], cwd="server"
-            )
+            test_cmd = ["bun", "test", f"src/tests/{handler_name}.test.ts"]
+            test_context = f"handler '{handler_name}'"
         else:
-            result = await node.data.workspace.exec(["bun", "test"], cwd="server")
+            test_cmd = ["bun", "test"]
+            test_context = "all tests"
+
+        # run tests with postgres service
+        result = await node.data.workspace.exec_with_pg(test_cmd, cwd="server")
+        logger.info(f"Test execution result for {test_context}: {result.exit_code}")
+
         if result.exit_code != 0:
-            return f"Test errors:\n{result.stdout}"
+            error_output = result.stderr
+            return f"Test errors:\n{error_output}"
         return None
 
     async def run_playwright_check(
@@ -657,8 +668,8 @@ class TrpcActor(FileOperationsActor):
         return feedback if feedback else None
 
     async def run_checks(self, node: Node[BaseData], user_prompt: str) -> str | None:
-        """Run validation checks based on context."""
         # This is handled by eval_node with context awareness
+        # Just to keep the interface consistent for now
         return None
 
     def _render_prompt(self, template_name: str, **kwargs) -> str:
@@ -816,16 +827,16 @@ class TrpcActor(FileOperationsActor):
             )
 
             message = Message(role="user", content=[TextRaw(user_prompt_rendered)])
-            node = Node(BaseData(handler_ws, [message], {}, True, "handler"))
+            node = Node(
+                BaseData(handler_ws, [message], {}, True, f"handler:{handler_name}")
+            )
             self.handler_nodes[handler_name] = node
 
     def _get_handler_name(self, node: Node[BaseData]) -> str:
-        """Extract handler name from node's workspace."""
-        for file_path in node.data.files:
-            if file_path.startswith("server/src/handlers/") and file_path.endswith(
-                ".ts"
-            ):
-                return os.path.splitext(os.path.basename(file_path))[0]
+        """Extract handler name from node's context."""
+        context = node.data.context
+        if context.startswith("handler:"):
+            return context.split(":", 1)[1]
         return "unknown"
 
     @property
