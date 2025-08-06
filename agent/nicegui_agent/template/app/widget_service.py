@@ -1,8 +1,8 @@
 """Service for managing dynamic widgets"""
 import logging
 from typing import List, Optional, Dict, Any
+from sqlmodel import Session, select, col
 from sqlalchemy import desc
-from sqlmodel import Session, select
 from app.database import engine
 from app.widget_models import Widget, WidgetTemplate, UserWidgetPreset, WidgetType, WidgetSize
 from datetime import datetime
@@ -20,7 +20,7 @@ class WidgetService:
             statement = select(Widget).where(
                 Widget.page == page,
                 Widget.is_visible
-            ).order_by(Widget.position)
+            ).order_by(col(Widget.position))
             widgets = session.exec(statement).all()
             return list(widgets)
     
@@ -37,7 +37,7 @@ class WidgetService:
         with Session(engine) as session:
             # Get the next position
             max_position = session.exec(
-                select(Widget.position).where(Widget.page == page).order_by(desc(Widget.position))
+                select(Widget.position).where(Widget.page == page).order_by(desc(col(Widget.position)))
             ).first()
             next_position = (max_position or 0) + 1
             

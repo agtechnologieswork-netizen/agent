@@ -1,8 +1,9 @@
 """Dynamic widget models for customizable UI"""
 from sqlmodel import SQLModel, Field, JSON, Column
 from typing import Optional, Dict, Any, List
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
+from pydantic import ConfigDict
 
 
 class WidgetType(str, Enum):
@@ -45,10 +46,10 @@ class Widget(SQLModel, table=True):
     is_editable: bool = Field(default=True)
     
     # Timestamps
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-    updated_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     
-    model_config = {"arbitrary_types_allowed": True}
+    model_config = ConfigDict(arbitrary_types_allowed=True)  # type: ignore
 
 
 class WidgetTemplate(SQLModel, table=True):
@@ -62,7 +63,7 @@ class WidgetTemplate(SQLModel, table=True):
     category: str = Field(default="general")
     icon: Optional[str] = None
     
-    model_config = {"arbitrary_types_allowed": True}
+    model_config = ConfigDict(arbitrary_types_allowed=True)  # type: ignore
 
 
 class UserWidgetPreset(SQLModel, table=True):
@@ -72,6 +73,6 @@ class UserWidgetPreset(SQLModel, table=True):
     preset_name: str
     widgets: List[Dict[str, Any]] = Field(default=[], sa_column=Column(JSON))
     is_default: bool = Field(default=False)
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     
-    model_config = {"arbitrary_types_allowed": True}
+    model_config = ConfigDict(arbitrary_types_allowed=True)  # type: ignore
