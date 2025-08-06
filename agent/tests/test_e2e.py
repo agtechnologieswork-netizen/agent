@@ -448,7 +448,7 @@ def generate_fix_prompt(error_type: str, match, full_logs: str):
     context = '\n'.join(context_lines)
     
     prompts = {
-        "attribute_error": f"Fix the AttributeError where {match[0]} object has no attribute {match[1]}. Context:\n{context}",
+        "attribute_error": f"Fix the AttributeError where {match[0] if isinstance(match, tuple) else match} object has no attribute {match[1] if isinstance(match, tuple) else ''}. Context:\n{context}",
         "name_error": f"Fix the NameError where {match} is not defined. Context:\n{context}",
         "import_error": f"Fix the ImportError for {match}. Context:\n{context}",
         "type_error": f"Fix the TypeError: {match}. Context:\n{context}",
@@ -463,6 +463,9 @@ def generate_fix_prompt(error_type: str, match, full_logs: str):
         "postgres_error": f"Fix the PostgreSQL error: {match}. Context:\n{context}",
         "server_error": f"Fix the server error: {match}. Context:\n{context}",
         "fastapi_error": f"Fix the FastAPI error: {match}. Context:\n{context}",
+        "application_error": f"Fix the application error: {match}. Context:\n{context}",
+        "databricks_error": f"Fix the Databricks error: {match}. Make the app work without Databricks credentials by using mock data or removing Databricks dependency. Context:\n{context}",
+        "auth_error": f"Fix the authentication error: {match}. Make the app work without external credentials by using mock data or local alternatives. Context:\n{context}",
     }
     
     return prompts.get(error_type, f"Fix the error: {match}. Context:\n{context}")
@@ -553,6 +556,274 @@ async def apply_fix(client, events, request, fix_prompt, temp_dir, template_id, 
         import traceback
         logger.error(traceback.format_exc())
         return (False, events, request)
+
+
+async def run_monitor_existing_project(project_dir: str, prompt: str, template_id=None, use_databricks=False):
+    """Monitor an existing project directory and auto-fix errors using edit mode"""
+    from api.agent_server.agent_api_client import spawn_local_server, get_all_files_from_project_dir
+    
+    logger.info(f"Starting monitor mode for existing project: {project_dir}")
+    print(f"🔍 Monitor Mode: {project_dir}")
+    print("="*50)
+    
+    # Setup settings for databricks if needed
+    settings = {}
+    if use_databricks:
+        settings = {
+            "databricks_host": os.getenv("DATABRICKS_HOST"),
+            "databricks_token": os.getenv("DATABRICKS_TOKEN"),
+        }
+        if not settings["databricks_host"] or not settings["databricks_token"]:
+            raise ValueError("Databricks host and token must be set in environment variables to use Databricks")
+    
+    # Get container names for the project
+    container_names = setup_docker_env()
+    
+    try:
+        # Start Docker containers from the existing project
+        print("🚀 Starting Docker containers...")
+        success, error_message = start_docker_compose(project_dir, container_names["project_name"], build=True)
+        if not success:
+            logger.error(f"Error starting Docker containers: {error_message}")
+            print(f"❌ Failed to start containers: {error_message}")
+            print("💡 Tip: Make sure docker-compose.yml exists in the project directory")
+            return
+        
+        # Wait for containers to be healthy
+        print("⏳ Waiting for containers to be healthy...")
+        container_healthy = await wait_for_healthy_containers(
+            [
+                container_names["db_container_name"],
+                container_names["app_container_name"],
+            ],
+            ["db", "app"],
+            timeout=60,
+            interval=1
+        )
+        
+        if not container_healthy:
+            print("⚠️ Containers didn't become healthy, but continuing with monitoring...")
+        else:
+            print("✅ Containers are healthy!")
+        
+        print("\n📊 App is running on http://localhost:80/")
+        print("👀 Monitoring logs for errors...")
+        print("🔧 Auto-fix mode enabled using agent")
+        print("Press Ctrl+C to stop monitoring\n")
+        
+        # Start monitoring with auto-fix using agent client
+        with spawn_local_server():
+            async with AgentApiClient() as client:
+                # Read initial files for context
+                files_for_snapshot = get_all_files_from_project_dir(project_dir)
+                all_files = [f.model_dump() for f in files_for_snapshot]
+                
+                # Create initial state for monitoring
+                monitor_state = {
+                    "events": [],
+                    "request": None,
+                    "client": client,
+                    "project_dir": project_dir,
+                    "all_files": all_files,
+                    "template_id": template_id,
+                    "settings": settings,
+                    "prompt": prompt
+                }
+                
+                # Run monitoring loop
+                await monitor_existing_project_loop(monitor_state, container_names)
+                
+    except KeyboardInterrupt:
+        print("\n🛑 Monitoring stopped by user")
+    finally:
+        print("🧹 Cleaning up...")
+        stop_docker_compose(project_dir, container_names["project_name"])
+        print("✅ Cleanup complete")
+
+
+async def monitor_existing_project_loop(monitor_state, container_names):
+    """Monitor loop for existing projects with edit-mode fixes"""
+    import re
+    
+    fixed_errors = set()
+    monitoring = True
+    consecutive_clean_checks = 0
+    max_clean_checks = 5
+    
+    print("📊 Monitoring Dashboard:")
+    print("="*50)
+    
+    while monitoring:
+        try:
+            # Adaptive monitoring frequency
+            if consecutive_clean_checks >= max_clean_checks:
+                await anyio.sleep(5)
+            else:
+                await anyio.sleep(2)
+            
+            # Get container logs
+            logs = get_container_logs([container_names["app_container_name"]])
+            app_logs = logs.get(container_names["app_container_name"], "")
+            
+            # Detect errors (reuse existing error patterns)
+            error_patterns = [
+                # Python errors
+                (r"AttributeError: '(\w+)' object has no attribute '(\w+)'", "attribute_error"),
+                (r"NameError: name '(\w+)' is not defined", "name_error"),
+                (r"ImportError: cannot import name '(\w+)' from '([\w.]+)'", "import_error"),
+                (r"ImportError: cannot import name '(\w+)'", "import_error"),
+                (r"TypeError: (\w+)\(\) missing \d+ required positional argument", "type_error"),
+                (r"ModuleNotFoundError: No module named '(\w+)'", "module_error"),
+                (r"SyntaxError: (.+)", "syntax_error"),
+                (r"ValueError: (.+)", "value_error"),
+                (r"KeyError: '(\w+)'", "key_error"),
+                # NiceGUI specific errors
+                (r"nicegui\.\w+Error: (.+)", "nicegui_error"),
+                (r"Failed to bind element: (.+)", "binding_error"),
+                (r"Invalid NiceGUI component: (.+)", "component_error"),
+                # Database errors
+                (r"sqlalchemy\.exc\.\w+: (.+)", "database_error"),
+                (r"psycopg2\.\w+: (.+)", "postgres_error"),
+                # FastAPI/uvicorn errors
+                (r"ERROR:.*uvicorn\.error: (.+)", "server_error"),
+                (r"fastapi\.exceptions\.\w+: (.+)", "fastapi_error"),
+                # Application startup errors
+                (r"ERROR:.*Application startup failed", "startup_error"),
+                (r"CRITICAL:.*(.+)", "critical_error"),
+                # General ERROR logs (catch-all for any ERROR level)
+                (r"- ERROR - (.+)", "application_error"),
+                # Databricks specific
+                (r"Error executing Databricks query: (.+)", "databricks_error"),
+                # Authentication errors
+                (r"cannot configure default credentials(.+)", "auth_error"),
+            ]
+            
+            for pattern, error_type in error_patterns:
+                matches = re.findall(pattern, app_logs)
+                for match in matches:
+                    error_key = f"{error_type}:{match}"
+                    
+                    if error_key not in fixed_errors:
+                        consecutive_clean_checks = 0
+                        print(f"\n🚨 Error detected: {error_type}")
+                        print(f"   Details: {match}")
+                        print("   Status: Applying fix...")
+                        
+                        fixed_errors.add(error_key)
+                        
+                        # Generate fix prompt
+                        fix_prompt = generate_fix_prompt(error_type, match, app_logs)
+                        
+                        # Apply fix using edit mode approach
+                        success = await apply_fix_to_existing_project(
+                            monitor_state, 
+                            fix_prompt, 
+                            container_names
+                        )
+                        
+                        if success:
+                            print("   Result: ✅ Fix applied and container restarted")
+                        else:
+                            print("   Result: ⚠️ Fix attempt completed, monitoring continues")
+                        
+                        break  # Apply one fix at a time
+            
+            # Check if app is stable
+            error_found = False
+            for pattern, _ in error_patterns:
+                if re.findall(pattern, app_logs):
+                    error_found = True
+                    break
+            
+            if not error_found:
+                consecutive_clean_checks += 1
+                if consecutive_clean_checks == 1:
+                    print("\n✅ Application running without errors")
+                elif consecutive_clean_checks == max_clean_checks:
+                    print("🎉 Application stable - reducing monitoring frequency")
+                    
+        except asyncio.CancelledError:
+            monitoring = False
+            break
+        except Exception as e:
+            logger.error(f"Error in monitoring loop: {e}")
+            await anyio.sleep(5)
+
+
+async def apply_fix_to_existing_project(monitor_state, fix_prompt, container_names):
+    """Apply a fix to an existing project using edit mode approach"""
+    from api.agent_server.agent_api_client import apply_patch, latest_unified_diff, get_all_files_from_project_dir
+    
+    client = monitor_state["client"]
+    project_dir = monitor_state["project_dir"]
+    template_id = monitor_state["template_id"]
+    settings = monitor_state["settings"]
+    
+    try:
+        # Re-read current files for latest context
+        files_for_snapshot = get_all_files_from_project_dir(project_dir)
+        all_files = [f.model_dump() for f in files_for_snapshot]
+        
+        # Send fix request to agent (like edit mode)
+        if not monitor_state["events"]:
+            # First request - initialize conversation
+            events, request = await client.send_message(
+                fix_prompt,
+                template_id=template_id,
+                settings=settings,
+                all_files=all_files
+            )
+            monitor_state["events"] = events
+            monitor_state["request"] = request
+        else:
+            # Continue conversation
+            new_events, new_request = await client.continue_conversation(
+                previous_events=monitor_state["events"],
+                previous_request=monitor_state["request"],
+                message=fix_prompt,
+                all_files=all_files,
+                template_id=template_id,
+                settings=settings,
+            )
+            monitor_state["events"].extend(new_events)
+            monitor_state["request"] = new_request
+        
+        # Get and apply the diff
+        diff = latest_unified_diff(monitor_state["events"])
+        if diff:
+            logger.info(f"Generated diff with {len(diff)} characters")
+            
+            # Apply directly to project directory
+            success, message = apply_patch(diff, project_dir, "")
+            if success:
+                logger.info("✅ Fix applied to project files")
+                
+                # Restart container
+                logger.info("🔄 Restarting container...")
+                restart_result = subprocess.run(
+                    ["docker", "compose", "-p", container_names["project_name"], "restart", "app"],
+                    cwd=project_dir,
+                    check=False,
+                    capture_output=True,
+                    text=True
+                )
+                
+                if restart_result.returncode == 0:
+                    await anyio.sleep(3)  # Wait for restart
+                    return True
+                else:
+                    logger.error(f"Failed to restart: {restart_result.stderr[:200]}")
+                    return False
+            else:
+                logger.error(f"Failed to apply patch: {message}")
+                return False
+        else:
+            logger.warning("No diff generated")
+            return False
+            
+    except Exception as e:
+        logger.error(f"Error applying fix: {e}")
+        return False
 
 
 if __name__ == "__main__":

@@ -179,9 +179,8 @@ def _run_edit_mode(prompt, input_folder, template_id, use_databricks):
 def _generate(prompt=None, template_id=None, with_edit=True, use_databricks=False, edit_mode=False, input_folder=None, monitor=False):
     from tests.test_e2e import DEFAULT_APP_REQUEST
     coloredlogs.install(level="INFO")
-    print(f"DEBUG: Received prompt parameter: {repr(prompt)}")
+    
     if prompt is None:
-        print(f"DEBUG: Using default prompt: {DEFAULT_APP_REQUEST}")
         prompt = DEFAULT_APP_REQUEST
     
     if edit_mode:
@@ -193,8 +192,18 @@ def _generate(prompt=None, template_id=None, with_edit=True, use_databricks=Fals
             sys.exit(1)
         _run_edit_mode(prompt, input_folder, template_id, use_databricks)
     elif monitor:
-        from tests.test_e2e import run_e2e_with_monitoring
-        anyio.run(run_e2e_with_monitoring, prompt, True, with_edit, template_id, use_databricks)
+        # Monitor mode can work with existing project or generate new one
+        if input_folder:
+            # Monitor existing project with auto-fix capability
+            if not os.path.exists(input_folder):
+                print(f"Error: Input folder '{input_folder}' does not exist")
+                sys.exit(1)
+            from tests.test_e2e import run_monitor_existing_project
+            anyio.run(run_monitor_existing_project, input_folder, prompt, template_id, use_databricks)
+        else:
+            # Generate new project and monitor it
+            from tests.test_e2e import run_e2e_with_monitoring
+            anyio.run(run_e2e_with_monitoring, prompt, True, with_edit, template_id, use_databricks)
     else:
         from tests.test_e2e import run_e2e
         anyio.run(run_e2e, prompt, True, with_edit, template_id, use_databricks)
