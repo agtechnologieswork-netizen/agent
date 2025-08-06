@@ -1,10 +1,9 @@
 """UI for managing widgets"""
 import logging
-from nicegui import ui, app
+from nicegui import ui
 from app.widget_service import WidgetService
-from app.widget_renderer import WidgetRenderer, WidgetGrid
+from app.widget_renderer import WidgetGrid
 from app.widget_models import Widget, WidgetType, WidgetSize
-from typing import Optional
 
 logger = logging.getLogger(__name__)
 
@@ -145,29 +144,30 @@ class WidgetManager:
                 with config_container:
                     widget_type = type_select.value
                     
-                    if widget_type == WidgetType.TEXT:
-                        ui.textarea("Content", placeholder="Enter text or markdown")
-                        ui.switch("Enable Markdown")
-                    
-                    elif widget_type == WidgetType.METRIC:
-                        ui.input("Title", placeholder="Metric title")
-                        ui.number("Value", value=0)
-                        ui.input("Icon", placeholder="Icon name (optional)")
-                        ui.number("Change %", placeholder="Change percentage")
-                    
-                    elif widget_type == WidgetType.CHART:
-                        ui.select("Chart Type", options=["line", "bar", "pie"], value="line")
-                        ui.input("Title", placeholder="Chart title")
-                        ui.switch("Show Legend")
-                    
-                    elif widget_type == WidgetType.BUTTON:
-                        ui.input("Label", placeholder="Button text")
-                        ui.input("Icon", placeholder="Icon name (optional)")
-                        ui.select("Action", options=["notify", "navigate"], value="notify")
-                    
-                    elif widget_type == WidgetType.IMAGE:
-                        ui.input("Image URL", placeholder="https://...")
-                        ui.input("Caption", placeholder="Image caption (optional)")
+                    match widget_type:
+                        case WidgetType.TEXT:
+                            ui.textarea("Content", placeholder="Enter text or markdown")
+                            ui.switch("Enable Markdown")
+                        
+                        case WidgetType.METRIC:
+                            ui.input("Title", placeholder="Metric title")
+                            ui.number("Value", value=0)
+                            ui.input("Icon", placeholder="Icon name (optional)")
+                            ui.number("Change %", placeholder="Change percentage")
+                        
+                        case WidgetType.CHART:
+                            ui.select("Chart Type", options=["line", "bar", "pie"], value="line")
+                            ui.input("Title", placeholder="Chart title")
+                            ui.switch("Show Legend")
+                        
+                        case WidgetType.BUTTON:
+                            ui.input("Label", placeholder="Button text")
+                            ui.input("Icon", placeholder="Icon name (optional)")
+                            ui.select("Action", options=["notify", "navigate"], value="notify")
+                        
+                        case WidgetType.IMAGE:
+                            ui.input("Image URL", placeholder="https://...")
+                            ui.input("Caption", placeholder="Image caption (optional)")
             
             type_select.on("update:model-value", update_config_fields)
             update_config_fields()
@@ -206,7 +206,7 @@ class WidgetManager:
                 "limit": data_config.get("limit", 100) if data_config else 100
             }
         
-        widget = self.widget_service.create_widget(
+        self.widget_service.create_widget(
             name=name,
             type=widget_type,
             size=size,
@@ -316,7 +316,7 @@ class WidgetManager:
         try:
             import json
             config = json.loads(config_str) if config_str else {}
-        except:
+        except (json.JSONDecodeError, ValueError):
             config = widget.config
         
         self.widget_service.update_widget(

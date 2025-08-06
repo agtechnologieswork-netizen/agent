@@ -18,7 +18,7 @@ class WidgetService:
         with Session(engine) as session:
             statement = select(Widget).where(
                 Widget.page == page,
-                Widget.is_visible == True
+                Widget.is_visible
             ).order_by(Widget.position)
             widgets = session.exec(statement).all()
             return list(widgets)

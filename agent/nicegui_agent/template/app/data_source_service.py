@@ -1,10 +1,9 @@
 """Service for managing data sources and database introspection"""
 import logging
 from typing import List, Dict, Any, Optional
-from sqlmodel import Session, select, text
+from sqlmodel import text
 from app.database import engine
 from app.widget_models import Widget
-import json
 
 logger = logging.getLogger(__name__)
 
@@ -31,7 +30,7 @@ class DataSourceService:
                 table_name = row[0]
                 
                 # Get columns for each table
-                col_result = conn.execute(text(f"""
+                col_result = conn.execute(text("""
                     SELECT column_name, data_type, is_nullable
                     FROM information_schema.columns
                     WHERE table_schema = 'public'
@@ -51,7 +50,8 @@ class DataSourceService:
                 try:
                     count_result = conn.execute(text(f'SELECT COUNT(*) FROM "{table_name}"'))
                     row_count = count_result.scalar()
-                except:
+                except Exception as e:
+                    logger.warning(f"Failed to get row count for {table_name}: {e}")
                     row_count = 0
                 
                 tables.append({
@@ -174,51 +174,52 @@ class DataSourceService:
         
         source_type = data_source.get("type", "static")
         
-        if source_type == "table":
-            # Direct table data
-            table_name = data_source.get("table")
-            columns = data_source.get("columns", [])
-            limit = data_source.get("limit", 100)
-            order_by = data_source.get("order_by")
-            
-            if table_name:
-                rows = DataSourceService.get_table_data(
-                    table_name, limit=limit, 
-                    columns=columns, order_by=order_by
-                )
-                return {"rows": rows}
-        
-        elif source_type == "aggregation":
-            # Aggregated data
-            table_name = data_source.get("table")
-            agg_type = data_source.get("aggregation", "count")
-            group_by = data_source.get("group_by")
-            value_column = data_source.get("value_column")
-            
-            if table_name:
-                rows = DataSourceService.get_aggregated_data(
-                    table_name, agg_type, group_by, value_column
-                )
+        match source_type:
+            case "table":
+                # Direct table data
+                table_name = data_source.get("table")
+                columns = data_source.get("columns", [])
+                limit = data_source.get("limit", 100)
+                order_by = data_source.get("order_by")
                 
-                # Format for charts
-                if widget.type.value == "chart":
-                    labels = [r.get("label", "") for r in rows]
-                    values = [r.get("value", 0) for r in rows]
-                    return {"x": labels, "y": values}
-                else:
+                if table_name:
+                    rows = DataSourceService.get_table_data(
+                        table_name, limit=limit, 
+                        columns=columns, order_by=order_by
+                    )
                     return {"rows": rows}
-        
-        elif source_type == "custom_sql":
-            # Custom SQL query (be very careful with this!)
-            query = data_source.get("query", "")
-            if query and "DROP" not in query.upper() and "DELETE" not in query.upper():
-                try:
-                    with engine.connect() as conn:
-                        result = conn.execute(text(query))
-                        rows = [dict(row._mapping) for row in result]
+            
+            case "aggregation":
+                # Aggregated data
+                table_name = data_source.get("table")
+                agg_type = data_source.get("aggregation", "count")
+                group_by = data_source.get("group_by")
+                value_column = data_source.get("value_column")
+                
+                if table_name:
+                    rows = DataSourceService.get_aggregated_data(
+                        table_name, agg_type, group_by, value_column
+                    )
+                    
+                    # Format for charts
+                    if widget.type.value == "chart":
+                        labels = [r.get("label", "") for r in rows]
+                        values = [r.get("value", 0) for r in rows]
+                        return {"x": labels, "y": values}
+                    else:
                         return {"rows": rows}
-                except Exception as e:
-                    logger.error(f"Error executing custom query: {e}")
-                    return {}
+            
+            case "custom_sql":
+                # Custom SQL query (be very careful with this!)
+                query = data_source.get("query", "")
+                if query and "DROP" not in query.upper() and "DELETE" not in query.upper():
+                    try:
+                        with engine.connect() as conn:
+                            result = conn.execute(text(query))
+                            rows = [dict(row._mapping) for row in result]
+                            return {"rows": rows}
+                    except Exception as e:
+                        logger.error(f"Error executing custom query: {e}")
+                        return {}
         
         return {}

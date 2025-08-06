@@ -15,7 +15,7 @@ def startup() -> None:
     
     # Initialize widget system
     try:
-        from app.widget_ui import initialize_widgets, WidgetManager
+        from app.widget_ui import initialize_widgets
         initialize_widgets()
         logger.info("Widget system initialized")
     except Exception as e:

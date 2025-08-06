@@ -1,9 +1,8 @@
 """Dynamic widget renderer for NiceGUI"""
 import logging
-from typing import Dict, Any, Optional, Callable
+from typing import Optional, Callable
 from nicegui import ui
 from app.widget_models import Widget, WidgetType, WidgetSize
-import json
 
 logger = logging.getLogger(__name__)
 
@@ -29,7 +28,7 @@ class WidgetRenderer:
         
         with ui.card().classes(f"{size_classes} p-4 relative group").style(
             "; ".join([f"{k}: {v}" for k, v in widget.style.items()])
-        ) as card:
+        ):
             # Add edit/delete buttons if callbacks provided
             if on_edit or on_delete:
                 with ui.row().classes("absolute top-2 right-2 gap-2 opacity-0 group-hover:opacity-100 transition-opacity"):
@@ -39,24 +38,25 @@ class WidgetRenderer:
                         ui.button(icon="delete", on_click=lambda w=widget: on_delete(w)).props("flat dense color=negative")
             
             # Render widget content based on type
-            if widget.type == WidgetType.TEXT:
-                WidgetRenderer._render_text_widget(widget)
-            elif widget.type == WidgetType.METRIC:
-                WidgetRenderer._render_metric_widget(widget)
-            elif widget.type == WidgetType.CHART:
-                WidgetRenderer._render_chart_widget(widget)
-            elif widget.type == WidgetType.TABLE:
-                WidgetRenderer._render_table_widget(widget)
-            elif widget.type == WidgetType.BUTTON:
-                WidgetRenderer._render_button_widget(widget)
-            elif widget.type == WidgetType.IMAGE:
-                WidgetRenderer._render_image_widget(widget)
-            elif widget.type == WidgetType.CARD:
-                WidgetRenderer._render_card_widget(widget)
-            elif widget.type == WidgetType.CUSTOM:
-                WidgetRenderer._render_custom_widget(widget)
-            else:
-                ui.label(f"Unknown widget type: {widget.type}")
+            match widget.type:
+                case WidgetType.TEXT:
+                    WidgetRenderer._render_text_widget(widget)
+                case WidgetType.METRIC:
+                    WidgetRenderer._render_metric_widget(widget)
+                case WidgetType.CHART:
+                    WidgetRenderer._render_chart_widget(widget)
+                case WidgetType.TABLE:
+                    WidgetRenderer._render_table_widget(widget)
+                case WidgetType.BUTTON:
+                    WidgetRenderer._render_button_widget(widget)
+                case WidgetType.IMAGE:
+                    WidgetRenderer._render_image_widget(widget)
+                case WidgetType.CARD:
+                    WidgetRenderer._render_card_widget(widget)
+                case WidgetType.CUSTOM:
+                    WidgetRenderer._render_custom_widget(widget)
+                case _:
+                    ui.label(f"Unknown widget type: {widget.type}")
     
     @staticmethod
     def _render_text_widget(widget: Widget):
@@ -131,14 +131,15 @@ class WidgetRenderer:
                 "y": [10, 15, 13, 17, 22]
             })
         
-        if chart_type == "line":
-            fig = go.Figure(data=go.Scatter(x=data["x"], y=data["y"], mode='lines+markers'))
-        elif chart_type == "bar":
-            fig = go.Figure(data=go.Bar(x=data["x"], y=data["y"]))
-        elif chart_type == "pie":
-            fig = go.Figure(data=go.Pie(labels=data.get("labels", data["x"]), values=data["y"]))
-        else:
-            fig = go.Figure()
+        match chart_type:
+            case "line":
+                fig = go.Figure(data=go.Scatter(x=data["x"], y=data["y"], mode='lines+markers'))
+            case "bar":
+                fig = go.Figure(data=go.Bar(x=data["x"], y=data["y"]))
+            case "pie":
+                fig = go.Figure(data=go.Pie(labels=data.get("labels", data["x"]), values=data["y"]))
+            case _:
+                fig = go.Figure()
         
         fig.update_layout(
             height=config.get("height", 300),
