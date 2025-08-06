@@ -1,5 +1,6 @@
 """UI for managing widgets"""
 import logging
+from typing import Optional
 from nicegui import ui
 from app.widget_service import WidgetService
 from app.widget_renderer import WidgetGrid
@@ -156,14 +157,14 @@ class WidgetManager:
                             ui.number("Change %", placeholder="Change percentage")
                         
                         case WidgetType.CHART:
-                            ui.select("Chart Type", options=["line", "bar", "pie"], value="line")
+                            ui.select(label="Chart Type", options=["line", "bar", "pie"], value="line")
                             ui.input("Title", placeholder="Chart title")
                             ui.switch("Show Legend")
                         
                         case WidgetType.BUTTON:
                             ui.input("Label", placeholder="Button text")
                             ui.input("Icon", placeholder="Icon name (optional)")
-                            ui.select("Action", options=["notify", "navigate"], value="notify")
+                            ui.select(label="Action", options=["notify", "navigate"], value="notify")
                         
                         case WidgetType.IMAGE:
                             ui.input("Image URL", placeholder="https://...")
@@ -188,11 +189,18 @@ class WidgetManager:
         
         dialog.open()
     
-    def add_widget(self, name: str, widget_type: WidgetType, size: WidgetSize, dialog, data_source=None, data_config=None):
+    def add_widget(self, name: str, widget_type: Optional[WidgetType], size: Optional[WidgetSize], dialog, data_source=None, data_config=None):
         """Add a new widget"""
         if not name:
             ui.notify("Please enter a widget name", type="warning")
             return
+        
+        if not widget_type:
+            ui.notify("Please select a widget type", type="warning")
+            return
+            
+        if not size:
+            size = WidgetSize.MEDIUM  # Default size
         
         # Create widget with basic config
         config = self.get_default_config(widget_type)
@@ -311,20 +319,27 @@ class WidgetManager:
         
         dialog.open()
     
-    def save_widget_changes(self, widget: Widget, name: str, size: WidgetSize, config_str: str, dialog):
+    def save_widget_changes(self, widget: Widget, name: str, size: Optional[WidgetSize], config_str: str, dialog):
         """Save changes to a widget"""
+        import json
         try:
-            import json
             config = json.loads(config_str) if config_str else {}
         except (json.JSONDecodeError, ValueError):
             config = widget.config
+            logger.warning(f"Failed to parse config JSON for widget {widget.id}, using existing config")
         
-        self.widget_service.update_widget(
-            widget.id,
-            name=name,
-            size=size,
-            config=config
-        )
+        if not size:
+            size = widget.size  # Keep existing size if not provided
+            
+        if widget.id is not None:
+            self.widget_service.update_widget(
+                widget.id,
+                name=name,
+                size=size,
+                config=config
+            )
+        else:
+            logger.error(f"Cannot update widget without ID: {widget.name}")
         
         ui.notify(f"Widget '{name}' updated", type="positive")
         dialog.close()
@@ -334,7 +349,10 @@ class WidgetManager:
         """Delete a widget with confirmation"""
         def confirm_delete():
             # Delete from database
-            success = self.widget_service.delete_widget(widget.id)
+            if widget.id is not None:
+                success = self.widget_service.delete_widget(widget.id)
+            else:
+                success = False
             if success:
                 ui.notify(f"Widget '{widget.name}' deleted", type="positive")
                 if dialog:

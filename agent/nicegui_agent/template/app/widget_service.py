@@ -1,6 +1,7 @@
 """Service for managing dynamic widgets"""
 import logging
 from typing import List, Optional, Dict, Any
+from sqlalchemy import desc
 from sqlmodel import Session, select
 from app.database import engine
 from app.widget_models import Widget, WidgetTemplate, UserWidgetPreset, WidgetType, WidgetSize
@@ -29,14 +30,14 @@ class WidgetService:
         type: WidgetType,
         page: str = "dashboard",
         size: WidgetSize = WidgetSize.MEDIUM,
-        config: Dict[str, Any] = None,
-        style: Dict[str, Any] = None
+        config: Optional[Dict[str, Any]] = None,
+        style: Optional[Dict[str, Any]] = None
     ) -> Widget:
         """Create a new widget"""
         with Session(engine) as session:
             # Get the next position
             max_position = session.exec(
-                select(Widget.position).where(Widget.page == page).order_by(Widget.position.desc())
+                select(Widget.position).where(Widget.page == page).order_by(desc(Widget.position))
             ).first()
             next_position = (max_position or 0) + 1
             

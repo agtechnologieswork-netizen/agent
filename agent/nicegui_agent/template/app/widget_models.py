@@ -48,8 +48,7 @@ class Widget(SQLModel, table=True):
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)
     
-    class Config:
-        arbitrary_types_allowed = True
+    model_config = {"arbitrary_types_allowed": True}
 
 
 class WidgetTemplate(SQLModel, table=True):
@@ -63,8 +62,7 @@ class WidgetTemplate(SQLModel, table=True):
     category: str = Field(default="general")
     icon: Optional[str] = None
     
-    class Config:
-        arbitrary_types_allowed = True
+    model_config = {"arbitrary_types_allowed": True}
 
 
 class UserWidgetPreset(SQLModel, table=True):
@@ -76,5 +74,4 @@ class UserWidgetPreset(SQLModel, table=True):
     is_default: bool = Field(default=False)
     created_at: datetime = Field(default_factory=datetime.utcnow)
     
-    class Config:
-        arbitrary_types_allowed = True
+    model_config = {"arbitrary_types_allowed": True}

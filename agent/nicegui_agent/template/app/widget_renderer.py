@@ -197,7 +197,7 @@ class WidgetRenderer:
             if action == "notify":
                 ui.notify(config.get("message", "Button clicked!"))
             elif action == "navigate":
-                ui.open(config.get("url", "/"))
+                ui.navigate.to(config.get("url", "/"))
             # Add more actions as needed
         
         ui.button(

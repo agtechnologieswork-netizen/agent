@@ -1,20 +1,16 @@
 #!/usr/bin/env python3
 """Integration test for widget system with NiceGUI"""
 
-import os
-import sys
-from nicegui import ui, app
 import logging
-
-# Set up logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
-
-# Import widget system components
+from nicegui import ui
 from app.database import create_tables
 from app.widget_service import WidgetService
 from app.widget_ui import WidgetManager
 from app.widget_models import WidgetType, WidgetSize
+
+# Set up logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 def test_widget_integration():
     """Test widget system integration"""

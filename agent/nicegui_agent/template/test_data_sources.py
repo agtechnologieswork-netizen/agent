@@ -7,7 +7,6 @@ sys.path.append('/app')
 from app.data_source_service import DataSourceService
 from app.widget_service import WidgetService
 from app.widget_models import WidgetType, WidgetSize
-import json
 
 def test_data_sources():
     print("=" * 60)
@@ -78,8 +77,10 @@ def test_data_sources():
         print(f"   Table widget retrieved {len(data.get('rows', []))} rows")
         
         # Clean up test widgets
-        WidgetService.delete_widget(metric_widget.id)
-        WidgetService.delete_widget(table_widget.id)
+        if metric_widget.id is not None:
+            WidgetService.delete_widget(metric_widget.id)
+        if table_widget.id is not None:
+            WidgetService.delete_widget(table_widget.id)
         print("\n   ✅ Test widgets cleaned up")
     
     print("\n" + "=" * 60)
