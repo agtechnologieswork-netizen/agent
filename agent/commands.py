@@ -175,7 +175,7 @@ def _run_edit_mode(prompt, input_folder, template_id, use_databricks):
     anyio.run(run_edit)
 
 
-def _generate(prompt=None, template_id=None, with_edit=True, use_databricks=False, edit_mode=False, input_folder=None):
+def _generate(prompt=None, template_id=None, with_edit=True, use_databricks=False, edit_mode=False, input_folder=None, monitor=False):
     from tests.test_e2e import DEFAULT_APP_REQUEST
     coloredlogs.install(level="INFO")
     if prompt is None:
@@ -189,6 +189,9 @@ def _generate(prompt=None, template_id=None, with_edit=True, use_databricks=Fals
             print(f"Error: Input folder '{input_folder}' does not exist")
             sys.exit(1)
         _run_edit_mode(prompt, input_folder, template_id, use_databricks)
+    elif monitor:
+        from tests.test_e2e import run_e2e_with_monitoring
+        anyio.run(run_e2e_with_monitoring, prompt, True, with_edit, template_id, use_databricks)
     else:
         from tests.test_e2e import run_e2e
         anyio.run(run_e2e, prompt, True, with_edit, template_id, use_databricks)
