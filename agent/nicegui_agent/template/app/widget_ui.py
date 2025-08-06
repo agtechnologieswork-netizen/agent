@@ -39,6 +39,10 @@ class WidgetManager:
                         on_click=self.show_add_widget_dialog
                     ).props("color=primary")
             
+            # Create widget container
+            with ui.column().classes("w-full") as self.widget_container:
+                pass
+            
             # Render widgets
             self.refresh_widgets()
     
@@ -46,17 +50,22 @@ class WidgetManager:
         """Refresh the widget display"""
         if hasattr(self, 'widget_container'):
             self.widget_container.clear()
-        
-        with ui.column().classes("w-full") as self.widget_container:
-            widgets = self.widget_service.get_widgets_for_page(self.current_page)
             
-            if not widgets:
-                with ui.card().classes("w-full p-8 text-center"):
-                    ui.icon("dashboard", size="4rem").classes("text-gray-400")
-                    ui.label("No widgets yet").classes("text-xl text-gray-600 mt-4")
-                    ui.label("Click 'Add Widget' to get started").classes("text-gray-500")
-            else:
-                self.grid.render(widgets, editable=self.edit_mode)
+            with self.widget_container:
+                widgets = self.widget_service.get_widgets_for_page(self.current_page)
+                
+                if not widgets:
+                    with ui.card().classes("w-full p-8 text-center"):
+                        ui.icon("dashboard", size="4rem").classes("text-gray-400")
+                        ui.label("No widgets yet").classes("text-xl text-gray-600 mt-4")
+                        ui.label("Click 'Add Widget' to get started").classes("text-gray-500")
+                else:
+                    # Set callbacks for edit and delete
+                    self.grid.set_callbacks(
+                        on_edit=self.edit_widget,
+                        on_delete=self.delete_widget
+                    )
+                    self.grid.render(widgets, editable=self.edit_mode)
     
     def toggle_edit_mode(self):
         """Toggle between edit and view mode"""
@@ -73,7 +82,7 @@ class WidgetManager:
             name_input = ui.input("Widget Name", placeholder="Enter widget name")
             
             type_select = ui.select(
-                "Widget Type",
+                label="Widget Type",
                 options={
                     WidgetType.TEXT: "Text",
                     WidgetType.METRIC: "Metric/KPI",
@@ -87,7 +96,7 @@ class WidgetManager:
             )
             
             size_select = ui.select(
-                "Widget Size",
+                label="Widget Size",
                 options={
                     WidgetSize.SMALL: "Small (25%)",
                     WidgetSize.MEDIUM: "Medium (50%)",
@@ -224,7 +233,7 @@ class WidgetManager:
             name_input = ui.input("Widget Name", value=widget.name)
             
             size_select = ui.select(
-                "Widget Size",
+                label="Widget Size",
                 options={
                     WidgetSize.SMALL: "Small (25%)",
                     WidgetSize.MEDIUM: "Medium (50%)",
@@ -235,9 +244,10 @@ class WidgetManager:
             )
             
             # Config editor (simplified - in production, use dynamic forms)
+            import json
             ui.label("Configuration (JSON)").classes("mt-4")
             config_editor = ui.textarea(
-                value=str(widget.config),
+                value=json.dumps(widget.config, indent=2),
                 placeholder="Widget configuration"
             ).classes("w-full font-mono text-sm")
             
@@ -282,12 +292,17 @@ class WidgetManager:
     def delete_widget(self, widget: Widget, dialog=None):
         """Delete a widget with confirmation"""
         def confirm_delete():
-            self.widget_service.delete_widget(widget.id)
-            ui.notify(f"Widget '{widget.name}' deleted", type="positive")
-            if dialog:
-                dialog.close()
-            confirm_dialog.close()
-            self.refresh_widgets()
+            # Delete from database
+            success = self.widget_service.delete_widget(widget.id)
+            if success:
+                ui.notify(f"Widget '{widget.name}' deleted", type="positive")
+                if dialog:
+                    dialog.close()
+                confirm_dialog.close()
+                # Refresh the widgets display
+                self.refresh_widgets()
+            else:
+                ui.notify(f"Failed to delete widget '{widget.name}'", type="negative")
         
         with ui.dialog() as confirm_dialog, ui.card():
             ui.label(f"Delete '{widget.name}'?").classes("text-lg")

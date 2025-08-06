@@ -28,8 +28,9 @@ def startup() -> None:
             from app.widget_ui import WidgetManager
             manager = WidgetManager()
             manager.render_dashboard()
-        except:
+        except Exception as e:
             # Fallback if widget system not available
+            logger.error(f"Failed to render dashboard: {e}")
             ui.label("🚧 Work in progress 🚧").style("font-size: 2rem; text-align: center; margin-top: 2rem")
     
     logger.info("Application startup completed successfully")

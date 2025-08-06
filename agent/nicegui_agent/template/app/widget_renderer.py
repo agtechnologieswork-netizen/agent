@@ -27,16 +27,16 @@ class WidgetRenderer:
         """Render a single widget based on its type and configuration"""
         size_classes = WidgetRenderer.get_size_classes(widget.size)
         
-        with ui.card().classes(f"{size_classes} p-4 relative").style(
+        with ui.card().classes(f"{size_classes} p-4 relative group").style(
             "; ".join([f"{k}: {v}" for k, v in widget.style.items()])
         ) as card:
             # Add edit/delete buttons if callbacks provided
-            if widget.is_editable and (on_edit or on_delete):
-                with ui.row().classes("absolute top-2 right-2 gap-2 opacity-0 hover:opacity-100 transition-opacity"):
+            if on_edit or on_delete:
+                with ui.row().classes("absolute top-2 right-2 gap-2 opacity-0 group-hover:opacity-100 transition-opacity"):
                     if on_edit:
-                        ui.button(icon="edit", on_click=lambda: on_edit(widget)).props("flat dense")
+                        ui.button(icon="edit", on_click=lambda w=widget: on_edit(w)).props("flat dense")
                     if on_delete:
-                        ui.button(icon="delete", on_click=lambda: on_delete(widget)).props("flat dense color=negative")
+                        ui.button(icon="delete", on_click=lambda w=widget: on_delete(w)).props("flat dense color=negative")
             
             # Render widget content based on type
             if widget.type == WidgetType.TEXT:
@@ -217,29 +217,30 @@ class WidgetGrid:
     def __init__(self, columns: int = 12):
         self.columns = columns
         self.container = None
+        self.on_edit = None
+        self.on_delete = None
     
     def render(self, widgets: list[Widget], editable: bool = False):
         """Render all widgets in a grid layout"""
-        with ui.column().classes("w-full gap-4") as self.container:
-            # Group widgets by row based on their size
-            current_row = []
-            current_width = 0
+        # Group widgets by row based on their size
+        current_row = []
+        current_width = 0
+        
+        for widget in sorted(widgets, key=lambda w: w.position):
+            widget_width = self._get_widget_width(widget.size)
             
-            for widget in sorted(widgets, key=lambda w: w.position):
-                widget_width = self._get_widget_width(widget.size)
-                
-                if current_width + widget_width > self.columns:
-                    # Render current row
-                    self._render_row(current_row, editable)
-                    current_row = [widget]
-                    current_width = widget_width
-                else:
-                    current_row.append(widget)
-                    current_width += widget_width
-            
-            # Render last row
-            if current_row:
+            if current_width + widget_width > self.columns:
+                # Render current row
                 self._render_row(current_row, editable)
+                current_row = [widget]
+                current_width = widget_width
+            else:
+                current_row.append(widget)
+                current_width += widget_width
+        
+        # Render last row
+        if current_row:
+            self._render_row(current_row, editable)
     
     def _get_widget_width(self, size: WidgetSize) -> int:
         """Get widget width in grid columns"""
@@ -257,16 +258,11 @@ class WidgetGrid:
             for widget in widgets:
                 WidgetRenderer.render_widget(
                     widget,
-                    on_edit=self._edit_widget if editable else None,
-                    on_delete=self._delete_widget if editable else None
+                    on_edit=self.on_edit if editable else None,
+                    on_delete=self.on_delete if editable else None
                 )
     
-    def _edit_widget(self, widget: Widget):
-        """Handle widget edit"""
-        ui.notify(f"Editing widget: {widget.name}")
-        # TODO: Open edit dialog
-    
-    def _delete_widget(self, widget: Widget):
-        """Handle widget delete"""
-        ui.notify(f"Deleting widget: {widget.name}")
-        # TODO: Confirm and delete
+    def set_callbacks(self, on_edit=None, on_delete=None):
+        """Set callbacks for edit and delete actions"""
+        self.on_edit = on_edit
+        self.on_delete = on_delete
