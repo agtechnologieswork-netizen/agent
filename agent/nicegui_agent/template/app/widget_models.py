@@ -38,6 +38,9 @@ class Widget(SQLModel, table=True):
     # Widget configuration as JSON
     config: Dict[str, Any] = Field(default={}, sa_column=Column(JSON))
     
+    # Data source configuration
+    data_source: Optional[Dict[str, Any]] = Field(default=None, sa_column=Column(JSON))
+    
     # Widget styling
     style: Dict[str, Any] = Field(default={}, sa_column=Column(JSON))
     

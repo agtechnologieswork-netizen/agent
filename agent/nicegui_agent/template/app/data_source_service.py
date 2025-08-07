@@ -166,8 +166,8 @@ class DataSourceService:
     def execute_widget_query(widget: Widget) -> Dict[str, Any]:
         """Execute the query configured for a widget and return data"""
         
-        config = widget.config
-        data_source = config.get("data_source", {})
+        # Check for data_source in widget directly first, then fall back to config
+        data_source = widget.data_source if widget.data_source else widget.config.get("data_source", {})
         
         if not data_source:
             return {}
@@ -209,17 +209,22 @@ class DataSourceService:
                     else:
                         return {"rows": rows}
             
-            case "custom_sql":
-                # Custom SQL query (be very careful with this!)
+            case "query" | "custom_sql":
+                # SQL query (be very careful with this!)
                 query = data_source.get("query", "")
                 if query and "DROP" not in query.upper() and "DELETE" not in query.upper():
                     try:
                         with engine.connect() as conn:
                             result = conn.execute(text(query))
                             rows = [dict(row._mapping) for row in result]
-                            return {"rows": rows}
+                            
+                            # For metric widgets, return single value
+                            if widget.type.value == "metric" and rows:
+                                return {"value": rows[0].get(list(rows[0].keys())[0], 0), "rows": rows}
+                            
+                            return {"rows": rows, "success": True}
                     except Exception as e:
-                        logger.error(f"Error executing custom query: {e}")
-                        return {}
+                        logger.error(f"Error executing query: {e}")
+                        return {"error": str(e), "success": False}
         
         return {}

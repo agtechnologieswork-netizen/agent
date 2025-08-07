@@ -36,6 +36,7 @@ class WidgetService:
         page: str = "dashboard",
         size: WidgetSize = WidgetSize.MEDIUM,
         config: Optional[Dict[str, Any]] = None,
+        data_source: Optional[Dict[str, Any]] = None,
         style: Optional[Dict[str, Any]] = None,
     ) -> Widget:
         """Create a new widget"""
@@ -53,6 +54,7 @@ class WidgetService:
                 size=size,
                 position=next_position,
                 config=config or {},
+                data_source=data_source,
                 style=style or {},
             )
             session.add(widget)

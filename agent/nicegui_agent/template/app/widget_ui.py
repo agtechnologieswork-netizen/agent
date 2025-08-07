@@ -211,16 +211,24 @@ class WidgetManager:
         # Create widget with basic config
         config = self.get_default_config(widget_type)
 
-        # Add data source configuration if provided
+        # Prepare data source configuration if provided
+        data_source_config = None
         if data_source and data_source != "none":
-            config["data_source"] = {
+            data_source_config = {
                 "type": "table",
                 "table": data_source,
                 "columns": data_config.get("columns", []) if data_config else [],
                 "limit": data_config.get("limit", 100) if data_config else 100,
             }
 
-        self.widget_service.create_widget(name=name, type=widget_type, size=size, page=self.current_page, config=config)
+        self.widget_service.create_widget(
+            name=name, 
+            type=widget_type, 
+            size=size, 
+            page=self.current_page, 
+            config=config,
+            data_source=data_source_config
+        )
 
         ui.notify(f"Widget '{name}' added successfully", type="positive")
         dialog.close()
