@@ -121,6 +121,29 @@ async def run_e2e(prompt: str, standalone: bool, with_edit=True, template_id=Non
                         settings=settings,
                     )
                     updated_diff = latest_unified_diff(new_events)
+                    
+                    # Breakpoint for debugging - pause before assertion
+                    if not updated_diff:
+                        import shutil
+                        from datetime import datetime
+                        
+                        # Save the project folder for debugging
+                        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                        debug_folder = f"/tmp/agent_debug_{timestamp}"
+                        shutil.copytree(temp_dir, debug_folder)
+                        
+                        logger.error(f"No diff generated after edit. Project folder: {temp_dir}")
+                        logger.error(f"Project saved to: {debug_folder}")
+                        logger.error("Starting debugger. Use 'c' to continue or examine variables.")
+                        logger.error("The temp_dir will be preserved until you exit the debugger.")
+                        
+                        # Check if we should pause with debugger
+                        if os.environ.get("AGENT_DEBUG_PAUSE", "").lower() == "true":
+                            import pdb
+                            pdb.set_trace()  # This will pause execution here
+                        else:
+                            logger.error("Set AGENT_DEBUG_PAUSE=true to pause with debugger")
+                    
                     assert updated_diff, "No diff was generated in the agent response after edit"
                     assert updated_diff != diff, "Edit did not produce a new diff"
                     
