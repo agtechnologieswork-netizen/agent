@@ -140,7 +140,9 @@ impl<T: Workspace + 'static> WorkspaceDyn for T {
     }
 }
 
+#[derive(serde::Serialize)]
 pub struct WorkspaceVCR<T: Workspace> {
+    #[serde(skip)]
     inner: T,
     commands: Vec<Command>,
 }
@@ -177,65 +179,36 @@ impl<T: Workspace> WorkspaceVCR<T> {
     }
 }
 
-impl<T: Workspace + 'static> WorkspaceDyn for WorkspaceVCR<T> {
-    fn bash(
-        &mut self,
-        cmd: &str,
-    ) -> Pin<Box<dyn Future<Output = eyre::Result<ExecResult>> + Send + Sync + '_>> {
-        let cmd = Bash(cmd.split_whitespace().map(String::from).collect());
+impl<T: Workspace + 'static> Workspace for WorkspaceVCR<T> {
+    async fn bash(&mut self, cmd: Bash) -> eyre::Result<ExecResult> {
         self.commands.push(Command::Bash(cmd.clone()));
-        Box::pin(self.inner.bash(cmd))
+        self.inner.bash(cmd).await
     }
 
-    fn write_file(
-        &mut self,
-        path: &str,
-        contents: &str,
-    ) -> Pin<Box<dyn Future<Output = eyre::Result<()>> + Send + Sync + '_>> {
-        let cmd = WriteFile {
-            path: path.to_string(),
-            contents: contents.to_string(),
-        };
+    async fn write_file(&mut self, cmd: WriteFile) -> eyre::Result<()> {
         self.commands.push(Command::WriteFile(cmd.clone()));
-        Box::pin(self.inner.write_file(cmd))
+        self.inner.write_file(cmd).await
     }
 
-    fn read_file(
-        &mut self,
-        path: &str,
-    ) -> Pin<Box<dyn Future<Output = eyre::Result<String>> + Send + Sync + '_>> {
-        let cmd = ReadFile(path.to_string());
+    async fn read_file(&mut self, cmd: ReadFile) -> eyre::Result<String> {
         self.commands.push(Command::ReadFile(cmd.clone()));
-        Box::pin(self.inner.read_file(cmd))
+        self.inner.read_file(cmd).await
     }
 
-    fn ls(
-        &mut self,
-        path: &str,
-    ) -> Pin<Box<dyn Future<Output = eyre::Result<Vec<String>>> + Send + Sync + '_>> {
-        let cmd = LsDir(path.to_string());
+    async fn ls(&mut self, cmd: LsDir) -> eyre::Result<Vec<String>> {
         self.commands.push(Command::LsDir(cmd.clone()));
-        Box::pin(self.inner.ls(cmd))
+        self.inner.ls(cmd).await
     }
 
-    fn rm(
-        &mut self,
-        path: &str,
-    ) -> Pin<Box<dyn Future<Output = eyre::Result<()>> + Send + Sync + '_>> {
-        let cmd = RmFile(path.to_string());
+    async fn rm(&mut self, cmd: RmFile) -> eyre::Result<()> {
         self.commands.push(Command::RmFile(cmd.clone()));
-        Box::pin(self.inner.rm(cmd))
+        self.inner.rm(cmd).await
     }
 
-    fn fork(
-        &self,
-    ) -> Pin<Box<dyn Future<Output = eyre::Result<Box<dyn WorkspaceDyn>>> + Send + Sync + '_>> {
-        Box::pin(async {
-            let fork: Box<dyn WorkspaceDyn> = Box::new(WorkspaceVCR {
-                inner: Workspace::fork(&self.inner).await?,
-                commands: self.commands.clone(),
-            });
-            Ok(fork)
+    async fn fork(&self) -> eyre::Result<Self> {
+        Ok(WorkspaceVCR {
+            inner: Workspace::fork(&self.inner).await?,
+            commands: self.commands.clone(),
         })
     }
 }

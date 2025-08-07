@@ -301,11 +301,11 @@ impl Tool for EditFileTool {
 }
 
 #[derive(Clone)]
-pub struct DoneTool {
+pub struct FinishTool {
     pub checker: Arc<dyn CheckerDyn>,
 }
 
-impl DoneTool {
+impl FinishTool {
     pub fn new(checker: impl Checker + 'static) -> Self {
         Self {
             checker: Arc::new(checker),
@@ -313,19 +313,19 @@ impl DoneTool {
     }
 }
 
-impl Tool for DoneTool {
+impl Tool for FinishTool {
     type Args = serde_json::Value;
-    type Output = ();
+    type Output = String;
     type Error = serde_json::Value;
 
     fn name(&self) -> String {
-        "done".to_string()
+        "finish".to_string()
     }
 
     async fn definition(&self, _prompt: String) -> rig::completion::ToolDefinition {
         rig::completion::ToolDefinition {
             name: self.name(),
-            description: "Mark task as done and run checks".to_string(),
+            description: "Mark task as finished and run checks".to_string(),
             parameters: serde_json::json!({
                 "type": "object",
                 "properties": {},
@@ -340,7 +340,7 @@ impl Tool for DoneTool {
     ) -> eyre::Result<eyre::Result<Self::Output, Self::Error>> {
         self.checker.run(workspace).await.map(|value| match value {
             Some(error) => Err(error),
-            None => Ok(()),
+            None => Ok("success".to_string()),
         })
     }
 }

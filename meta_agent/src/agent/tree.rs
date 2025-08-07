@@ -28,6 +28,10 @@ impl<T> Tree<T> {
         Ok(new_node_idx)
     }
 
+    pub fn num_nodes(&self) -> usize {
+        self.nodes.len()
+    }
+
     pub fn get_node(&self, idx: usize) -> &T {
         &self.nodes[idx]
     }

@@ -2,13 +2,17 @@ use crate::workspace::WorkspaceDyn;
 use eyre::Result;
 use serde::{Deserialize, Serialize};
 use std::pin::Pin;
+use tokio::sync::mpsc;
 pub mod actor;
+pub mod demo;
+pub mod optimizer;
 pub mod toolset;
 pub mod tree;
 pub use tree::Tree;
 
 pub trait Search<T>: Clone + Send {
-    fn select(&mut self, root: &Tree<T>) -> impl Future<Output = Result<Vec<usize>>> + Send;
+    type SearchAct;
+    fn select(&mut self, root: &Tree<T>) -> impl Future<Output = Result<Self::SearchAct>> + Send;
     fn unlock(&mut self, idx: usize) -> Result<()>;
 }
 
@@ -22,18 +26,28 @@ pub trait Rollout<T>: Clone + Send {
     fn rollout(&self, trajectory: Self::Trajectory) -> impl Future<Output = Result<T>> + Send;
 }
 
-pub trait Notify<T>: Clone + Send {
-    fn notify_scheduled(
-        &self,
-        root: &Tree<T>,
-        idx: usize,
-    ) -> impl Future<Output = Result<()>> + Send;
-    fn notify_completed(
-        &self,
-        root: &Tree<T>,
-        result: &Result<(T, usize)>,
-    ) -> impl Future<Output = Result<()>> + Send;
+pub struct Command<T> {
+    pub node_seq_num: Option<usize>,
+    pub cmd: T,
 }
+
+pub struct Event<T> {
+    pub node_seq_num: usize,
+    pub event: T,
+}
+
+/*pub trait Pipeline {
+    type Checkpoint;
+    type Command;
+    type Event;
+
+    fn execute(
+        &mut self,
+        cmd_rx: mpsc::Receiver<Self::Command>,
+        event_tx: mpsc::Sender<Self::Event>,
+        checkpoint: Option<Self::Checkpoint>,
+    ) -> impl Future<Output = Result<Self::Checkpoint>> + Send + Sync;
+}*/
 
 pub trait Checker: Sized + Send + Sync {
     fn run<'a>(

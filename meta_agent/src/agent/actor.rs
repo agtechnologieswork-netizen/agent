@@ -10,16 +10,48 @@ use rig::{
 };
 use std::{collections::HashSet, sync::Arc};
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(serde::Serialize)]
+pub struct Metrics {
+    pub output_tokens: u64,
+}
+
+impl Metrics {
+    fn output_tokens(mut self, output_tokens: u64) -> Self {
+        self.output_tokens = output_tokens;
+        self
+    }
+}
+
+impl Default for Metrics {
+    fn default() -> Self {
+        Self { output_tokens: 0 }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
 pub enum NodeKind {
     Step,
     Done,
 }
 
+#[derive(serde::Serialize)]
 pub struct Node {
     pub kind: NodeKind,
     pub history: Vec<rig::message::Message>,
+    #[serde(skip)]
     pub workspace: Box<dyn WorkspaceDyn>,
+    pub metrics: Metrics,
+}
+
+impl Node {
+    pub fn root_prompt(prompt: impl Into<Message>, workspace: impl WorkspaceDyn + 'static) -> Self {
+        Self {
+            kind: NodeKind::Step,
+            history: vec![prompt.into()],
+            workspace: Box::new(workspace),
+            metrics: Default::default(),
+        }
+    }
 }
 
 impl AgentNode for Node {
@@ -28,7 +60,7 @@ impl AgentNode for Node {
     }
 }
 
-impl NodeTool<Node> for crate::agent::toolset::DoneTool {
+impl NodeTool<Node> for crate::agent::toolset::FinishTool {
     async fn call_node(
         &self,
         args: Self::Args,
@@ -131,8 +163,8 @@ impl Rollout<Node> for AgentActor {
             kind: NodeKind::Step,
             history: vec![response.message()],
             workspace: trajectory.workspace,
+            metrics: Metrics::default().output_tokens(response.output_tokens),
         };
-        // TODO: Catch "done" tool running and mark as completed
         let tools = self.run_tools(&response, &mut node).await?;
         let message = match tools {
             Some(tools) => {
@@ -146,35 +178,56 @@ impl Rollout<Node> for AgentActor {
     }
 }
 
+pub enum SearchAction {
+    Rollout(Vec<usize>),
+    Done(usize),
+}
+
 #[derive(Clone)]
 pub struct SearchActor {
     locked: HashSet<usize>,
+    limit: Option<usize>,
 }
 
 impl SearchActor {
     pub fn new() -> Self {
         Self {
             locked: HashSet::new(),
+            limit: None,
         }
+    }
+
+    pub fn with_limit(mut self, limit: usize) -> Self {
+        self.limit = Some(limit);
+        self
+    }
+
+    pub fn is_exhausted(&self, root: &Tree<Node>) -> bool {
+        return self.limit.is_some_and(|limit| root.num_nodes() >= limit);
     }
 }
 
 impl Search<Node> for SearchActor {
-    async fn select(&mut self, root: &Tree<Node>) -> Result<Vec<usize>> {
+    type SearchAct = SearchAction;
+
+    async fn select(&mut self, root: &Tree<Node>) -> Result<Self::SearchAct> {
+        if self.is_exhausted(root) {
+            eyre::bail!("Search limit exhausted after {} steps.", root.num_nodes());
+        }
         let mut node_ids = Vec::new();
         for idx in root.get_leafs_idx() {
             if self.locked.contains(&idx) {
                 continue;
             }
             match root.get_node(idx).kind {
-                NodeKind::Done => continue,
+                NodeKind::Done => return Ok(SearchAction::Done(idx)),
                 _ => {
                     node_ids.push(idx);
                     self.locked.insert(idx);
                 }
             }
         }
-        Ok(node_ids)
+        Ok(SearchAction::Rollout(node_ids))
     }
 
     fn unlock(&mut self, idx: usize) -> Result<()> {
@@ -201,33 +254,32 @@ impl Checker for PythonChecker {
 }
 
 pub async fn run<T: Send + 'static>(
-    mut search: impl Search<T>,
+    mut search: impl Search<T, SearchAct = SearchAction>,
     rollout: impl Rollout<T> + 'static,
     root: &mut Tree<T>,
-    step_limit: usize,
-) -> Result<()> {
-    let mut iter = 0usize;
+) -> Result<usize> {
     let mut set = tokio::task::JoinSet::new();
-    while let Ok(node_ids) = search.select(root).await {
-        for p_idx in node_ids {
-            let trajectory = rollout.trajectory(root, p_idx).await?;
-            let rollout = rollout.clone();
-            set.spawn(async move { rollout.rollout(trajectory).await.map(|node| (node, p_idx)) });
+    loop {
+        match search.select(root).await? {
+            SearchAction::Rollout(node_ids) => {
+                for p_idx in node_ids {
+                    let trajectory = rollout.trajectory(root, p_idx).await?;
+                    let rollout = rollout.clone();
+                    set.spawn(async move {
+                        rollout.rollout(trajectory).await.map(|node| (node, p_idx))
+                    });
+                }
+            }
+            SearchAction::Done(solution_id) => return Ok(solution_id),
         }
         match set.join_next().await {
             Some(result) => {
                 let (node, p_idx) = result??;
                 root.add_node(node, p_idx).and(search.unlock(p_idx))?;
             }
-            None => break,
-        }
-        // TODO: early out for testing
-        match iter.cmp(&step_limit) {
-            std::cmp::Ordering::Greater => break,
-            _ => iter = iter + 1,
+            None => eyre::bail!("No rollouts selected"),
         }
     }
-    Ok(())
 }
 
 pub async fn run_demo_agent() -> Result<()> {
@@ -250,9 +302,9 @@ Program will be run using uv run main.py command.
         toolset::LsDirTool,
         toolset::RmFileTool,
         toolset::EditFileTool,
-        node: toolset::DoneTool::new(PythonChecker),
+        node: toolset::FinishTool::new(PythonChecker),
     ];
-    let search = SearchActor::new();
+    let search = SearchActor::new().with_limit(10);
     let rollout = AgentActor {
         llm: Arc::new(client),
         tools: Arc::new(tools),
@@ -266,11 +318,10 @@ Program will be run using uv run main.py command.
         .await?;
     let prompt =
         "Create a simple python script that fetches my public ip using one of the common services.";
-    let mut root = Tree::new(Node {
-        kind: NodeKind::Step,
-        history: vec![prompt.into()],
-        workspace: Box::new(workspace),
-    });
-    run(search, rollout, &mut root, 10).await?;
+    let mut root = Tree::new(Node::root_prompt(prompt, workspace));
+    run(search, rollout, &mut root).await?;
+    tracing::info!("Finished with {} nodes", root.num_nodes());
+    let result = serde_json::to_string_pretty(&root)?;
+    std::fs::write("trajectory.json", &result)?;
     Ok(())
 }
