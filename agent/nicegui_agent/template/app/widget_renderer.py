@@ -74,8 +74,8 @@ class WidgetRenderer:
         """Render a metric/KPI widget"""
         config = widget.config
         
-        # Check if widget has a data source
-        if config.get("data_source"):
+        # Check if widget has a data source (stored separately, not in config)
+        if widget.data_source:
             from app.data_source_service import DataSourceService
             data = DataSourceService.execute_widget_query(widget)
             if data and data.get("rows"):
@@ -111,25 +111,38 @@ class WidgetRenderer:
         if config.get("title"):
             ui.label(config["title"]).classes("text-lg font-semibold mb-2")
         
-        # Check if widget has a data source
-        if config.get("data_source"):
+        # Check if widget has a data source (stored separately, not in config)
+        if widget.data_source:
             from app.data_source_service import DataSourceService
             query_data = DataSourceService.execute_widget_query(widget)
-            if query_data:
-                # Use data from query
-                data = query_data
+            if query_data and query_data.get("rows"):
+                # Convert rows to chart data format
+                rows = query_data["rows"]
+                if rows:
+                    # Get column names
+                    cols = list(rows[0].keys()) if rows else []
+                    # Use first column as x, second as y
+                    if len(cols) >= 2:
+                        data = {
+                            "x": [row.get(cols[0]) for row in rows],
+                            "y": [row.get(cols[1]) for row in rows]
+                        }
+                    elif len(cols) == 1:
+                        # Single column - use index as x
+                        data = {
+                            "x": list(range(len(rows))),
+                            "y": [row.get(cols[0]) for row in rows]
+                        }
+                    else:
+                        data = {"x": ["No Data"], "y": [0]}
+                else:
+                    data = {"x": ["No Data"], "y": [0]}
             else:
-                # Fallback to config data
-                data = config.get("data", {
-                    "x": ["No Data"],
-                    "y": [0]
-                })
+                # No data from query
+                data = {"x": ["No Data"], "y": [0]}
         else:
-            # Use static data from config
-            data = config.get("data", {
-                "x": ["Jan", "Feb", "Mar", "Apr", "May"],
-                "y": [10, 15, 13, 17, 22]
-            })
+            # No data source configured - this should not happen with new widgets
+            data = {"x": ["Configure Data Source"], "y": [0]}
         
         match chart_type:
             case "line":
@@ -157,8 +170,8 @@ class WidgetRenderer:
         if config.get("title"):
             ui.label(config["title"]).classes("text-lg font-semibold mb-2")
         
-        # Check if widget has a data source
-        if config.get("data_source"):
+        # Check if widget has a data source (stored separately, not in config)
+        if widget.data_source:
             from app.data_source_service import DataSourceService
             data = DataSourceService.execute_widget_query(widget)
             if data and data.get("rows"):
@@ -170,20 +183,15 @@ class WidgetRenderer:
                         for key in rows[0].keys()
                     ]
                 else:
-                    columns = []
+                    columns = [{"name": "info", "label": "Info", "field": "info"}]
+                    rows = [{"info": "No data available"}]
             else:
-                columns = config.get("columns", [])
-                rows = config.get("rows", [])
+                columns = [{"name": "info", "label": "Info", "field": "info"}]
+                rows = [{"info": "Query returned no results"}]
         else:
-            columns = config.get("columns", [
-                {"name": "id", "label": "ID", "field": "id"},
-                {"name": "name", "label": "Name", "field": "name"}
-            ])
-            
-            rows = config.get("rows", [
-                {"id": 1, "name": "Sample Item 1"},
-                {"id": 2, "name": "Sample Item 2"}
-            ])
+            # No data source configured - show message
+            columns = [{"name": "message", "label": "Message", "field": "message"}]
+            rows = [{"message": "Please configure a data source for this widget"}]
         
         ui.table(columns=columns, rows=rows).classes("w-full")
     

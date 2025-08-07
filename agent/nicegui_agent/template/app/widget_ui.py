@@ -105,32 +105,55 @@ class WidgetManager:
                 value=WidgetSize.MEDIUM,
             )
 
-            # Data source configuration
-            ui.label("Data Source").classes("text-sm font-medium text-gray-700 mt-4 mb-2")
+            # Data source configuration (REQUIRED)
+            ui.label("Data Source (Required)").classes("text-sm font-medium text-gray-700 mt-4 mb-2")
+            ui.label("⚠️ Widgets must connect to real data sources").classes("text-xs text-amber-600 mb-2")
 
             from app.data_source_service import DataSourceService
 
             tables = DataSourceService.get_available_tables()
-            table_options = {"none": "Static Data"}
+            table_options = {}
             for table in tables:
                 table_options[table["name"]] = f"{table['name']} ({table['row_count']} rows)"
+            
+            # Add query option
+            table_options["custom_query"] = "📝 Custom SQL Query"
 
-            data_source_select = ui.select(label="Select Table", options=table_options, value="none").classes("w-full")
+            default_table = list(table_options.keys())[0] if table_options else None
+            data_source_select = ui.select(
+                label="Select Data Source", 
+                options=table_options, 
+                value=default_table
+            ).classes("w-full").props("outlined filled")
 
             # Dynamic data source configuration
             data_config_container = ui.column().classes("w-full mt-2")
+            
+            # Store query input reference
+            query_input_ref = {"element": None}
 
             def update_data_config():
                 data_config_container.clear()
                 with data_config_container:
-                    if data_source_select.value != "none":
+                    if data_source_select.value == "custom_query":
+                        ui.label("Enter SQL Query:").classes("text-sm font-medium")
+                        query_input_ref["element"] = ui.textarea(
+                            placeholder="SELECT * FROM table WHERE condition",
+                            value=""
+                        ).classes("w-full font-mono text-sm").props("rows=3")
+                        ui.label("💡 Query will be executed against the database").classes("text-xs text-gray-500")
+                    elif data_source_select.value:
                         selected_table = next((t for t in tables if t["name"] == data_source_select.value), None)
                         if selected_table:
-                            ui.label(f"Columns in {selected_table['name']}:").classes("text-sm")
-                            for col in selected_table["columns"][:5]:  # Show first 5 columns
+                            ui.label(f"Table: {selected_table['name']}").classes("text-sm font-medium")
+                            ui.label(f"Columns available:").classes("text-xs text-gray-600 mt-1")
+                            for col in selected_table["columns"][:8]:  # Show first 8 columns
                                 ui.label(f"  • {col['name']} ({col['type']})").classes("text-xs text-gray-600")
+                            if len(selected_table["columns"]) > 8:
+                                ui.label(f"  ... and {len(selected_table['columns']) - 8} more").classes("text-xs text-gray-400")
 
             data_source_select.on("update:model-value", update_data_config)
+            update_data_config()  # Show initial data config
 
             # Dynamic configuration based on widget type
             ui.label("Widget Configuration").classes("text-sm font-medium text-gray-700 mt-4 mb-2")
@@ -180,6 +203,7 @@ class WidgetManager:
                         size_select.value,
                         dialog,
                         data_source=data_source_select.value,
+                        query_text=query_input_ref["element"].value if query_input_ref["element"] else None,
                         on_close=on_close,
                     ),
                 ).props("color=primary")
@@ -193,6 +217,7 @@ class WidgetManager:
         size: Optional[WidgetSize],
         dialog,
         data_source=None,
+        query_text=None,
         data_config=None,
         on_close=None,
     ):
@@ -211,15 +236,37 @@ class WidgetManager:
         # Create widget with basic config
         config = self.get_default_config(widget_type)
 
-        # Prepare data source configuration if provided
+        # Prepare data source configuration (REQUIRED)
         data_source_config = None
-        if data_source and data_source != "none":
+        if data_source == "custom_query":
+            # Use the query text if provided
+            if query_text:
+                data_source_config = {
+                    "type": "query",
+                    "query": query_text,
+                    "refresh_interval": 60,
+                }
+            else:
+                # Fallback to default query
+                from app.data_source_service import DataSourceService
+                tables = DataSourceService.get_available_tables()
+                default_table = tables[0]['name'] if tables else 'widget'
+                data_source_config = {
+                    "type": "query",
+                    "query": f"SELECT * FROM {default_table} LIMIT 10",
+                    "refresh_interval": 60,
+                }
+        elif data_source:
             data_source_config = {
                 "type": "table",
                 "table": data_source,
                 "columns": data_config.get("columns", []) if data_config else [],
                 "limit": data_config.get("limit", 100) if data_config else 100,
             }
+        else:
+            # No data source selected - this should not happen with new UI
+            ui.notify("Please select a data source", type="warning")
+            return
 
         self.widget_service.create_widget(
             name=name, 
@@ -240,20 +287,16 @@ class WidgetManager:
     def get_default_config(self, widget_type: WidgetType) -> dict:
         """Get default configuration for a widget type"""
         configs = {
-            WidgetType.TEXT: {"content": "New text widget. Click edit to customize.", "markdown": False},
-            WidgetType.METRIC: {"title": "New Metric", "value": 0, "icon": "trending_up"},
+            WidgetType.TEXT: {"content": "New text widget. Data will be loaded from the selected source.", "markdown": False},
+            WidgetType.METRIC: {"title": "New Metric", "icon": "trending_up"},
             WidgetType.CHART: {
                 "chart_type": "line",
-                "title": "Sample Chart",
-                "data": {"x": ["Jan", "Feb", "Mar", "Apr", "May"], "y": [10, 15, 13, 17, 22]},
+                "title": "Data Chart",
+                # Data will come from data_source
             },
             WidgetType.TABLE: {
-                "title": "Sample Table",
-                "columns": [
-                    {"name": "id", "label": "ID", "field": "id"},
-                    {"name": "name", "label": "Name", "field": "name"},
-                ],
-                "rows": [{"id": 1, "name": "Item 1"}, {"id": 2, "name": "Item 2"}],
+                "title": "Data Table",
+                # Columns and rows will come from data_source
             },
             WidgetType.BUTTON: {"label": "Click Me", "action": "notify", "message": "Button clicked!"},
             WidgetType.IMAGE: {"source": "https://via.placeholder.com/400x200", "caption": "Sample Image"},
@@ -287,6 +330,21 @@ class WidgetManager:
                 },
                 value=widget.size,
             )
+
+            # Show current data source
+            ui.label("Data Source").classes("mt-4 text-sm font-medium text-gray-700")
+            if widget.data_source:
+                with ui.card().classes("w-full p-3 bg-blue-50"):
+                    source_type = widget.data_source.get("type", "unknown")
+                    if source_type == "query":
+                        ui.label("📝 Custom Query").classes("text-sm font-medium")
+                        ui.label(widget.data_source.get("query", "")).classes("text-xs font-mono text-gray-600")
+                    elif source_type == "table":
+                        ui.label(f"📊 Table: {widget.data_source.get('table', 'unknown')}").classes("text-sm font-medium")
+                    elif source_type == "aggregation":
+                        ui.label(f"📈 Aggregation from: {widget.data_source.get('table', 'unknown')}").classes("text-sm font-medium")
+            else:
+                ui.label("⚠️ No data source configured").classes("text-sm text-amber-600")
 
             # Config editor (simplified - in production, use dynamic forms)
             import json

@@ -18,18 +18,20 @@ class WidgetGenerator:
     def create_metric_widget(
         name: str,
         title: str,
-        value: Any,
+        value: Any = None,
         icon: str = "trending_up",
         change_percent: Optional[float] = None,
         size: WidgetSize = WidgetSize.SMALL,
-        page: str = "dashboard"
+        page: str = "dashboard",
+        data_source: Optional[Dict] = None
     ) -> None:
-        """Create a metric/KPI widget"""
+        """Create a metric/KPI widget with data source"""
         config = {
             "title": title,
-            "value": value,
             "icon": icon,
         }
+        if value is not None:
+            config["value"] = value
         if change_percent is not None:
             config["change"] = change_percent
             
@@ -38,7 +40,8 @@ class WidgetGenerator:
             type=WidgetType.METRIC,
             size=size,
             page=page,
-            config=config
+            config=config,
+            data_source=data_source  # Pass data_source separately
         )
         logger.info(f"Created metric widget: {name}")
     
@@ -52,25 +55,33 @@ class WidgetGenerator:
         page: str = "dashboard",
         data_source: Optional[Dict] = None
     ) -> None:
-        """Create a chart widget"""
+        """Create a chart widget with data source"""
         config = {
             "title": title,
             "chart_type": chart_type,
             "show_legend": True,
         }
         
-        if data:
-            config["data"] = data
-        
-        if data_source:
-            config["data_source"] = data_source
+        # NEVER put data in config - use data_source instead
+        if data and not data_source:
+            logger.warning(f"Chart widget {name} created with static data - converting to query")
+            # Convert static data to a data source query if possible
+            from app.data_source_service import DataSourceService
+            tables = DataSourceService.get_available_tables()
+            if tables:
+                first_table = tables[0]["name"]
+                data_source = {
+                    "type": "query",
+                    "query": f"SELECT * FROM {first_table} LIMIT 10"
+                }
             
         WidgetService().create_widget(
             name=name,
             type=WidgetType.CHART,
             size=size,
             page=page,
-            config=config
+            config=config,
+            data_source=data_source  # Pass data_source separately
         )
         logger.info(f"Created chart widget: {name}")
     
@@ -78,28 +89,38 @@ class WidgetGenerator:
     def create_table_widget(
         name: str,
         title: str,
-        columns: List[Dict],
-        rows: List[Dict],
+        columns: Optional[List[Dict]] = None,
+        rows: Optional[List[Dict]] = None,
         size: WidgetSize = WidgetSize.LARGE,
         page: str = "dashboard",
         data_source: Optional[Dict] = None
     ) -> None:
-        """Create a table widget"""
+        """Create a table widget with data source"""
         config = {
             "title": title,
-            "columns": columns,
-            "rows": rows,
         }
         
-        if data_source:
-            config["data_source"] = data_source
-            
+        # NEVER put columns/rows in config - use data_source instead
+        if (columns or rows) and not data_source:
+            logger.warning(f"Table widget {name} created with static data - converting to query")
+            # Convert static data to a data source query
+            from app.data_source_service import DataSourceService
+            tables = DataSourceService.get_available_tables()
+            if tables:
+                first_table = tables[0]["name"]
+                data_source = {
+                    "type": "query",
+                    "query": f"SELECT * FROM {first_table} LIMIT 20"
+                }
+        
+        # Columns and rows will come from data_source query execution
         WidgetService().create_widget(
             name=name,
             type=WidgetType.TABLE,
             size=size,
             page=page,
-            config=config
+            config=config,
+            data_source=data_source  # Pass data_source separately
         )
         logger.info(f"Created table widget: {name}")
     
@@ -182,69 +203,62 @@ Toggle **Edit Widgets** mode to start customizing!
                     size=WidgetSize.FULL
                 )
             
-            # Sample metric widgets
-            WidgetGenerator.create_metric_widget(
+            # Create data-driven metric widgets using WidgetTools
+            from app.widget_tools import WidgetTools
+            
+            # Get the first available table for queries
+            first_table = data_tables[0]["name"] if data_tables else "widget"
+            
+            # Create metrics with real queries
+            WidgetTools.create_metric_from_query(
                 name="Total Revenue",
-                title="Total Revenue",
-                value=125430,
-                icon="attach_money",
-                change_percent=12.5,
+                query=f"SELECT COUNT(*) as value FROM {first_table}",
+                title="Total Records",
+                icon="storage",
                 size=WidgetSize.SMALL
             )
             
-            WidgetGenerator.create_metric_widget(
+            WidgetTools.create_metric_from_query(
                 name="Active Users",
-                title="Active Users",
-                value=1847,
+                query=f"SELECT COUNT(DISTINCT id) as value FROM {first_table}",
+                title="Unique Records",
                 icon="people",
-                change_percent=5.2,
                 size=WidgetSize.SMALL
             )
             
-            WidgetGenerator.create_metric_widget(
+            WidgetTools.create_metric_from_query(
                 name="Conversion Rate",
-                title="Conversion Rate",
-                value="3.4%",
+                query=f"SELECT CAST(COUNT(*) * 100.0 / NULLIF((SELECT COUNT(*) FROM {first_table}), 0) AS INTEGER) as value FROM {first_table} WHERE id IS NOT NULL",
+                title="Data Quality %",
                 icon="trending_up",
-                change_percent=-2.1,
                 size=WidgetSize.SMALL
             )
             
-            WidgetGenerator.create_metric_widget(
+            WidgetTools.create_metric_from_query(
                 name="Avg Order Value",
-                title="Avg Order Value",
-                value="$67.89",
+                query=f"SELECT MAX(id) as value FROM {first_table}",
+                title="Latest ID",
                 icon="shopping_cart",
-                change_percent=8.7,
                 size=WidgetSize.SMALL
             )
             
-            # Sample chart widget
-            WidgetGenerator.create_chart_widget(
-                name="Monthly Sales Trend",
-                title="Monthly Sales Trend",
-                chart_type="line",
-                data={
-                    "x": ["Jan", "Feb", "Mar", "Apr", "May", "Jun"],
-                    "y": [45000, 52000, 48000, 61000, 58000, 67000]
-                },
-                size=WidgetSize.LARGE
-            )
+            # Create chart with real data
+            if data_tables:
+                WidgetTools.create_chart_from_table(
+                    name="Monthly Sales Trend",
+                    table=first_table,
+                    x_column="id",
+                    y_column="id",  # Will be replaced with actual column
+                    chart_type="line",
+                    title="Data Trend",
+                    size=WidgetSize.LARGE
+                )
             
-            # Sample table widget
-            WidgetGenerator.create_table_widget(
+            # Create table with real data
+            WidgetTools.create_table_from_query(
                 name="Top Products",
-                title="Top Performing Products",
-                columns=[
-                    {"name": "product", "label": "Product", "field": "product"},
-                    {"name": "sales", "label": "Sales", "field": "sales"},
-                    {"name": "revenue", "label": "Revenue", "field": "revenue"},
-                ],
-                rows=[
-                    {"product": "Widget Pro", "sales": 234, "revenue": "$23,400"},
-                    {"product": "Dashboard Plus", "sales": 189, "revenue": "$18,900"},
-                    {"product": "Analytics Suite", "sales": 156, "revenue": "$31,200"},
-                ],
+                query=f"SELECT * FROM {first_table} LIMIT 10",
+                title="Recent Records",
                 size=WidgetSize.MEDIUM
             )
             
