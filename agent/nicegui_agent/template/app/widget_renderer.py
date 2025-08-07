@@ -78,11 +78,13 @@ class WidgetRenderer:
         if widget.data_source:
             from app.data_source_service import DataSourceService
             data = DataSourceService.execute_widget_query(widget)
-            if data and data.get("rows"):
-                # Use first row's first value for metric
+            # Prefer explicit single value when provided
+            if data and "value" in data:
+                config["value"] = data["value"]
+            elif data and data.get("rows"):
+                # Use first row's first numeric value for metric
                 row = data["rows"][0] if data["rows"] else {}
                 if row:
-                    # Get first numeric value
                     value = next((v for v in row.values() if isinstance(v, (int, float))), 0)
                     config["value"] = value
         
@@ -115,31 +117,37 @@ class WidgetRenderer:
         if widget.data_source:
             from app.data_source_service import DataSourceService
             query_data = DataSourceService.execute_widget_query(widget)
-            if query_data and query_data.get("rows"):
-                # Convert rows to chart data format
+            data = {"x": ["No Data"], "y": [0]}
+
+            # Support direct x/y payloads (e.g., aggregations)
+            if query_data and isinstance(query_data, dict) and "x" in query_data and "y" in query_data:
+                data = {
+                    "x": query_data.get("x", []),
+                    "y": query_data.get("y", []),
+                    "labels": query_data.get("labels", None),
+                }
+            elif query_data and query_data.get("rows"):
                 rows = query_data["rows"]
                 if rows:
-                    # Get column names
                     cols = list(rows[0].keys()) if rows else []
-                    # Use first column as x, second as y
-                    if len(cols) >= 2:
+                    # Prefer configured axis names when available
+                    x_axis = config.get("x_axis")
+                    y_axis = config.get("y_axis")
+                    if x_axis in cols and y_axis in cols:
+                        data = {
+                            "x": [row.get(x_axis) for row in rows],
+                            "y": [row.get(y_axis) for row in rows],
+                        }
+                    elif len(cols) >= 2:
                         data = {
                             "x": [row.get(cols[0]) for row in rows],
-                            "y": [row.get(cols[1]) for row in rows]
+                            "y": [row.get(cols[1]) for row in rows],
                         }
                     elif len(cols) == 1:
-                        # Single column - use index as x
                         data = {
                             "x": list(range(len(rows))),
-                            "y": [row.get(cols[0]) for row in rows]
+                            "y": [row.get(cols[0]) for row in rows],
                         }
-                    else:
-                        data = {"x": ["No Data"], "y": [0]}
-                else:
-                    data = {"x": ["No Data"], "y": [0]}
-            else:
-                # No data from query
-                data = {"x": ["No Data"], "y": [0]}
         else:
             # No data source configured - this should not happen with new widgets
             data = {"x": ["Configure Data Source"], "y": [0]}

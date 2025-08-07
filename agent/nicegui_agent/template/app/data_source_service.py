@@ -201,13 +201,12 @@ class DataSourceService:
                         table_name, agg_type, group_by, value_column
                     )
                     
-                    # Format for charts
+                    # Always include rows; add x/y for chart convenience
                     if widget.type.value == "chart":
                         labels = [r.get("label", "") for r in rows]
                         values = [r.get("value", 0) for r in rows]
-                        return {"x": labels, "y": values}
-                    else:
-                        return {"rows": rows}
+                        return {"x": labels, "y": values, "rows": rows}
+                    return {"rows": rows}
             
             case "query" | "custom_sql":
                 # SQL query (be very careful with this!)
@@ -218,7 +217,7 @@ class DataSourceService:
                             result = conn.execute(text(query))
                             rows = [dict(row._mapping) for row in result]
                             
-                            # For metric widgets, return single value
+                            # For metric widgets, return single value alongside rows
                             if widget.type.value == "metric" and rows:
                                 return {"value": rows[0].get(list(rows[0].keys())[0], 0), "rows": rows}
                             
@@ -226,5 +225,26 @@ class DataSourceService:
                     except Exception as e:
                         logger.error(f"Error executing query: {e}")
                         return {"error": str(e), "success": False}
+            
+            case "databricks_query":
+                # Execute SQL against Databricks warehouse
+                query = data_source.get("query", "")
+                if not query:
+                    return {}
+                try:
+                    from app.dbrx import execute_databricks_query
+                except Exception as e:
+                    logger.error(f"Databricks support not available: {e}")
+                    return {"error": "databricks_not_available", "success": False}
+                try:
+                    rows = execute_databricks_query(query)
+                    if widget.type.value == "metric" and rows:
+                        first_row = rows[0]
+                        first_val = next((v for v in first_row.values() if isinstance(v, (int, float))), 0)
+                        return {"value": first_val, "rows": rows}
+                    return {"rows": rows, "success": True}
+                except Exception as e:
+                    logger.error(f"Error executing Databricks query: {e}")
+                    return {"error": str(e), "success": False}
         
         return {}

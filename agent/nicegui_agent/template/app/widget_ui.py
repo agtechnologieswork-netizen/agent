@@ -43,6 +43,21 @@ class WidgetManager:
             # Render widgets
             self.refresh_widgets()
 
+            # Set up auto-refresh based on the smallest configured widget refresh interval
+            try:
+                widgets = self.widget_service.get_widgets_for_page(self.current_page)
+                intervals: list[int] = []
+                for w in widgets:
+                    if isinstance(getattr(w, "data_source", None), dict):
+                        val = w.data_source.get("refresh_interval")
+                        if isinstance(val, (int, float)) and val > 0:
+                            intervals.append(int(val))
+                refresh_seconds = min(intervals) if intervals else None
+                if refresh_seconds:
+                    ui.timer(refresh_seconds, self.refresh_widgets)
+            except Exception as e:
+                logger.warning(f"Failed to initialize auto-refresh timer: {e}")
+
     def refresh_widgets(self):
         """Refresh the widget display"""
         if hasattr(self, "widget_container"):
