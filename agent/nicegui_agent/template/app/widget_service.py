@@ -47,6 +47,21 @@ class WidgetService:
             ).first()
             next_position = (max_position or 0) + 1
 
+            # Enforce data_source for data-driven widget types when missing
+            if data_source is None and type in {WidgetType.METRIC, WidgetType.CHART, WidgetType.TABLE}:
+                try:
+                    from app.data_source_service import DataSourceService
+                    tables = DataSourceService.get_available_tables()
+                    default_table = tables[0]["name"] if tables else "widget"
+                    data_source = {
+                        "type": "query",
+                        "query": f'SELECT * FROM "{default_table}" LIMIT 10',
+                        "refresh_interval": 60,
+                    }
+                except Exception:
+                    # Fall back to a harmless placeholder
+                    data_source = {"type": "query", "query": "SELECT 1 AS value", "refresh_interval": 60}
+
             widget = Widget(
                 name=name,
                 type=type,

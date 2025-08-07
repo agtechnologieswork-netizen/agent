@@ -3,6 +3,7 @@ import os
 from app.startup import startup
 from nicegui import app, ui
 from starlette.middleware.base import BaseHTTPMiddleware
+import os
 
 # configure logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
@@ -24,7 +25,12 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
 
 @app.get("/health")
 async def health():
-    return {"status": "healthy", "service": "nicegui-app"}
+    status = {
+        "status": "healthy",
+        "service": "nicegui-app",
+        "databricks": "configured" if (os.environ.get("DATABRICKS_HOST") and os.environ.get("DATABRICKS_TOKEN")) else "missing",
+    }
+    return status
 
 
 # suppress sqlalchemy engine logs below warning level

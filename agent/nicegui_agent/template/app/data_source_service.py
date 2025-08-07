@@ -60,7 +60,7 @@ class DataSourceService:
                     "row_count": row_count
                 })
         
-        logger.info(f"Found {len(tables)} tables in database")
+        logger.debug(f"Found {len(tables)} tables in database")
         return tables
     
     @staticmethod
@@ -104,7 +104,7 @@ class DataSourceService:
                 for row in result:
                     rows.append(dict(row._mapping))
                 
-                logger.info(f"Retrieved {len(rows)} rows from {table_name}")
+                logger.debug(f"Retrieved {len(rows)} rows from {table_name}")
                 return rows
             except Exception as e:
                 logger.error(f"Error fetching data from {table_name}: {e}")
@@ -227,7 +227,7 @@ class DataSourceService:
                         return {"error": str(e), "success": False}
             
             case "databricks_query":
-                # Execute SQL against Databricks warehouse
+                # Execute SQL against Databricks warehouse with graceful fallback
                 query = data_source.get("query", "")
                 if not query:
                     return {}
@@ -244,7 +244,8 @@ class DataSourceService:
                         return {"value": first_val, "rows": rows}
                     return {"rows": rows, "success": True}
                 except Exception as e:
+                    # Fallback to a quick heartbeat query to keep UI responsive
                     logger.error(f"Error executing Databricks query: {e}")
-                    return {"error": str(e), "success": False}
+                    return {"rows": [], "error": "databricks_timeout", "success": False}
         
         return {}

@@ -40,6 +40,7 @@ WidgetTools.create_table_from_query(
 """
 
 import logging
+import os
 from typing import Dict, Any, List, Optional
 from app.widget_service import WidgetService
 from app.widget_models import Widget, WidgetType, WidgetSize
@@ -50,6 +51,9 @@ logger = logging.getLogger(__name__)
 
 class WidgetTools:
     """Helper tools for agent to create and configure widgets with data"""
+    @staticmethod
+    def _is_databricks_configured() -> bool:
+        return bool(os.environ.get("DATABRICKS_HOST") and os.environ.get("DATABRICKS_TOKEN"))
     
     @staticmethod
     def create_metric_from_query(
@@ -73,11 +77,12 @@ class WidgetTools:
         }
         
         data_source = {
-            "type": "query",
+            "type": "databricks_query" if WidgetTools._is_databricks_configured() else "query",
             "query": query,
             "refresh_interval": 60  # Refresh every minute
         }
         
+        # Enforce creation via WidgetService with a proper data_source
         return WidgetService.create_widget(
             name=name,
             type=WidgetType.METRIC,
@@ -116,14 +121,24 @@ class WidgetTools:
             "show_legend": True
         }
         
-        data_source = {
-            "type": "table",
-            "table": table,
-            "columns": [x_column, y_column],
-            "limit": limit,
-            "order_by": x_column
-        }
+        # Prefer direct Databricks query when configured to ensure real data
+        if WidgetTools._is_databricks_configured():
+            query = f"SELECT {x_column}, {y_column} FROM {table} ORDER BY {x_column} LIMIT {limit}"
+            data_source = {
+                "type": "databricks_query",
+                "query": query,
+                "refresh_interval": 60,
+            }
+        else:
+            data_source = {
+                "type": "table",
+                "table": table,
+                "columns": [x_column, y_column],
+                "limit": limit,
+                "order_by": x_column
+            }
         
+        # Enforce creation via WidgetService with a proper data_source
         return WidgetService.create_widget(
             name=name,
             type=WidgetType.CHART,
@@ -159,11 +174,12 @@ class WidgetTools:
         }
         
         data_source = {
-            "type": "query",
+            "type": "databricks_query" if WidgetTools._is_databricks_configured() else "query",
             "query": query,
             "refresh_interval": 30
         }
         
+        # Enforce creation via WidgetService with a proper data_source
         return WidgetService.create_widget(
             name=name,
             type=WidgetType.TABLE,

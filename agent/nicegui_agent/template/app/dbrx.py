@@ -26,19 +26,17 @@ def execute_databricks_query(query: str) -> List[Dict[str, Any]]:
         return []
 
     # use warehouse to execute query
+    # Choose a running warehouse quickly; set a short wait_timeout to avoid UI stalls
     try:
-        running_warehouses = [x for x in client.warehouses.list() if x.state == State.RUNNING]
-        if not running_warehouses:
-            warehouse = list(client.warehouses.list())[0]
-        else:
-            warehouse = running_warehouses[0]
-
+        warehouse = next((x for x in client.warehouses.list() if x.state == State.RUNNING), None)
+        if warehouse is None:
+            # As a fallback pick the first one
+            warehouse = next(iter(client.warehouses.list()))
         if warehouse.id is None:
             raise RuntimeError("Warehouse ID is None")
-
         logger.info(f"Executing query {query.replace('\n', '\t')} on warehouse: {warehouse.id}")
         execution = client.statement_execution.execute_statement(
-            warehouse_id=warehouse.id, statement=query, wait_timeout="30s"
+            warehouse_id=warehouse.id, statement=query, wait_timeout="15s"
         )
     except Exception as e:
         logger.error(f"Failed to execute Databricks query: {e}")

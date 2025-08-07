@@ -148,6 +148,9 @@ class WidgetRenderer:
                             "x": list(range(len(rows))),
                             "y": [row.get(cols[0]) for row in rows],
                         }
+            # If databricks_query returns neither rows nor x/y, show connection hint
+            if (not data.get("x") or not data.get("y")) and widget.data_source.get("type") == "databricks_query":
+                data = {"x": ["Connect"], "y": [0]}
         else:
             # No data source configured - this should not happen with new widgets
             data = {"x": ["Configure Data Source"], "y": [0]}
