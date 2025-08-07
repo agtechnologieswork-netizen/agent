@@ -131,8 +131,9 @@ class WidgetManager:
             for table in tables:
                 table_options[table["name"]] = f"{table['name']} ({table['row_count']} rows)"
             
-            # Add query option
+            # Add query options
             table_options["custom_query"] = "📝 Custom SQL Query"
+            table_options["databricks_query"] = "🧱 Databricks SQL Query"
 
             default_table = list(table_options.keys())[0] if table_options else None
             data_source_select = ui.select(
@@ -157,6 +158,15 @@ class WidgetManager:
                             value=""
                         ).classes("w-full font-mono text-sm").props("rows=3")
                         ui.label("💡 Query will be executed against the database").classes("text-xs text-gray-500")
+                    elif data_source_select.value == "databricks_query":
+                        import os
+                        ui.label("Enter Databricks SQL Query:").classes("text-sm font-medium")
+                        query_input_ref["element"] = ui.textarea(
+                            placeholder="SELECT 1 AS value",
+                            value=""
+                        ).classes("w-full font-mono text-sm").props("rows=3")
+                        hint = "✅ Databricks credentials detected" if os.getenv("DATABRICKS_HOST") and os.getenv("DATABRICKS_TOKEN") else "⚠️ Set DATABRICKS_HOST and DATABRICKS_TOKEN before running"
+                        ui.label(hint).classes("text-xs text-gray-500")
                     elif data_source_select.value:
                         selected_table = next((t for t in tables if t["name"] == data_source_select.value), None)
                         if selected_table:
@@ -271,6 +281,13 @@ class WidgetManager:
                     "query": f"SELECT * FROM {default_table} LIMIT 10",
                     "refresh_interval": 60,
                 }
+        elif data_source == "databricks_query":
+            # Databricks SQL path
+            data_source_config = {
+                "type": "databricks_query",
+                "query": query_text or "SELECT 1 AS value",
+                "refresh_interval": 60,
+            }
         elif data_source:
             data_source_config = {
                 "type": "table",
@@ -351,13 +368,17 @@ class WidgetManager:
             if widget.data_source:
                 with ui.card().classes("w-full p-3 bg-blue-50"):
                     source_type = widget.data_source.get("type", "unknown")
-                    if source_type == "query":
-                        ui.label("📝 Custom Query").classes("text-sm font-medium")
-                        ui.label(widget.data_source.get("query", "")).classes("text-xs font-mono text-gray-600")
-                    elif source_type == "table":
-                        ui.label(f"📊 Table: {widget.data_source.get('table', 'unknown')}").classes("text-sm font-medium")
-                    elif source_type == "aggregation":
-                        ui.label(f"📈 Aggregation from: {widget.data_source.get('table', 'unknown')}").classes("text-sm font-medium")
+                    match source_type:
+                        case "query":
+                            ui.label("📝 Custom Query").classes("text-sm font-medium")
+                            ui.label(widget.data_source.get("query", "")).classes("text-xs font-mono text-gray-600")
+                        case "table":
+                            ui.label(f"📊 Table: {widget.data_source.get('table', 'unknown')}").classes("text-sm font-medium")
+                        case "aggregation":
+                            ui.label(f"📈 Aggregation from: {widget.data_source.get('table', 'unknown')}").classes("text-sm font-medium")
+                        case "databricks_query":
+                            ui.label("🧱 Databricks SQL").classes("text-sm font-medium")
+                            ui.label(widget.data_source.get("query", "")).classes("text-xs font-mono text-gray-600")
             else:
                 ui.label("⚠️ No data source configured").classes("text-sm text-amber-600")
 
