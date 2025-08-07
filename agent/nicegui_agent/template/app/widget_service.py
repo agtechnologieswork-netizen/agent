@@ -58,8 +58,9 @@ class WidgetService:
                         "query": f'SELECT * FROM "{default_table}" LIMIT 10',
                         "refresh_interval": 60,
                     }
-                except Exception:
-                    # Fall back to a harmless placeholder
+                except Exception as e:
+                    # Fall back to a harmless placeholder and log the reason
+                    logger.exception("Failed to infer default data_source; falling back to SELECT 1: %s", e)
                     data_source = {"type": "query", "query": "SELECT 1 AS value", "refresh_interval": 60}
 
             widget = Widget(
