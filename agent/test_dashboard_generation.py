@@ -3,7 +3,6 @@
 Test dashboard generation with widgets using NiceGUI agent
 """
 
-import os
 import tempfile
 import shutil
 from pathlib import Path

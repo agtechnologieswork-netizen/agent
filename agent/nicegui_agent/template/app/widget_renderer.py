@@ -133,11 +133,11 @@ class WidgetRenderer:
         
         match chart_type:
             case "line":
-                fig = go.Figure(data=go.Scatter(x=data["x"], y=data["y"], mode='lines+markers'))
+                fig = go.Figure(data=go.Scatter(x=data.get("x", []), y=data.get("y", []), mode='lines+markers'))
             case "bar":
-                fig = go.Figure(data=go.Bar(x=data["x"], y=data["y"]))
+                fig = go.Figure(data=go.Bar(x=data.get("x", []), y=data.get("y", [])))
             case "pie":
-                fig = go.Figure(data=go.Pie(labels=data.get("labels", data["x"]), values=data["y"]))
+                fig = go.Figure(data=go.Pie(labels=data.get("labels", data.get("x", [])), values=data.get("y", [])))
             case _:
                 fig = go.Figure()
         

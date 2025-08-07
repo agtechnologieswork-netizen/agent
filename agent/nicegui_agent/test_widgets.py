@@ -5,8 +5,8 @@ import sys
 import os
 sys.path.append(os.path.join(os.path.dirname(__file__), 'template'))
 
-from app.database import create_tables, get_session
-from app.widget_models import Widget, WidgetType, WidgetSize
+from app.database import create_tables
+from app.widget_models import WidgetType, WidgetSize
 from app.widget_service import WidgetService
 
 def test_widget_system():
@@ -53,7 +53,7 @@ def test_widget_system():
     
     # Delete the test widget
     WidgetService.delete_widget(new_widget.id)
-    print(f"✓ Deleted test widget")
+    print("✓ Deleted test widget")
     
     print("\n✅ Widget system test completed successfully!")
 
