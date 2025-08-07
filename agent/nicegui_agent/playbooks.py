@@ -456,10 +456,10 @@ def reset_db():
 - Use .isoformat() for date serialization:
   ```python
   # WRONG
-  return {"created_at": user.created_at}
+  return {{"created_at": user.created_at}}
 
   # CORRECT
-  return {"created_at": user.created_at.isoformat()}
+  return {{"created_at": user.created_at.isoformat()}}
   ```
 
 ## Query Result Validation
@@ -811,12 +811,12 @@ async def test_csv_upload(user: User) -> None:
     )])
     table = user.find(ui.table).elements.pop()
     assert table.columns == [
-        {{'name': 'name', 'label': 'Name', 'field': 'name'}},
-        {{'name': 'age', 'label': 'Age', 'field': 'age'}},
+        {{{{'name': 'name', 'label': 'Name', 'field': 'name'}}}},
+        {{{{'name': 'age', 'label': 'Age', 'field': 'age'}}}},
     ]
     assert table.rows == [
-        {{'name': 'Alice', 'age': '30'}},
-        {{'name': 'Bob', 'age': '28'}},
+        {{{{'name': 'Alice', 'age': '30'}}}},
+        {{{{'name': 'Bob', 'age': '28'}}}},
     ]
 ```
 
@@ -937,11 +937,11 @@ WIDGET_DATA_SOURCE_RULES = """
 ## ❌ PROHIBITED (Will cause lint errors):
 ```python
 # NEVER DO THIS:
-config = {"data": [1, 2, 3]}  # ❌ STATIC DATA
-config = {"values": [10, 20, 30]}  # ❌ HARDCODED VALUES
-config = {"chart_data": {"x": ["Jan", "Feb"], "y": [100, 200]}}  # ❌ JSON DATA
-mock_data = [{"id": 1, "value": 42}]  # ❌ MOCK DATA
-sample_data = [{"name": "Example", "value": 100}]  # ❌ SAMPLE DATA
+config = {{"data": [1, 2, 3]}}  # ❌ STATIC DATA
+config = {{"values": [10, 20, 30]}}  # ❌ HARDCODED VALUES
+config = {{"chart_data": {{"x": ["Jan", "Feb"], "y": [100, 200]}}}}  # ❌ JSON DATA
+mock_data = [{{"id": 1, "value": 42}}]  # ❌ MOCK DATA
+sample_data = [{{"name": "Example", "value": 100}}]  # ❌ SAMPLE DATA
 ```
 
 ## ✅ REQUIRED (Always do this):
