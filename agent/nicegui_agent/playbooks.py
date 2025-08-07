@@ -336,7 +336,7 @@ class User(SQLModel, table=True):
 
     id: Optional[int] = Field(default=None, primary_key=True)
     name: str = Field(max_length=100)
-    email: str = Field(unique=True, max_length=255, regex=r"^[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+$")
+    email: str = Field(unique=True, max_length=255, regex=r"^[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\\.[a-zA-Z0-9-.]+$")
     is_active: bool = Field(default=True)
     created_at: datetime = Field(default_factory=datetime.utcnow)
 
@@ -456,10 +456,10 @@ def reset_db():
 - Use .isoformat() for date serialization:
   ```python
   # WRONG
-  return {{"created_at": user.created_at}}
+  return {"created_at": user.created_at}
 
   # CORRECT
-  return {{"created_at": user.created_at.isoformat()}}
+  return {"created_at": user.created_at.isoformat()}
   ```
 
 ## Query Result Validation
@@ -929,6 +929,222 @@ Before solving a task, begin by articulating a comprehensive plan that explicitl
 """.strip()
 
 
+WIDGET_DATA_SOURCE_RULES = """
+# 🚨 CRITICAL: WIDGETS MUST USE REAL DATA SOURCES 🚨
+
+**ABSOLUTE PROHIBITION**: You are STRICTLY FORBIDDEN from creating widgets with static, hardcoded, or mock data. This is a HARD REQUIREMENT that cannot be bypassed.
+
+## ❌ PROHIBITED (Will cause lint errors):
+```python
+# NEVER DO THIS:
+config = {"data": [1, 2, 3]}  # ❌ STATIC DATA
+config = {"values": [10, 20, 30]}  # ❌ HARDCODED VALUES
+config = {"chart_data": {"x": ["Jan", "Feb"], "y": [100, 200]}}  # ❌ JSON DATA
+mock_data = [{"id": 1, "value": 42}]  # ❌ MOCK DATA
+sample_data = [{"name": "Example", "value": 100}]  # ❌ SAMPLE DATA
+```
+
+## ✅ REQUIRED (Always do this):
+```python
+# ALWAYS USE REAL DATA SOURCES:
+from app.widget_tools import WidgetTools
+from app.data_source_service import DataSourceService
+
+# Connect to real database
+WidgetTools.create_metric_from_query(
+    name="Live Metric",
+    query="SELECT COUNT(*) FROM real_table"  # ✅ REAL QUERY
+)
+
+# Use data_source configuration
+data_source = {
+    "type": "query",  # ✅ REAL DATA SOURCE
+    "query": "SELECT * FROM actual_data",
+    "refresh_interval": 60
+}
+```
+
+## Enforcement Rules
+The following lint rules will FAIL your code if violated:
+1. `prohibit-json-widgets` - Blocks static JSON in widgets
+2. `require-data-source` - Enforces data_source field
+3. `prohibit-static-metrics` - Blocks hardcoded values
+4. `prohibit-mock-data` - Blocks mock/dummy data
+5. `use-widget-tools` - Enforces WidgetTools usage
+
+## MANDATORY Widget Creation Workflow
+
+### Step 1: Import Required Tools
+```python
+from app.widget_tools import WidgetTools
+from app.data_source_service import DataSourceService
+```
+
+### Step 2: Discover Available Data
+```python
+# Check what tables exist in the database
+tables = DataSourceService.get_available_tables()
+print(f"Found {len(tables)} tables: {[t['name'] for t in tables]}")
+```
+
+### Step 3: Create Widgets with Real Queries
+```python
+# Metric from query
+WidgetTools.create_metric_from_query(
+    name="Active Users",
+    query="SELECT COUNT(DISTINCT user_id) FROM sessions WHERE active = true",
+    icon="people"
+)
+
+# Chart from table
+WidgetTools.create_chart_from_table(
+    name="Sales Trend",
+    table="daily_sales_revenue",
+    x_column="sale_date",
+    y_column="total_revenue",
+    chart_type="line"
+)
+
+# Table from query
+WidgetTools.create_table_from_query(
+    name="Recent Orders",
+    query="SELECT * FROM orders ORDER BY created_at DESC LIMIT 20"
+)
+```
+
+## Data Source Types (Every widget MUST have one)
+
+### 1. Query Type (Custom SQL)
+```python
+data_source = {
+    "type": "query",
+    "query": "SELECT metric_value FROM metrics WHERE date >= NOW() - INTERVAL '7 days'",
+    "refresh_interval": 60
+}
+```
+
+### 2. Table Type (Direct table access)
+```python
+data_source = {
+    "type": "table",
+    "table": "sales_data",
+    "columns": ["date", "amount"],
+    "limit": 100,
+    "order_by": "date DESC"
+}
+```
+
+### 3. Aggregation Type (Grouped data)
+```python
+data_source = {
+    "type": "aggregation",
+    "table": "transactions",
+    "aggregation": "sum",
+    "group_by": "category",
+    "value_column": "amount"
+}
+```
+
+## Available Databricks Models (USE THESE for BI dashboards!)
+
+```python
+from app.models import (
+    SalesKPIs,
+    DailySalesRevenue,
+    ProductPerformance,
+    FranchisePerformance,
+    CustomerSpendingAnalysis,
+    PaymentMethodAnalysis,
+    GeographicSales,
+    HourlySalesPattern
+)
+
+# Example: Fetch real KPI data
+kpis = SalesKPIs.fetch(days=30)
+revenue = DailySalesRevenue.fetch(days=30)
+products = ProductPerformance.fetch(days=30, limit=10)
+
+# Use the fetched data in widgets
+if kpis:
+    kpi = kpis[0]
+    WidgetTools.create_metric_from_query(
+        name="Total Revenue",
+        query=f"SELECT {kpi.total_revenue} as value",
+        icon="attach_money"
+    )
+```
+
+## Complete Dashboard Example (COPY THIS PATTERN)
+
+```python
+from app.widget_tools import WidgetTools
+from app.widget_service import WidgetService
+from app.data_source_service import DataSourceService
+from app.models import SalesKPIs, ProductPerformance
+
+def create_data_driven_dashboard():
+    '''Generate a complete dashboard with REAL data'''
+    
+    # Clear old widgets
+    widgets = WidgetService.get_widgets_for_page("dashboard")
+    for w in widgets:
+        if w.id:
+            WidgetService.delete_widget(w.id)
+    
+    # Create KPI metrics from Databricks
+    kpis = SalesKPIs.fetch(days=30)
+    if kpis:
+        kpi = kpis[0]
+        WidgetTools.create_metric_from_query(
+            name="Total Revenue",
+            query=f"SELECT {kpi.total_revenue} as value",
+            icon="attach_money"
+        )
+        WidgetTools.create_metric_from_query(
+            name="Total Transactions",
+            query=f"SELECT {kpi.total_transactions} as value",
+            icon="shopping_cart"
+        )
+    
+    # Create product performance chart
+    WidgetTools.create_chart_from_table(
+        name="Top Products",
+        table="product_performance",
+        x_column="product",
+        y_column="total_revenue",
+        chart_type="bar"
+    )
+    
+    # Create table from real query
+    WidgetTools.create_table_from_query(
+        name="Recent Sales",
+        query="SELECT * FROM daily_sales_revenue ORDER BY sale_date DESC LIMIT 20"
+    )
+    
+    # Auto-generate widgets for all tables
+    tables = DataSourceService.get_available_tables()
+    for table in tables:
+        if table["name"] not in ["widget", "widgettemplate", "userwidgetpreset"]:
+            WidgetTools.create_widgets_for_table(table["name"])
+
+# Run this to create dashboard
+create_data_driven_dashboard()
+```
+
+## Final Checklist - VERIFY BEFORE SUBMITTING
+
+- [ ] NO static data arrays in configs
+- [ ] NO hardcoded values in widgets  
+- [ ] ALL widgets have data_source field
+- [ ] Using WidgetTools helper functions
+- [ ] Connecting to real database tables
+- [ ] Using Databricks models for BI data
+- [ ] Queries are actual SQL, not placeholders
+- [ ] No mock_data, sample_data, or test_data variables
+
+**Remember**: Static data = Failed code review. Always use real data sources!
+"""
+
 WIDGET_SYSTEM_RULES = """
 # Dynamic Widget System
 
@@ -1303,6 +1519,8 @@ Don't be chatty, keep on solving the problem, not describing what you are doing.
 {get_tool_usage_rules(use_databricks)}
 
 {NICEGUI_UI_GUIDELINES}
+
+{WIDGET_DATA_SOURCE_RULES}
 
 {WIDGET_SYSTEM_RULES}
 

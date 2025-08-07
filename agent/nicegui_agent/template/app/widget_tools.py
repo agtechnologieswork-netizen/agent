@@ -55,7 +55,7 @@ class WidgetTools:
     def create_metric_from_query(
         name: str,
         query: str,
-        title: str = None,
+        title: Optional[str] = None,
         icon: str = "trending_up",
         page: str = "dashboard",
         size: WidgetSize = WidgetSize.SMALL
@@ -94,7 +94,7 @@ class WidgetTools:
         x_column: str,
         y_column: str,
         chart_type: str = "line",
-        title: str = None,
+        title: Optional[str] = None,
         page: str = "dashboard",
         size: WidgetSize = WidgetSize.MEDIUM,
         limit: int = 100
@@ -137,10 +137,10 @@ class WidgetTools:
     def create_table_from_query(
         name: str,
         query: str,
-        title: str = None,
+        title: Optional[str] = None,
         page: str = "dashboard",
         size: WidgetSize = WidgetSize.LARGE,
-        columns: List[Dict[str, str]] = None
+        columns: Optional[List[Dict[str, str]]] = None
     ) -> Widget:
         """
         Create a table widget from a SQL query.
