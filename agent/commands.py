@@ -176,7 +176,7 @@ def _run_edit_mode(prompt, input_folder, template_id, use_databricks):
     anyio.run(run_edit)
 
 
-def _generate(prompt=None, template_id=None, with_edit=True, use_databricks=False, edit_mode=False, input_folder=None, monitor=False):
+def _generate(prompt=None, template_id=None, with_edit=True, use_databricks=False, edit_mode=False, input_folder=None, monitor=False, fast=False):
     from tests.test_e2e import DEFAULT_APP_REQUEST
     coloredlogs.install(level="INFO")
     
@@ -206,6 +206,9 @@ def _generate(prompt=None, template_id=None, with_edit=True, use_databricks=Fals
             anyio.run(run_e2e_with_monitoring, prompt, True, with_edit, template_id, use_databricks)
     else:
         from tests.test_e2e import run_e2e
+        # When fast mode is enabled, pass a settings override via environment
+        if fast:
+            os.environ["AGENT_FAST_MODE"] = "1"
         anyio.run(run_e2e, prompt, True, with_edit, template_id, use_databricks)
 
 

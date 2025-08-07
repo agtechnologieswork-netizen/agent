@@ -1,4 +1,5 @@
 import logging
+import os
 from abc import ABC
 from typing import Dict, Any, Optional, TypedDict, List, Union, Type
 from datetime import datetime
@@ -133,7 +134,13 @@ class BaseAgentSession(AgentInterface, ABC):
                     app_name=metadata["app_name"],
                 )
 
-            fsm_settings = {**self.settings, 'event_callback': emit_intermediate_message}
+            # Merge request.settings into session settings; inject fast mode from env
+            merged_settings = {**self.settings}
+            if request.settings:
+                merged_settings.update(request.settings)
+            if os.environ.get("AGENT_FAST_MODE", "0") == "1":
+                merged_settings["fast"] = True
+            fsm_settings = {**merged_settings, 'event_callback': emit_intermediate_message}
 
             if request.agent_state:
                 logger.info(f"Continuing with existing state for trace {self.trace_id}")
