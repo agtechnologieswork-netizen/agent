@@ -9,11 +9,95 @@ from logging import getLogger
 from typing import Dict, List, Any, Optional
 
 from app.dbrx import execute_databricks_query
+import os
 
 logger = getLogger(__name__)
 
 
 class BIDashboardService:
+    @staticmethod
+    def _table_and_columns() -> Dict[str, str]:
+        """Resolve table and column names from env; fall back to discovery later (TODO)."""
+        return {
+            "table": os.getenv("SALES_TABLE_FULL_NAME", "`catalog`.`schema`.`sales_table`"),
+            "date": os.getenv("SALES_DATE_COLUMN", "sale_date"),
+            "datetime": os.getenv("SALES_DATETIME_COLUMN", "sale_datetime"),
+            "amount": os.getenv("SALES_AMOUNT_COLUMN", "total_amount"),
+            "product": os.getenv("SALES_PRODUCT_COLUMN", "product_name"),
+            "customer": os.getenv("SALES_CUSTOMER_ID_COLUMN", "customer_id"),
+            "franchise": os.getenv("SALES_FRANCHISE_ID_COLUMN", "franchise_id"),
+            "payment": os.getenv("SALES_PAYMENT_METHOD_COLUMN", "payment_method"),
+        }
+
+    # --- Generic SQL builders for widgets (return SQL strings) ---
+    @staticmethod
+    def kpi_total_revenue_sql(days: int = 30) -> str:
+        cfg = BIDashboardService._table_and_columns()
+        return (
+            "SELECT COALESCE(SUM({amount}), 0) AS value FROM {table} "
+            "WHERE {date} >= current_date() - INTERVAL {days} DAYS"
+        ).format(days=days, **cfg)
+
+    @staticmethod
+    def kpi_total_orders_sql(days: int = 30) -> str:
+        cfg = BIDashboardService._table_and_columns()
+        return (
+            "SELECT COUNT(*) AS value FROM {table} "
+            "WHERE {date} >= current_date() - INTERVAL {days} DAYS"
+        ).format(days=days, **cfg)
+
+    @staticmethod
+    def kpi_avg_order_value_sql(days: int = 30) -> str:
+        cfg = BIDashboardService._table_and_columns()
+        return (
+            "SELECT COALESCE(AVG({amount}), 0) AS value FROM {table} "
+            "WHERE {date} >= current_date() - INTERVAL {days} DAYS"
+        ).format(days=days, **cfg)
+
+    @staticmethod
+    def kpi_unique_customers_sql(days: int = 30) -> str:
+        cfg = BIDashboardService._table_and_columns()
+        return (
+            "SELECT COUNT(DISTINCT {customer}) AS value FROM {table} "
+            "WHERE {date} >= current_date() - INTERVAL {days} DAYS"
+        ).format(days=days, **cfg)
+
+    @staticmethod
+    def revenue_trend_sql(days: int = 30, limit: int = 1000) -> str:
+        cfg = BIDashboardService._table_and_columns()
+        return (
+            "SELECT CAST({date} AS DATE) AS day, SUM({amount}) AS value FROM {table} "
+            "WHERE {date} >= current_date() - INTERVAL {days} DAYS "
+            "GROUP BY day ORDER BY day LIMIT {limit}"
+        ).format(days=days, limit=limit, **cfg)
+
+    @staticmethod
+    def top_products_sql(days: int = 30, limit: int = 10) -> str:
+        cfg = BIDashboardService._table_and_columns()
+        return (
+            "SELECT {product} AS label, SUM({amount}) AS value FROM {table} "
+            "WHERE {date} >= current_date() - INTERVAL {days} DAYS "
+            "GROUP BY {product} ORDER BY value DESC LIMIT {limit}"
+        ).format(days=days, limit=limit, **cfg)
+
+    @staticmethod
+    def top_locations_sql(days: int = 30, limit: int = 10) -> str:
+        # Example using city as location if present; caller may modify
+        cfg = BIDashboardService._table_and_columns()
+        return (
+            "SELECT city AS label, SUM({amount}) AS value FROM {table} "
+            "WHERE {date} >= current_date() - INTERVAL {days} DAYS "
+            "GROUP BY city ORDER BY value DESC LIMIT {limit}"
+        ).format(days=days, limit=limit, **cfg)
+
+    @staticmethod
+    def recent_transactions_sql(limit: int = 50) -> str:
+        cfg = BIDashboardService._table_and_columns()
+        # Prefer datetime if available, otherwise date
+        order_col = cfg.get("datetime") or cfg.get("date")
+        return (
+            "SELECT * FROM {table} ORDER BY {order_col} DESC LIMIT {limit}"
+        ).format(order_col=order_col, limit=limit, **cfg)
     """Service class for fetching and processing BI analytics data (query-first)"""
 
     @staticmethod
@@ -36,33 +120,34 @@ class BIDashboardService:
         NOTE: Replace `catalog.schema.sales_table` with your real table.
         """
         try:
+            cfg = BIDashboardService._table_and_columns()
             revenue_row = execute_databricks_query(
                 """
-                SELECT COALESCE(SUM(total_amount), 0) AS total_revenue
-                FROM `catalog`.`schema`.`sales_table`
-                WHERE sale_date >= current_date() - INTERVAL {days} DAYS
-                """.format(days=days)
+                SELECT COALESCE(SUM({amount}), 0) AS total_revenue
+                FROM {table}
+                WHERE {date} >= current_date() - INTERVAL {days} DAYS
+                """.format(days=days, **cfg)
             )
             transactions_row = execute_databricks_query(
                 """
                 SELECT COUNT(*) AS total_transactions
-                FROM `catalog`.`schema`.`sales_table`
-                WHERE sale_date >= current_date() - INTERVAL {days} DAYS
-                """.format(days=days)
+                FROM {table}
+                WHERE {date} >= current_date() - INTERVAL {days} DAYS
+                """.format(days=days, **cfg)
             )
             customers_row = execute_databricks_query(
                 """
-                SELECT COUNT(DISTINCT customer_id) AS unique_customers
-                FROM `catalog`.`schema`.`sales_table`
-                WHERE sale_date >= current_date() - INTERVAL {days} DAYS
-                """.format(days=days)
+                SELECT COUNT(DISTINCT {customer}) AS unique_customers
+                FROM {table}
+                WHERE {date} >= current_date() - INTERVAL {days} DAYS
+                """.format(days=days, **cfg)
             )
             avg_order_row = execute_databricks_query(
                 """
-                SELECT COALESCE(AVG(total_amount), 0) AS avg_transaction_value
-                FROM `catalog`.`schema`.`sales_table`
-                WHERE sale_date >= current_date() - INTERVAL {days} DAYS
-                """.format(days=days)
+                SELECT COALESCE(AVG({amount}), 0) AS avg_transaction_value
+                FROM {table}
+                WHERE {date} >= current_date() - INTERVAL {days} DAYS
+                """.format(days=days, **cfg)
             )
 
             def get_val(rows: List[Dict[str, Any]], key: str) -> float:
@@ -87,15 +172,16 @@ class BIDashboardService:
     def get_daily_revenue_trend(days: int = 30) -> List[Dict[str, Any]]:
         """Get daily revenue trend data for charts"""
         try:
+            cfg = BIDashboardService._table_and_columns()
             rows = execute_databricks_query(
                 """
-                SELECT CAST(sale_date AS DATE) AS day, SUM(total_amount) AS total_revenue
-                FROM `catalog`.`schema`.`sales_table`
-                WHERE sale_date >= current_date() - INTERVAL {days} DAYS
+                SELECT CAST({date} AS DATE) AS day, SUM({amount}) AS total_revenue
+                FROM {table}
+                WHERE {date} >= current_date() - INTERVAL {days} DAYS
                 GROUP BY day
                 ORDER BY day
                 LIMIT 1000
-                """.format(days=days)
+                """.format(days=days, **cfg)
             )
             return [{"date": r.get("day"), "value": r.get("total_revenue", 0), "label": f"${r.get('total_revenue', 0):,.2f}"} for r in rows]
         except Exception as e:
@@ -106,19 +192,20 @@ class BIDashboardService:
     def get_product_performance_data(days: int = 30, limit: int = 10) -> Dict[str, Any]:
         """Get top performing products with sales data"""
         try:
+            cfg = BIDashboardService._table_and_columns()
             products = execute_databricks_query(
                 """
-                SELECT product_name AS product,
-                       SUM(total_amount) AS total_revenue,
+                SELECT {product} AS product,
+                       SUM({amount}) AS total_revenue,
                        SUM(quantity) AS total_quantity,
                        COALESCE(AVG(unit_price), 0) AS avg_unit_price,
-                       100.0 * SUM(total_amount) / NULLIF(SUM(SUM(total_amount)) OVER (), 0) AS revenue_percentage
-                FROM `catalog`.`schema`.`sales_table`
-                WHERE sale_date >= current_date() - INTERVAL {days} DAYS
-                GROUP BY product_name
+                       100.0 * SUM({amount}) / NULLIF(SUM(SUM({amount})) OVER (), 0) AS revenue_percentage
+                FROM {table}
+                WHERE {date} >= current_date() - INTERVAL {days} DAYS
+                GROUP BY {product}
                 ORDER BY total_revenue DESC
                 LIMIT {limit}
-                """.format(days=days, limit=limit)
+                """.format(days=days, limit=limit, **cfg)
             )
             return {
                 "columns": [
@@ -147,21 +234,22 @@ class BIDashboardService:
     def get_franchise_performance_data(days: int = 30, limit: int = 15) -> Dict[str, Any]:
         """Get franchise performance metrics"""
         try:
+            cfg = BIDashboardService._table_and_columns()
             franchises = execute_databricks_query(
                 """
                 SELECT franchise_name,
                        city,
                        country,
-                       SUM(total_amount) AS total_revenue,
+                       SUM({amount}) AS total_revenue,
                        COUNT(*) AS transaction_count,
-                       COALESCE(AVG(total_amount), 0) AS avg_transaction_value,
+                       COALESCE(AVG({amount}), 0) AS avg_transaction_value,
                        COUNT(DISTINCT franchise_id) AS size
-                FROM `catalog`.`schema`.`sales_table`
-                WHERE sale_date >= current_date() - INTERVAL {days} DAYS
+                FROM {table}
+                WHERE {date} >= current_date() - INTERVAL {days} DAYS
                 GROUP BY franchise_name, city, country
                 ORDER BY total_revenue DESC
                 LIMIT {limit}
-                """.format(days=days, limit=limit)
+                """.format(days=days, limit=limit, **cfg)
             )
             return {
                 "columns": [
@@ -192,15 +280,16 @@ class BIDashboardService:
     def get_customer_segments_data(days: int = 30) -> Dict[str, Any]:
         """Get customer segmentation analysis"""
         try:
+            cfg = BIDashboardService._table_and_columns()
             customers = execute_databricks_query(
                 """
                 SELECT customer_segment,
-                       SUM(total_amount) AS total_spent,
+                       SUM({amount}) AS total_spent,
                        COUNT(*) AS transaction_count
-                FROM `catalog`.`schema`.`sales_table`
-                WHERE sale_date >= current_date() - INTERVAL {days} DAYS
+                FROM {table}
+                WHERE {date} >= current_date() - INTERVAL {days} DAYS
                 GROUP BY customer_segment
-                """.format(days=days)
+                """.format(days=days, **cfg)
             )
 
             segments: Dict[str, Dict[str, float]] = {}
@@ -232,19 +321,20 @@ class BIDashboardService:
     def get_payment_methods_data(days: int = 30) -> Dict[str, Any]:
         """Get payment method preferences and performance"""
         try:
+            cfg = BIDashboardService._table_and_columns()
             payment_methods = execute_databricks_query(
                 """
-                SELECT payment_method,
+                SELECT {payment} AS payment_method,
                        COUNT(*) AS transaction_count,
                        100.0 * COUNT(*) / NULLIF(COUNT(*) OVER (), 0) AS percentage_of_transactions,
-                       SUM(total_amount) AS total_revenue,
-                       COALESCE(AVG(total_amount), 0) AS avg_transaction_value
-                FROM `catalog`.`schema`.`sales_table`
-                WHERE sale_date >= current_date() - INTERVAL {days} DAYS
-                GROUP BY payment_method
+                       SUM({amount}) AS total_revenue,
+                       COALESCE(AVG({amount}), 0) AS avg_transaction_value
+                FROM {table}
+                WHERE {date} >= current_date() - INTERVAL {days} DAYS
+                GROUP BY {payment}
                 ORDER BY transaction_count DESC
                 LIMIT 10
-                """.format(days=days)
+                """.format(days=days, **cfg)
             )
             return {
                 "chart_data": {
@@ -283,20 +373,21 @@ class BIDashboardService:
     def get_geographic_performance(days: int = 30) -> Dict[str, Any]:
         """Get geographic sales performance by country"""
         try:
+            cfg = BIDashboardService._table_and_columns()
             geo_data = execute_databricks_query(
                 """
                 SELECT country,
-                       SUM(total_amount) AS total_revenue,
+                       SUM({amount}) AS total_revenue,
                        COUNT(*) AS transaction_count,
                        COUNT(DISTINCT customer_id) AS unique_customers,
                        COUNT(DISTINCT franchise_id) AS unique_franchises,
-                       COALESCE(AVG(total_amount), 0) AS avg_transaction_value
-                FROM `catalog`.`schema`.`sales_table`
-                WHERE sale_date >= current_date() - INTERVAL {days} DAYS
+                       COALESCE(AVG({amount}), 0) AS avg_transaction_value
+                FROM {table}
+                WHERE {date} >= current_date() - INTERVAL {days} DAYS
                 GROUP BY country
                 ORDER BY total_revenue DESC
                 LIMIT 20
-                """.format(days=days)
+                """.format(days=days, **cfg)
             )
             return {
                 "chart_data": {
@@ -337,16 +428,17 @@ class BIDashboardService:
     def get_hourly_sales_pattern(days: int = 30) -> Dict[str, Any]:
         """Get hourly sales patterns for operational insights"""
         try:
+            cfg = BIDashboardService._table_and_columns()
             hourly_data = execute_databricks_query(
                 """
-                SELECT EXTRACT(HOUR FROM sale_datetime) AS hour_of_day,
+                SELECT EXTRACT(HOUR FROM {datetime}) AS hour_of_day,
                        COUNT(*) AS transaction_count,
-                       SUM(total_amount) AS total_revenue
-                FROM `catalog`.`schema`.`sales_table`
-                WHERE sale_datetime >= current_timestamp() - INTERVAL {days} DAYS
+                       SUM({amount}) AS total_revenue
+                FROM {table}
+                WHERE {datetime} >= current_timestamp() - INTERVAL {days} DAYS
                 GROUP BY hour_of_day
                 ORDER BY hour_of_day
-                """.format(days=days)
+                """.format(days=days, **cfg)
             )
 
             return {
