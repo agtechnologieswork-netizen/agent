@@ -12,7 +12,6 @@ import plotly.express as px
 from datetime import datetime
 
 from app.bi_dashboard_service import BIDashboardService
-from app.models import KPIMetric
 
 logger = getLogger(__name__)
 
@@ -120,9 +119,9 @@ class BIDashboardUI:
         welcome = self.service.get_welcome_message()
 
         with ui.card().classes("welcome-banner w-full"):
-            ui.label(f"{welcome.emoji} {welcome.title}").classes("text-3xl font-bold mb-2")
-            ui.label(welcome.subtitle).classes("text-lg opacity-90 mb-2")
-            ui.label(welcome.description).classes("text-base opacity-80")
+            ui.label(f"{welcome.get('emoji', '')} {welcome.get('title', '')}").classes("text-3xl font-bold mb-2")
+            ui.label(welcome.get("subtitle", "")).classes("text-lg opacity-90 mb-2")
+            ui.label(welcome.get("description", "")).classes("text-base opacity-80")
 
     def _render_controls_with_widget_options(self):
         """Render dashboard controls with widget management options"""
@@ -267,28 +266,32 @@ class BIDashboardUI:
             logger.error(f"Error rendering KPI metrics: {e}")
             ui.notify(f"Error loading KPI metrics: {str(e)}", type="negative")
 
-    def _render_kpi_card(self, metric: KPIMetric):
+    def _render_kpi_card(self, metric: dict):
         """Render individual KPI metric card"""
         with ui.card().classes("kpi-card flex-1 min-w-48"):
             with ui.row().classes("items-center justify-between w-full"):
-                ui.label(metric.emoji).classes("text-3xl")
-                if metric.change_percent is not None:
-                    trend_class = f"metric-trend-{metric.trend}"
-                    trend_icon = "↗️" if metric.trend == "up" else "↘️" if metric.trend == "down" else "➡️"
-                    ui.label(f"{trend_icon} {metric.change_percent:+.1f}%").classes(f"text-sm {trend_class}")
+                ui.label(metric.get("emoji", "")).classes("text-3xl")
+                change_percent = metric.get("change_percent")
+                if change_percent is not None:
+                    trend = metric.get("trend", "neutral")
+                    trend_class = f"metric-trend-{trend}"
+                    trend_icon = "↗️" if trend == "up" else "↘️" if trend == "down" else "➡️"
+                    ui.label(f"{trend_icon} {change_percent:+.1f}%").classes(f"text-sm {trend_class}")
 
-            ui.label(metric.name).classes("text-sm opacity-80 mt-2")
+            ui.label(metric.get("name", "")).classes("text-sm opacity-80 mt-2")
 
             # Format value based on type
-            if isinstance(metric.value, float):
-                if metric.unit == "$":
-                    value_text = f"${metric.value:,.2f}"
+            value = metric.get("value", 0)
+            unit = metric.get("unit", "")
+            if isinstance(value, float):
+                if unit == "$":
+                    value_text = f"${value:,.2f}"
                 else:
-                    value_text = f"{metric.value:,.1f}"
+                    value_text = f"{value:,.1f}"
             else:
-                value_text = f"{metric.value:,}"
+                value_text = f"{value:,}"
 
-            ui.label(f"{value_text}{metric.unit if metric.unit != '$' else ''}").classes("text-2xl font-bold mt-1")
+            ui.label(f"{value_text}{unit if unit != '$' else ''}").classes("text-2xl font-bold mt-1")
 
     def _render_revenue_trend(self):
         """Render daily revenue trend chart"""
@@ -302,8 +305,8 @@ class BIDashboardUI:
                     fig = go.Figure()
                     fig.add_trace(
                         go.Scatter(
-                            x=[point.date for point in revenue_data],
-                            y=[point.value for point in revenue_data],
+                            x=[point.get("date") for point in revenue_data],
+                            y=[point.get("value", 0) for point in revenue_data],
                             mode="lines+markers",
                             name="Revenue",
                             line=dict(color="#2563eb", width=3),

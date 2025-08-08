@@ -1,7 +1,7 @@
 """UI for managing widgets"""
 
 import logging
-from typing import Optional
+from typing import Optional, Any, Dict
 from nicegui import ui
 from app.widget_service import WidgetService
 from app.widget_renderer import WidgetGrid
@@ -132,8 +132,8 @@ class WidgetManager:
             # Dynamic data source configuration
             data_config_container = ui.column().classes("w-full mt-2")
             
-            # Store query input reference
-            query_input_ref = {"element": None}
+            # Store query input reference with broad typing to satisfy type checker
+            query_input_ref: Dict[str, Any] = {"element": None}
 
             def update_data_config():
                 data_config_container.clear()

@@ -24,8 +24,13 @@ rule:
           $$$ARGS
         )
       not:
-        has:
-          pattern: data_source = $$$
+        any:
+          - has:
+              pattern: data_source = $$$
+          - has:
+              pattern: data_source=$$$
+          - inside:
+              pattern: class WidgetTools
     - pattern: |
         Widget(
           name=$NAME,

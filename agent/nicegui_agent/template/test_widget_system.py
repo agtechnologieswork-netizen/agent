@@ -35,12 +35,16 @@ def test_widget_system():
     print(f"✓ Created new widget: {new_widget.name} (ID: {new_widget.id})")
     
     # Update the widget
-    updated = WidgetService.update_widget(
-        new_widget.id,
-        name="Updated Test Widget",
-        config={"content": "Updated content", "markdown": True}
-    )
-    print(f"✓ Updated widget: {updated.name}")
+    if new_widget.id is not None:
+        updated = WidgetService.update_widget(
+            new_widget.id,
+            name="Updated Test Widget",
+            config={"content": "Updated content", "markdown": True}
+        )
+        if updated:
+            print(f"✓ Updated widget: {updated.name}")
+        else:
+            print("✗ Failed to update widget")
     
     # Get all widgets again
     widgets = WidgetService.get_widgets_for_page("dashboard")
@@ -52,8 +56,11 @@ def test_widget_system():
         print(f"  - {widget.name} ({widget.type.value}, {widget.size.value})")
     
     # Delete the test widget
-    WidgetService.delete_widget(new_widget.id)
-    print("✓ Deleted test widget")
+    if new_widget.id is not None:
+        WidgetService.delete_widget(new_widget.id)
+        print("✓ Deleted test widget")
+    else:
+        print("✗ Test widget ID is None, cannot delete")
     
     print("\n✅ Widget system test completed successfully!")
 

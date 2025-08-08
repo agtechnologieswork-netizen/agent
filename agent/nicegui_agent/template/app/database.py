@@ -2,7 +2,7 @@ import os
 from sqlmodel import SQLModel, create_engine, Session
 
 # Import all models to ensure they're registered. ToDo: replace with specific imports when possible.
-from app.models import *  # noqa: F401, F403
+from app.models import ExampleModel  # noqa: F401
 from app.widget_models import Widget, WidgetTemplate, UserWidgetPreset  # noqa: F401
 
 DATABASE_URL = os.environ.get("APP_DATABASE_URL", "postgresql://postgres:postgres@postgres:5432/postgres")

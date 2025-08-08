@@ -16,13 +16,15 @@ _CACHE: "OrderedDict[str, tuple[float, List[Dict[str, Any]]]]" = OrderedDict()
 def _cache_ttl_seconds() -> int:
     try:
         return max(0, int(os.getenv("DATABRICKS_CACHE_TTL_SECONDS", "30")))
-    except Exception:
+    except Exception as e:
+        logger.warning("Invalid DATABRICKS_CACHE_TTL_SECONDS; using default. Error: %s", e)
         return 30
 
 def _cache_max_entries() -> int:
     try:
         return max(1, int(os.getenv("DATABRICKS_CACHE_MAX_ENTRIES", "128")))
-    except Exception:
+    except Exception as e:
+        logger.warning("Invalid DATABRICKS_CACHE_MAX_ENTRIES; using default. Error: %s", e)
         return 128
 
 def _normalize_query(query: str) -> str:
@@ -53,8 +55,8 @@ def execute_databricks_query(query: str) -> List[Dict[str, Any]]:
             # Expired
             try:
                 _CACHE.pop(qkey, None)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("Failed to pop expired cache key: %s", e)
 
     try:
         client = WorkspaceClient()
@@ -107,8 +109,8 @@ def execute_databricks_query(query: str) -> List[Dict[str, Any]]:
                 # Evict if beyond capacity
                 while len(_CACHE) > _cache_max_entries():
                     _CACHE.popitem(last=False)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("Failed to update cache: %s", e)
         return result
 
     return []

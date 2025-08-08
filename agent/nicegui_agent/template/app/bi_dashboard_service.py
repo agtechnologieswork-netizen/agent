@@ -476,18 +476,24 @@ class BIDashboardService:
             prev_customers = float(total_kpi.get("unique_customers", 0)) - float(current_kpi.get("unique_customers", 0))
             prev_avg_transaction = prev_revenue / prev_transactions if prev_transactions > 0 else 0
 
+            # Get current values from dict
+            curr_revenue = float(current_kpi.get("total_revenue", 0))
+            curr_transactions = float(current_kpi.get("total_transactions", 0))
+            curr_customers = float(current_kpi.get("unique_customers", 0))
+            curr_avg_transaction = float(current_kpi.get("avg_transaction_value", 0))
+
             return {
                 "revenue_growth": BIDashboardService._calculate_percentage_change(
-                    prev_revenue, current_kpi.total_revenue
+                    prev_revenue, curr_revenue
                 ),
                 "transactions_growth": BIDashboardService._calculate_percentage_change(
-                    prev_transactions, current_kpi.total_transactions
+                    prev_transactions, curr_transactions
                 ),
                 "customers_growth": BIDashboardService._calculate_percentage_change(
-                    prev_customers, current_kpi.unique_customers
+                    prev_customers, curr_customers
                 ),
                 "avg_transaction_growth": BIDashboardService._calculate_percentage_change(
-                    prev_avg_transaction, current_kpi.avg_transaction_value
+                    prev_avg_transaction, curr_avg_transaction
                 ),
             }
         except Exception as e:
