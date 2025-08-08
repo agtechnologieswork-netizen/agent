@@ -26,7 +26,7 @@ class WidgetGenerator:
         data_source: Optional[Dict] = None
     ) -> None:
         """Create a metric/KPI widget with data source"""
-        config = {
+        config: Dict[str, Any] = {
             "title": title,
             "icon": icon,
         }
@@ -56,7 +56,7 @@ class WidgetGenerator:
         data_source: Optional[Dict] = None
     ) -> None:
         """Create a chart widget with data source"""
-        config = {
+        config: Dict[str, Any] = {
             "title": title,
             "chart_type": chart_type,
             "show_legend": True,
@@ -96,7 +96,7 @@ class WidgetGenerator:
         data_source: Optional[Dict] = None
     ) -> None:
         """Create a table widget with data source"""
-        config = {
+        config: Dict[str, Any] = {
             "title": title,
         }
         

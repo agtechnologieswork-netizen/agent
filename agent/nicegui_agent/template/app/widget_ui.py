@@ -251,11 +251,11 @@ class WidgetManager:
             ui.notify("Please enter a widget name", type="warning")
             return
 
-        if not widget_type:
+        if widget_type is None:
             ui.notify("Please select a widget type", type="warning")
             return
 
-        if not size:
+        if size is None:
             size = WidgetSize.MEDIUM  # Default size
 
         # Create widget with basic config
@@ -285,15 +285,15 @@ class WidgetManager:
             # Databricks SQL path
             data_source_config = {
                 "type": "databricks_query",
-                "query": query_text or "SELECT 1 AS value",
+                "query": (query_text or "SELECT 1 AS value"),
                 "refresh_interval": 60,
             }
         elif data_source:
             data_source_config = {
                 "type": "table",
                 "table": data_source,
-                "columns": data_config.get("columns", []) if data_config else [],
-                "limit": data_config.get("limit", 100) if data_config else 100,
+                "columns": (data_config.get("columns", []) if isinstance(data_config, dict) else []),
+                "limit": (data_config.get("limit", 100) if isinstance(data_config, dict) else 100),
             }
         else:
             # No data source selected - this should not happen with new UI

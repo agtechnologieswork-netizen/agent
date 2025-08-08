@@ -1,0 +1,6 @@
+id: avoid-ui-element-in-config
+language: python
+message: "Do not assign NiceGUI UI elements into config/dict; store values (e.g., .value) not elements."
+severity: error
+rule:
+  pattern-regex: "\w+\[[\"\']\w+[\"\']\]\s*=\s*ui\.(input|textarea|number|select)\("
