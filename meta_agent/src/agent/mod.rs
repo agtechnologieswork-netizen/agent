@@ -32,6 +32,7 @@ pub struct Command<T> {
     pub cmd: T,
 }
 
+#[derive(Deserialize, Serialize)]
 pub struct Event<T> {
     pub node_seq_num: usize,
     pub event: T,

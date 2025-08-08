@@ -319,7 +319,6 @@ impl super::Pipeline for AgentPipeline {
                     new_cmd = cmd_rx.recv() => {command = new_cmd;},
                 },
             }
-            tokio::time::sleep(std::time::Duration::from_secs(5)).await;
         }
     }
 }
@@ -352,35 +351,6 @@ impl Checker for PythonChecker {
             0 => None,
             _ => Some(serde_json::json!({"stdout": result.stdout, "stderr": result.stderr})),
         })
-    }
-}
-
-pub async fn run<T: Send + 'static>(
-    mut search: impl Search<T, SearchAct = SearchAction>,
-    rollout: impl Rollout<T> + 'static,
-    root: &mut Tree<T>,
-) -> Result<usize> {
-    let mut set = tokio::task::JoinSet::new();
-    loop {
-        match search.select(root).await? {
-            SearchAction::Rollout(node_ids) => {
-                for p_idx in node_ids {
-                    let trajectory = rollout.trajectory(root, p_idx).await?;
-                    let rollout = rollout.clone();
-                    set.spawn(async move {
-                        rollout.rollout(trajectory).await.map(|node| (node, p_idx))
-                    });
-                }
-            }
-            SearchAction::Done(solution_id) => return Ok(solution_id),
-        }
-        match set.join_next().await {
-            Some(result) => {
-                let (node, p_idx) = result??;
-                root.add_node(node, p_idx).and(search.unlock(p_idx))?;
-            }
-            None => eyre::bail!("No rollouts selected"),
-        }
     }
 }
 
