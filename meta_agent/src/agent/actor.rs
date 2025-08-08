@@ -8,9 +8,10 @@ use rig::{
     OneOrMany,
     message::{Message, UserContent},
 };
+use serde::{Deserialize, Serialize};
 use std::{collections::HashSet, sync::Arc};
 
-#[derive(serde::Serialize)]
+#[derive(Deserialize, Serialize, Clone)]
 pub struct Metrics {
     pub output_tokens: u64,
 }
@@ -28,30 +29,19 @@ impl Default for Metrics {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 pub enum NodeKind {
     Step,
     Done,
 }
 
-#[derive(serde::Serialize)]
+#[derive(Serialize, Deserialize)]
 pub struct Node {
     pub kind: NodeKind,
     pub history: Vec<rig::message::Message>,
-    #[serde(skip)]
+    #[serde(skip, default = "crate::workspace::mock::default_mock")]
     pub workspace: Box<dyn WorkspaceDyn>,
     pub metrics: Metrics,
-}
-
-impl Node {
-    pub fn root_prompt(prompt: impl Into<Message>, workspace: impl WorkspaceDyn + 'static) -> Self {
-        Self {
-            kind: NodeKind::Step,
-            history: vec![prompt.into()],
-            workspace: Box::new(workspace),
-            metrics: Default::default(),
-        }
-    }
 }
 
 impl AgentNode for Node {
@@ -84,11 +74,9 @@ pub struct AgentActor {
 }
 
 impl AgentActor {
-    // TODO: parametrize by trajectory type
     pub async fn tools_definitions(&self) -> Result<Vec<rig::completion::ToolDefinition>> {
         let mut definitions = Vec::new();
         for tool in self.tools.iter() {
-            // TODO: Properly pass the prompt to rig tools
             let definition = tool.definition("".to_string()).await;
             definitions.push(definition);
         }
@@ -236,6 +224,120 @@ impl Search<Node> for SearchActor {
         }
         Ok(())
     }
+
+    fn clear(&mut self) {
+        self.locked.clear();
+    }
+}
+
+pub struct AgentPipeline {
+    pub rollout: AgentActor,
+    pub search: SearchActor,
+}
+
+impl AgentPipeline {
+    async fn handle_command(
+        &mut self,
+        cmd: &PipelineCmd,
+        state: &mut Option<Tree<Node>>,
+        event_tx: &tokio::sync::mpsc::Sender<PipelineEvent>,
+    ) -> Result<()> {
+        match cmd {
+            PipelineCmd::Start {
+                prompt,
+                root_workspace,
+            } => {
+                let node = Node {
+                    kind: NodeKind::Step,
+                    history: vec![prompt.into()],
+                    workspace: root_workspace.fork().await?,
+                    metrics: Default::default(),
+                };
+                *state = Some(Tree::new(node));
+                self.search_solution(state.as_mut().unwrap(), event_tx)
+                    .await?;
+            }
+        }
+        Ok(())
+    }
+
+    pub async fn search_solution(
+        &mut self,
+        root: &mut Tree<Node>,
+        event_tx: &tokio::sync::mpsc::Sender<PipelineEvent>,
+    ) -> Result<usize> {
+        let mut set = tokio::task::JoinSet::new();
+        loop {
+            match self.search.select(root).await? {
+                SearchAction::Rollout(node_ids) => {
+                    for p_idx in node_ids {
+                        let trajectory = self.rollout.trajectory(root, p_idx).await?;
+                        let rollout = self.rollout.clone();
+                        set.spawn(async move {
+                            rollout.rollout(trajectory).await.map(|node| (node, p_idx))
+                        });
+                        let _ = event_tx.send(PipelineEvent::Scheduled(p_idx)).await;
+                    }
+                }
+                SearchAction::Done(solution_id) => return Ok(solution_id),
+            }
+            match set.join_next().await {
+                Some(result) => {
+                    let (node, p_idx) = result??;
+                    let node_id = root.add_node(node, p_idx)?;
+                    self.search.unlock(p_idx)?;
+                    let _ = event_tx.send(PipelineEvent::Expanded(node_id, p_idx)).await;
+                }
+                None => eyre::bail!("No rollouts selected"),
+            }
+        }
+    }
+}
+
+impl super::Pipeline for AgentPipeline {
+    type Checkpoint = Option<Tree<Node>>;
+    type Command = PipelineCmd;
+    type Event = PipelineEvent;
+
+    async fn execute(
+        &mut self,
+        mut cmd_rx: tokio::sync::mpsc::Receiver<Self::Command>,
+        event_tx: tokio::sync::mpsc::Sender<Self::Event>,
+    ) -> Result<Self::Checkpoint> {
+        let mut state: Option<Tree<Node>> = None;
+        let mut command: Option<Self::Command> = None;
+        loop {
+            match command {
+                None => command = cmd_rx.recv().await,
+                Some(ref cmd) => tokio::select! {
+                    res = self.handle_command(cmd, &mut state, &event_tx) => {
+                        if let Err(error) = res {
+                            tracing::error!(?error, "command handler");
+                        }
+                        return Ok(state);
+                    },
+                    new_cmd = cmd_rx.recv() => {command = new_cmd;},
+                },
+            }
+            tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+        }
+    }
+}
+
+pub enum PipelineCmd {
+    Start {
+        prompt: String,
+        root_workspace: Box<dyn WorkspaceDyn + 'static>,
+    },
+}
+
+#[derive(Debug)]
+pub enum PipelineEvent {
+    /// Scheduled rollout node parent id
+    Scheduled(usize),
+    /// Scheduled rollout node (node_id, parent_id)
+    Expanded(usize, usize),
+    Finished,
 }
 
 pub struct PythonChecker;
@@ -283,8 +385,10 @@ pub async fn run<T: Send + 'static>(
 }
 
 pub async fn run_demo_agent() -> Result<()> {
+    use super::Pipeline;
     use crate::{agent::toolset, tools_vec};
     use rig::client::ProviderClient;
+    use tokio::sync::mpsc;
 
     let client = rig::providers::anthropic::Client::from_env();
     let preamble = "
@@ -311,15 +415,42 @@ Program will be run using uv run main.py command.
         model,
         preamble,
     };
-
     let dagger_ref = crate::workspace::dagger::DaggerRef::new();
     let workspace = dagger_ref
         .workspace("Dockerfile.appbuild".into(), "./src/stacks/python".into())
         .await?;
     let prompt =
         "Create a simple python script that fetches my public ip using one of the common services.";
-    let mut root = Tree::new(Node::root_prompt(prompt, workspace));
-    run(search, rollout, &mut root).await?;
+    let (cmd_tx, cmd_rx) = mpsc::channel(1);
+    let (event_tx, mut event_rx) = mpsc::channel(1);
+    let mut pipeline = AgentPipeline { rollout, search };
+    let command = PipelineCmd::Start {
+        prompt: prompt.to_string(),
+        root_workspace: Box::new(workspace),
+    };
+
+    tokio::spawn(async move {
+        tracing::info!("started event consumer");
+        while let Some(event) = event_rx.recv().await {
+            tracing::info!(?event, "event received");
+        }
+        tracing::info!("stopped event consumer");
+    });
+
+    tokio::spawn({
+        let cmd_tx = cmd_tx.clone();
+        async move {
+            let _ = cmd_tx.send(command).await;
+        }
+    });
+
+    let result = pipeline.execute(cmd_rx, event_tx).await?;
+
+    if result.is_none() {
+        eyre::bail!("empty state from pipeline execution");
+    }
+
+    let root = result.unwrap();
     tracing::info!("Finished with {} nodes", root.num_nodes());
     let result = serde_json::to_string_pretty(&root)?;
     std::fs::write("trajectory.json", &result)?;

@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::pin::Pin;
 pub mod dagger;
+pub mod mock;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Bash(pub Vec<String>);
@@ -140,7 +141,7 @@ impl<T: Workspace + 'static> WorkspaceDyn for T {
     }
 }
 
-#[derive(serde::Serialize)]
+#[derive(serde::Serialize, serde::Deserialize)]
 pub struct WorkspaceVCR<T: Workspace> {
     #[serde(skip)]
     inner: T,

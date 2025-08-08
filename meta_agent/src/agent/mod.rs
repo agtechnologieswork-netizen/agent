@@ -14,6 +14,7 @@ pub trait Search<T>: Clone + Send {
     type SearchAct;
     fn select(&mut self, root: &Tree<T>) -> impl Future<Output = Result<Self::SearchAct>> + Send;
     fn unlock(&mut self, idx: usize) -> Result<()>;
+    fn clear(&mut self);
 }
 
 pub trait Rollout<T>: Clone + Send {
@@ -36,18 +37,17 @@ pub struct Event<T> {
     pub event: T,
 }
 
-/*pub trait Pipeline {
-    type Checkpoint;
-    type Command;
-    type Event;
+pub trait Pipeline {
+    type Checkpoint: Serialize + for<'a> Deserialize<'a>;
+    type Command: Send + Sync;
+    type Event: Send + Sync;
 
     fn execute(
         &mut self,
         cmd_rx: mpsc::Receiver<Self::Command>,
         event_tx: mpsc::Sender<Self::Event>,
-        checkpoint: Option<Self::Checkpoint>,
     ) -> impl Future<Output = Result<Self::Checkpoint>> + Send + Sync;
-}*/
+}
 
 pub trait Checker: Sized + Send + Sync {
     fn run<'a>(
