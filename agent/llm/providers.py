@@ -77,7 +77,9 @@ def get_backend_for_model(model_name: str) -> str:
 
     backend, _ = model_name.split(":", 1)
     if backend not in PROVIDERS:
-        raise ValueError(f"Unknown backend '{backend}' in model specification '{model_name}'")
+        raise ValueError(
+            f"Unknown backend '{backend}' in model specification '{model_name}'"
+        )
 
     # check if backend has required env vars
     config = PROVIDERS[backend]
@@ -113,7 +115,9 @@ def get_model_mapping(model_name: str, backend: str) -> str:
     if ":" in model_name:
         _, model_part = model_name.split(":", 1)
         # for lmstudio, if model_part is a URL, use a default model name
-        if backend == "lmstudio" and (model_part.startswith("http://") or model_part.startswith("https://")):
+        if backend == "lmstudio" and (
+            model_part.startswith("http://") or model_part.startswith("https://")
+        ):
             return "model"  # lmstudio doesn't care about model name
         return model_part
 

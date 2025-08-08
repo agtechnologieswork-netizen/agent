@@ -11,7 +11,6 @@ from log import get_logger
 logger = get_logger(__name__)
 
 
-
 def create_client(
     backend: str, model_name: str, client_params: Dict[str, Any] | None = None
 ) -> AsyncLLM:
@@ -65,7 +64,11 @@ def create_client(
             if ":" in model_name and model_name.startswith("lmstudio:"):
                 _, host_part = model_name.split(":", 1)
                 # if host_part looks like a URL, use it as base_url
-                if host_part and host_part.startswith("http://") or host_part.startswith("https://"):
+                if (
+                    host_part
+                    and host_part.startswith("http://")
+                    or host_part.startswith("https://")
+                ):
                     base_url = host_part if "/v1" in host_part else f"{host_part}/v1"
                 else:
                     # otherwise use default
@@ -96,7 +99,9 @@ def create_client(
                 )
             base_url = os.getenv("OPENAI_BASE_URL") or client_params.get("base_url")
             if base_url:
-                return client_class(model_name=mapped_model, api_key=api_key, base_url=base_url)
+                return client_class(
+                    model_name=mapped_model, api_key=api_key, base_url=base_url
+                )
             return client_class(model_name=mapped_model, api_key=api_key)
 
         case _:

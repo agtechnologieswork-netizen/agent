@@ -51,17 +51,17 @@ DEFAULT_MODELS = {
 
 def get_model_for_category(category: str) -> str:
     """Get model name for a specific category, with environment variable override support.
-    
+
     Supports backend:model format in env vars:
     - LLM_BEST_CODING_MODEL=openrouter:deepseek/deepseek-coder
     - LLM_UNIVERSAL_MODEL=lmstudio:http://localhost:1234
     - LLM_ULTRA_FAST_MODEL=ollama:phi4
     """
     env_var = f"LLM_{category.upper()}_MODEL"
-    
+
     # check for explicit model override first
     if explicit_model := os.getenv(env_var):
         return explicit_model
-    
+
     # otherwise use regular defaults
     return DEFAULT_MODELS.get(category, DEFAULT_MODELS[ModelCategory.UNIVERSAL])

@@ -119,6 +119,9 @@ class OpenAILLM:
                             },
                         }
                     )
+                elif isinstance(block, ToolUseResult):
+                    # Extract the tool_result with proper tool_use_id from ToolUseResult
+                    tool_results.append(block.tool_result)
                 elif isinstance(block, common.ToolResult):
                     tool_results.append(block)
 
@@ -293,16 +296,16 @@ class OpenAILLM:
         # Newer models (gpt-4-turbo-2024-04-09 and later, including o1 models) use max_completion_tokens
         # Older models use max_tokens
         use_completion_tokens = any(
-            prefix in chosen_model.lower() 
+            prefix in chosen_model.lower()
             for prefix in ["gpt-4-turbo-2024", "gpt-4o", "o1-", "gpt-5"]
         )
-        
+
         request: Dict[str, Any] = {
             "model": chosen_model,
             "messages": openai_messages,
             "temperature": temperature,
         }
-        
+
         if use_completion_tokens:
             request["max_completion_tokens"] = max_tokens
         else:
@@ -320,7 +323,7 @@ class OpenAILLM:
         logger.info(
             f"{self.provider_name} request model={chosen_model} temp={temperature} max_tokens={max_tokens} "
             f"tools={len(openai_tools) if openai_tools else 0} "
-            f"{'tool_choice='+tool_choice if tool_choice else ''}"
+            f"{'tool_choice=' + tool_choice if tool_choice else ''}"
         )
 
         telemetry = LLMTelemetry()
@@ -329,7 +332,9 @@ class OpenAILLM:
         try:
             response = await self.client.chat.completions.create(**request)
         except Exception as e:
-            logger.error(f"{self.provider_name} API error for model '{chosen_model}': {e}")
+            logger.error(
+                f"{self.provider_name} API error for model '{chosen_model}': {e}"
+            )
             raise
 
         if hasattr(response, "usage") and response.usage:
@@ -361,73 +366,3 @@ class OpenAILLM:
 
 
 __all__ = ["OpenAILLM"]
-
-
-if __name__ == "__main__":
-    import asyncio
-    
-    async def test_openai_client():
-        # smoke test for OpenAI client
-        try:
-            client = OpenAILLM(model_name="gpt-4o-mini")
-            
-            # test basic text completion
-            messages = [
-                common.Message(
-                    role="user",
-                    content=[common.TextRaw("Say 'Hello, World!' and nothing else.")]
-                )
-            ]
-            
-            response = await client.completion(
-                messages=messages,
-                max_tokens=50,
-                temperature=0.7
-            )
-            
-            print(f"✓ Basic completion works")
-            print(f"  Response: {response.content[0].text if response.content else 'No content'}")
-            print(f"  Tokens: input={response.input_tokens}, output={response.output_tokens}")
-            
-            # test with tools
-            tools = [
-                {
-                    "name": "get_weather",
-                    "description": "Get the current weather",
-                    "input_schema": {
-                        "type": "object",
-                        "properties": {
-                            "location": {"type": "string"}
-                        },
-                        "required": ["location"]
-                    }
-                }
-            ]
-            
-            messages_with_tool = [
-                common.Message(
-                    role="user", 
-                    content=[common.TextRaw("What's the weather in Paris?")]
-                )
-            ]
-            
-            response_with_tools = await client.completion(
-                messages=messages_with_tool,
-                max_tokens=100,
-                temperature=0.7,
-                tools=tools
-            )
-            
-            print(f"✓ Tool calling works")
-            tool_calls = [b for b in response_with_tools.content if isinstance(b, common.ToolUse)]
-            if tool_calls:
-                print(f"  Tool called: {tool_calls[0].name}")
-            
-            print("\n✅ All smoke tests passed!")
-            
-        except Exception as e:
-            print(f"❌ Smoke test failed: {e}")
-            import traceback
-            traceback.print_exc()
-    
-    asyncio.run(test_openai_client())

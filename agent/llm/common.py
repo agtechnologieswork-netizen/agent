@@ -62,7 +62,9 @@ class AttachedFiles:
         return self._cache_key
 
 
-ContentBlock: TypeAlias = Union[TextRaw, ToolUse, ToolUseResult, ThinkingBlock, ToolResult]
+ContentBlock: TypeAlias = Union[
+    TextRaw, ToolUse, ToolUseResult, ThinkingBlock, ToolResult
+]
 
 
 def dump_content(content: Iterable[ContentBlock]) -> list[dict]:

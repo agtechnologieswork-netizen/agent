@@ -77,6 +77,7 @@ class LMStudioLLM(OpenAILLM):
     LM Studio client implemented as an OpenAI-compatible subclass.
     Reuses the OpenAI format transformation logic (messages, tools, completion parsing).
     """
+
     provider_name = "LMStudio"
 
     def __init__(
@@ -123,9 +124,6 @@ class LMStudioLLM(OpenAILLM):
             output_tokens=completion.output_tokens,
             stop_reason=completion.stop_reason,
         )
-
-
-
 
     async def completion(
         self,
