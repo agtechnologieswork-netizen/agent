@@ -31,6 +31,18 @@ def _normalize_query(query: str) -> str:
     # Collapse whitespace to increase cache hit rate; keep case as-is
     return " ".join(query.split())
 
+def _sanitize_identifiers(query: str) -> str:
+    """Sanitize identifier quoting for compatibility.
+
+    Some generated queries use backticks around catalog.schema.table like
+    `catalog`.`schema`.`table`, which may not execute in certain contexts.
+    For broader compatibility, strip backticks so it becomes catalog.schema.table.
+    """
+    try:
+        return query.replace("`", "")
+    except Exception:
+        return query
+
 T = TypeVar("T", bound="DatabricksModel")
 
 
@@ -41,7 +53,8 @@ def execute_databricks_query(query: str) -> List[Dict[str, Any]]:
         logger.warning("Databricks credentials not configured. Returning empty result.")
         return []
 
-    # Cache lookup
+    # Sanitize identifiers and prepare cache lookup
+    query = _sanitize_identifiers(query)
     ttl = _cache_ttl_seconds()
     qkey = _normalize_query(query)
     if ttl > 0 and qkey in _CACHE:

@@ -73,12 +73,13 @@ class WidgetTools:
         config = {
             "title": title or name,
             "icon": icon,
-            "query": query
         }
         
+        # Sanitize identifiers (strip backticks) to avoid warehouse-specific quoting issues
+        safe_query = query.replace("`", "")
         data_source = {
             "type": "databricks_query" if WidgetTools._is_databricks_configured() else "query",
-            "query": query,
+            "query": safe_query,
             "refresh_interval": 60  # Refresh every minute
         }
         
@@ -124,6 +125,7 @@ class WidgetTools:
         # Prefer direct Databricks query when configured to ensure real data
         if WidgetTools._is_databricks_configured():
             query = f"SELECT {x_column}, {y_column} FROM {table} ORDER BY {x_column} LIMIT {limit}"
+            query = query.replace("`", "")
             data_source = {
                 "type": "databricks_query",
                 "query": query,
@@ -167,15 +169,15 @@ class WidgetTools:
         """
         config = {
             "title": title or name,
-            "query": query,
             "columns": columns or [],
             "pagination": True,
             "rows_per_page": 10
         }
         
+        safe_query = query.replace("`", "")
         data_source = {
             "type": "databricks_query" if WidgetTools._is_databricks_configured() else "query",
-            "query": query,
+            "query": safe_query,
             "refresh_interval": 30
         }
         

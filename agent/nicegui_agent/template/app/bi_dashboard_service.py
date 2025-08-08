@@ -121,13 +121,13 @@ class BIDashboardService:
         """
         try:
             cfg = BIDashboardService._table_and_columns()
-            revenue_row = execute_databricks_query(
-                """
-                SELECT COALESCE(SUM({amount}), 0) AS total_revenue
-                FROM {table}
-                WHERE {date} >= current_date() - INTERVAL {days} DAYS
-                """.format(days=days, **cfg)
-            )
+                revenue_row = execute_databricks_query(
+                    (
+                        "SELECT COALESCE(SUM({amount}), 0) AS total_revenue "
+                        "FROM {table} "
+                        "WHERE {date} >= current_date() - INTERVAL {days} DAYS"
+                    ).format(days=days, **cfg)
+                )
             transactions_row = execute_databricks_query(
                 """
                 SELECT COUNT(*) AS total_transactions
