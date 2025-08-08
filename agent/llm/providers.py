@@ -6,6 +6,7 @@ from llm.anthropic_client import AnthropicLLM
 from llm.gemini import GeminiLLM
 from llm.lmstudio_client import LMStudioLLM
 from llm.openrouter_client import OpenRouterLLM
+from llm.openai_client import OpenAILLM
 
 from llm.ollama_client import OllamaLLM
 
@@ -24,6 +25,10 @@ PROVIDERS: Dict[str, Dict[str, Any]] = {
     "gemini": {
         "client": GeminiLLM,
         "env_vars": ["GEMINI_API_KEY"],
+    },
+    "openai": {
+        "client": OpenAILLM,
+        "env_vars": ["OPENAI_API_KEY"],
     },
     "ollama": {
         "client": OllamaLLM,
@@ -56,10 +61,10 @@ def is_backend_available(backend: str) -> bool:
 
 def get_backend_for_model(model_name: str) -> str:
     """Determine the backend for a given model name.
-    
+
     Requires backend:model format:
     - anthropic:claude-sonnet-4-20250514
-    - gemini:gemini-2.5-flash-preview-05-20  
+    - gemini:gemini-2.5-flash-preview-05-20
     - ollama:phi4
     - openrouter:deepseek/deepseek-coder
     - lmstudio:http://localhost:1234
@@ -69,15 +74,15 @@ def get_backend_for_model(model_name: str) -> str:
             f"Model '{model_name}' must specify backend using 'backend:model' format "
             f"(e.g., 'anthropic:{model_name}', 'ollama:{model_name}')"
         )
-    
+
     backend, _ = model_name.split(":", 1)
     if backend not in PROVIDERS:
         raise ValueError(f"Unknown backend '{backend}' in model specification '{model_name}'")
-    
+
     # check if backend has required env vars
     config = PROVIDERS[backend]
     required_vars = config.get("env_vars", [])
-    
+
     if required_vars:
         missing_vars = [var for var in required_vars if not os.getenv(var)]
         if missing_vars:
@@ -92,13 +97,13 @@ def get_backend_for_model(model_name: str) -> str:
                 raise ValueError(
                     f"Backend '{backend}' requires environment variable(s): {', '.join(missing_vars)}"
                 )
-    
+
     return backend
 
 
 def get_model_mapping(model_name: str, backend: str) -> str:
     """Extract the model part from backend:model format.
-    
+
     Examples:
     - "anthropic:claude-sonnet" → "claude-sonnet"
     - "lmstudio:http://localhost:1234" → "model"
@@ -111,6 +116,6 @@ def get_model_mapping(model_name: str, backend: str) -> str:
         if backend == "lmstudio" and (model_part.startswith("http://") or model_part.startswith("https://")):
             return "model"  # lmstudio doesn't care about model name
         return model_part
-    
+
     # shouldn't happen with new format but handle gracefully
     return model_name

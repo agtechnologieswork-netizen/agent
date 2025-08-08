@@ -1,17 +1,9 @@
-from typing import List, Dict, Any, Literal, cast
-from openai import AsyncOpenAI
+from typing import List, Dict, Any
 import json
 import re
 from llm import common
-from llm.telemetry import LLMTelemetry
 from log import get_logger
-import logging
-from tenacity import (
-    retry,
-    stop_after_attempt,
-    wait_exponential_jitter,
-    before_sleep_log,
-)
+from llm.openai_client import OpenAILLM
 
 logger = get_logger(__name__)
 
@@ -80,234 +72,61 @@ def parse_tool_calls_from_content(content: str) -> tuple[List[common.ToolUse], s
     return tool_uses, remaining_content
 
 
-class LMStudioLLM:
+class LMStudioLLM(OpenAILLM):
+    """
+    LM Studio client implemented as an OpenAI-compatible subclass.
+    Reuses the OpenAI format transformation logic (messages, tools, completion parsing).
+    """
+    provider_name = "LMStudio"
+
     def __init__(
         self,
         base_url: str = "http://localhost:1234/v1",
         model_name: str = "loaded-model",
     ):
-        logger.info(
-            f"Initializing LMStudioLLM client with base URL: {base_url}"
-        )
-        self.client = AsyncOpenAI(
+        # LM Studio ignores API key but OpenAI client requires a value
+        logger.info(f"Initializing LMStudioLLM client with base URL: {base_url}")
+        super().__init__(
+            model_name=model_name,
+            api_key="lm-studio",
             base_url=base_url,
-            api_key="lm-studio",  # LM Studio doesn't require a real API key
+            provider_name=self.provider_name,
         )
-        self.model_name = model_name
-        self.default_model = model_name
 
+    # _messages_into, _tools_into, and _completion_into inherited from OpenAILLM
+    # We only override completion to preserve legacy behavior (parsing <tool_call> fallbacks).
     def _messages_into(self, messages: List[common.Message]) -> List[Dict[str, Any]]:
-        openai_messages = []
-
-        for message in messages:
-            content_parts = []
-            tool_calls = []
-            tool_results = []
-
-            # First pass: collect all content blocks by type
-            for block in message.content:
-                if isinstance(block, common.TextRaw):
-                    content_parts.append({"type": "text", "text": block.text})
-                elif isinstance(block, common.ToolUse):
-                    # Ensure arguments are properly serialized
-                    arguments = block.input
-                    if not isinstance(arguments, str):
-                        try:
-                            arguments = json.dumps(arguments)
-                        except (TypeError, ValueError) as e:
-                            logger.warning(
-                                f"Failed to serialize tool arguments: {e}, using str conversion"
-                            )
-                            arguments = str(arguments)
-
-                    tool_calls.append(
-                        {
-                            "id": block.id,
-                            "type": "function",
-                            "function": {"name": block.name, "arguments": arguments},
-                        }
-                    )
-                elif isinstance(block, common.ToolResult):
-                    tool_results.append(block)
-
-            # Handle tool results as separate messages (OpenAI format requirement)
-            if tool_results:
-                # First add the main message if it has content
-                if content_parts or tool_calls:
-                    openai_message = {"role": message.role}
-                    if content_parts:
-                        if (
-                            len(content_parts) == 1
-                            and content_parts[0]["type"] == "text"
-                        ):
-                            openai_message["content"] = content_parts[0]["text"]
-                        else:
-                            openai_message["content"] = content_parts  # type: ignore
-                    elif message.role == "user":
-                        # OpenAI requires content for user messages
-                        openai_message["content"] = ""
-
-                    if tool_calls:
-                        openai_message["tool_calls"] = tool_calls  # type: ignore
-
-                    openai_messages.append(openai_message)
-
-                # Then add each tool result as separate messages
-                for tool_result in tool_results:
-                    openai_messages.append(
-                        {
-                            "role": "tool",
-                            "tool_call_id": tool_result.tool_use_id,
-                            "content": tool_result.content,
-                        }
-                    )
-            else:
-                # Regular message without tool results
-                if content_parts or tool_calls or message.role == "user":
-                    openai_message = {"role": message.role}
-                    if content_parts:
-                        if (
-                            len(content_parts) == 1
-                            and content_parts[0]["type"] == "text"
-                        ):
-                            openai_message["content"] = content_parts[0]["text"]
-                        else:
-                            openai_message["content"] = content_parts  # type: ignore
-                    elif not tool_calls and message.role == "user":
-                        # OpenAI requires content for user messages
-                        openai_message["content"] = ""
-
-                    if tool_calls:
-                        openai_message["tool_calls"] = tool_calls  # type: ignore
-
-                    openai_messages.append(openai_message)
-
-        return openai_messages
+        # Delegate entirely to base class implementation
+        return super()._messages_into(messages)  # type: ignore[attr-defined]
 
     def _tools_into(
         self, tools: List[common.Tool] | None
     ) -> List[Dict[str, Any]] | None:
-        if not tools:
-            return None
-
-        openai_tools = []
-        for tool in tools:
-            # Validate required tool fields
-            name = tool.get("name")
-            if not name:
-                logger.warning(f"Skipping tool with missing name: {tool}")
-                continue
-
-            description = tool.get("description", "")
-            parameters = tool.get("input_schema", {})
-
-            # Basic validation of parameter schema
-            if parameters and not isinstance(parameters, dict):
-                logger.warning(
-                    f"Tool {name} has invalid parameter schema, using empty schema"
-                )
-                parameters = {}
-
-            openai_tools.append(
-                {
-                    "type": "function",
-                    "function": {
-                        "name": name,
-                        "description": description,
-                        "parameters": parameters,
-                    },
-                }
-            )
-
-        if not openai_tools:
-            logger.warning("No valid tools found after validation")
-            return None
-
-        return openai_tools
+        return super()._tools_into(tools)  # type: ignore[attr-defined]
 
     def _completion_into(self, response: Any) -> common.Completion:
-        content_blocks = []
-
-        message = response.choices[0].message
-
-        # Handle tool calls
-        if message.tool_calls:
-            # Standard tool calls handling
-            for tool_call in message.tool_calls:
-                # Parse arguments if they're a JSON string
-                try:
-                    if isinstance(tool_call.function.arguments, str):
-                        arguments = json.loads(tool_call.function.arguments)
-                    else:
-                        arguments = tool_call.function.arguments
-                except (json.JSONDecodeError, TypeError) as e:
-                    logger.warning(
-                        f"Failed to parse tool call arguments: {e}, using raw arguments"
-                    )
-                    arguments = tool_call.function.arguments
-
-                content_blocks.append(
-                    common.ToolUse(
-                        name=tool_call.function.name, input=arguments, id=tool_call.id
-                    )
-                )
-
-            # Add any remaining text content if present
-            if message.content:
-                content_blocks.append(common.TextRaw(message.content))
-        elif message.content:
-            # Check if content contains tool calls in XML format (workaround for some LMStudio models)
-            if "<tool_call>" in message.content:
-                logger.info(
-                    "Detected potential tool call in message content, attempting to parse..."
-                )
-                parsed_tool_uses, remaining_content = parse_tool_calls_from_content(
-                    message.content
-                )
-
-                # Add remaining content first if any
-                if remaining_content:
-                    content_blocks.append(common.TextRaw(remaining_content))
-
-                # Then add parsed tool uses
-                content_blocks.extend(parsed_tool_uses)
+        completion = super()._completion_into(response)  # type: ignore[attr-defined]
+        # Fallback parsing for inline <tool_call> tags still needed for some legacy models
+        new_blocks: list[common.ContentBlock] = []
+        for block in completion.content:
+            if isinstance(block, common.TextRaw) and "<tool_call>" in block.text:
+                parsed_tool_uses, remaining = parse_tool_calls_from_content(block.text)
+                if remaining:
+                    new_blocks.append(common.TextRaw(remaining))
+                new_blocks.extend(parsed_tool_uses)
             else:
-                # Just regular text content
-                content_blocks.append(common.TextRaw(message.content))
-
-        # Determine stop reason
-        finish_reason = response.choices[0].finish_reason
-        stop_reason_map = {
-            "stop": "end_turn",
-            "length": "max_tokens",
-            "tool_calls": "tool_use",
-            "content_filter": "stop_sequence",
-            None: "unknown",
-        }
-        stop_reason = cast(
-            Literal["end_turn", "max_tokens", "stop_sequence", "tool_use", "unknown"],
-            stop_reason_map.get(finish_reason, "unknown"),
-        )
-
-        # Get token usage
-        usage = response.usage
-        input_tokens = usage.prompt_tokens if usage else 0
-        output_tokens = usage.completion_tokens if usage else 0
-
+                new_blocks.append(block)
         return common.Completion(
             role="assistant",
-            content=content_blocks,
-            input_tokens=input_tokens,
-            output_tokens=output_tokens,
-            stop_reason=stop_reason,
+            content=new_blocks,
+            input_tokens=completion.input_tokens,
+            output_tokens=completion.output_tokens,
+            stop_reason=completion.stop_reason,
         )
 
-    @retry(
-        stop=stop_after_attempt(3),
-        wait=wait_exponential_jitter(initial=1, max=60, jitter=1),
-        before_sleep=before_sleep_log(logger, logging.WARNING),
-        reraise=True,
-    )
+
+
+
     async def completion(
         self,
         messages: List[common.Message],
@@ -320,82 +139,18 @@ class LMStudioLLM:
         *args,
         **kwargs,
     ) -> common.Completion:
-        chosen_model = model or self.default_model
-        openai_messages = self._messages_into(messages)
-
-        # Insert system prompt at the beginning if provided
-        if system_prompt:
-            openai_messages.insert(0, {"role": "system", "content": system_prompt})
-
-        # Build request parameters
-        request_params = {
-            "model": chosen_model,
-            "messages": openai_messages,
-            "temperature": temperature,
-            "max_tokens": max_tokens,
-        }
-
-        # Add tools if provided
-        openai_tools = self._tools_into(tools)
-        if openai_tools:
-            request_params["tools"] = openai_tools
-            if tool_choice:
-                request_params["tool_choice"] = {
-                    "type": "function",
-                    "function": {"name": tool_choice},
-                }
-
-        try:
-            logger.info(
-                f"LM Studio request - model: {chosen_model}, temperature: {temperature}, max_tokens: {max_tokens}"
-            )
-            if openai_tools:
-                logger.info(
-                    f"LM Studio request includes {len(openai_tools)} tools: {[tool['function']['name'] for tool in openai_tools]}"
-                )
-            if tool_choice:
-                logger.info(f"LM Studio request with forced tool choice: {tool_choice}")
-
-            telemetry = LLMTelemetry()
-            telemetry.start_timing()
-
-            # Make the API call
-            response = await self.client.chat.completions.create(**request_params)
-
-            # Log telemetry
-            if hasattr(response, "usage") and response.usage:
-                telemetry.log_completion(
-                    model=chosen_model,
-                    input_tokens=response.usage.prompt_tokens,
-                    output_tokens=response.usage.completion_tokens,
-                    temperature=temperature,
-                    has_tools=openai_tools is not None,
-                    provider="LMStudio",
-                )
-
-            # Convert response to common format
-            completion = self._completion_into(response)
-
-            # Enhanced logging for tool calls debugging
-            tool_use_blocks = [
-                block
-                for block in completion.content
-                if isinstance(block, common.ToolUse)
-            ]
-            if tool_use_blocks:
-                logger.info(
-                    f"LM Studio response includes {len(tool_use_blocks)} tool calls: {[block.name for block in tool_use_blocks]}"
-                )
-
-            logger.info(
-                f"LM Studio response - content_blocks: {len(list(completion.content))}, stop_reason: {completion.stop_reason}"
-            )
-
-            return completion
-
-        except Exception as e:
-            logger.error(f"LM Studio API error: {e}")
-            raise
+        # Defer to OpenAI-compatible implementation (includes telemetry)
+        return await super().completion(
+            messages=messages,
+            max_tokens=max_tokens,
+            model=model,
+            temperature=temperature,
+            tools=tools,
+            tool_choice=tool_choice,
+            system_prompt=system_prompt,
+            *args,
+            **kwargs,
+        )
 
 
 if __name__ == "__main__":
@@ -473,10 +228,13 @@ if __name__ == "__main__":
                     common.InternalMessage(
                         role="user",
                         content=[
+                            # Construct ToolResult with positional args to match dataclass definition:
+                            # ToolResult(content: str, tool_use_id: str | None = None, name: str | None = None, is_error: bool | None = None)
                             common.ToolResult(
-                                content="The weather in San Francisco is 72°F (22°C) and sunny.",
-                                tool_use_id=tool_call.id,
-                                name=tool_call.name,
+                                "The weather in San Francisco is 72°F (22°C) and sunny.",
+                                tool_call.id,
+                                tool_call.name,
+                                False,
                             )
                         ],  # type: ignore[list-item]
                     )

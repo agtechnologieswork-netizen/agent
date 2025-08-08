@@ -88,5 +88,16 @@ def create_client(
                 api_key=api_key,
             )
 
+        case "openai":
+            api_key = os.getenv("OPENAI_API_KEY") or client_params.get("api_key")
+            if not api_key:
+                raise ValueError(
+                    "OpenAI backend requires OPENAI_API_KEY environment variable"
+                )
+            base_url = os.getenv("OPENAI_BASE_URL") or client_params.get("base_url")
+            if base_url:
+                return client_class(model_name=mapped_model, api_key=api_key, base_url=base_url)
+            return client_class(model_name=mapped_model, api_key=api_key)
+
         case _:
             raise ValueError(f"Unsupported backend: {backend}")
