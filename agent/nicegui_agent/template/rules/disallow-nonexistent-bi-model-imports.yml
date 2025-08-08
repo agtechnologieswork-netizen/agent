@@ -1,0 +1,16 @@
+id: disallow-nonexistent-bi-model-imports
+language: python
+message: "Do not import non-existent BI models from app.models; use query-first via WidgetTools instead."
+severity: error
+rule:
+  any:
+    - pattern: "from app.models import SalesKPIs"
+    - pattern: "from app.models import DailySalesRevenue"
+    - pattern: "from app.models import ProductPerformance"
+    - pattern: "from app.models import FranchisePerformance"
+    - pattern: "from app.models import CustomerSpendingAnalysis"
+    - pattern: "from app.models import PaymentMethodAnalysis"
+    - pattern: "from app.models import GeographicSales"
+    - pattern: "from app.models import HourlySalesPattern"
+    - pattern: "from app.models import KPIMetric"
+    - pattern: "from app.models import TimeSeriesPoint"

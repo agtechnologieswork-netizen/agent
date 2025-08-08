@@ -1,109 +1,103 @@
 """
 BI Dashboard Service for Bakehouse Analytics 🥐📊
 
-This service provides comprehensive analytics data for the go-to-market dashboard,
-fetching real-time sales statistics from Databricks and processing them for UI display.
+Query-first implementation that fetches analytics directly from Databricks via
+execute_databricks_query. Returned shapes are simple dicts the UI can render.
 """
 
 from logging import getLogger
 from typing import Dict, List, Any, Optional
 
-from app.models import (
-    SalesKPIs,
-    DailySalesRevenue,
-    ProductPerformance,
-    FranchisePerformance,
-    CustomerSpendingAnalysis,
-    PaymentMethodAnalysis,
-    GeographicSales,
-    HourlySalesPattern,
-    WelcomeMessage,
-    KPIMetric,
-    TimeSeriesPoint,
-)
+from app.dbrx import execute_databricks_query
 
 logger = getLogger(__name__)
 
 
 class BIDashboardService:
-    """Service class for fetching and processing BI analytics data"""
+    """Service class for fetching and processing BI analytics data (query-first)"""
 
     @staticmethod
-    def get_welcome_message() -> WelcomeMessage:
+    def get_welcome_message() -> Dict[str, str]:
         """Get welcome message with emojis for dashboard greeting"""
-        return WelcomeMessage(
-            title="Welcome to your Bakery Sales Dashboard! 🥐📈📊",
-            subtitle="Insights await you! ✨",
-            emoji="👋",
-            description="Discover powerful analytics for your bakery business - sales performance, customer insights, franchise metrics, and market trends all in one place",
-        )
+        return {
+            "title": "Welcome to your Bakery Sales Dashboard! 🥐📈📊",
+            "subtitle": "Insights await you! ✨",
+            "emoji": "👋",
+            "description": (
+                "Discover powerful analytics for your bakery business - sales performance, "
+                "customer insights, franchise metrics, and market trends all in one place"
+            ),
+        }
 
     @staticmethod
-    def get_kpi_metrics(days: int = 30) -> List[KPIMetric]:
-        """Fetch key performance indicators with trend analysis"""
+    def get_kpi_metrics(days: int = 30) -> List[Dict[str, Any]]:
+        """Fetch key performance indicators with simple trend analysis.
+
+        NOTE: Replace `catalog.schema.sales_table` with your real table.
+        """
         try:
-            kpis_data = SalesKPIs.fetch(days=days)
+            revenue_row = execute_databricks_query(
+                """
+                SELECT COALESCE(SUM(total_amount), 0) AS total_revenue
+                FROM `catalog`.`schema`.`sales_table`
+                WHERE sale_date >= current_date() - INTERVAL {days} DAYS
+                """.format(days=days)
+            )
+            transactions_row = execute_databricks_query(
+                """
+                SELECT COUNT(*) AS total_transactions
+                FROM `catalog`.`schema`.`sales_table`
+                WHERE sale_date >= current_date() - INTERVAL {days} DAYS
+                """.format(days=days)
+            )
+            customers_row = execute_databricks_query(
+                """
+                SELECT COUNT(DISTINCT customer_id) AS unique_customers
+                FROM `catalog`.`schema`.`sales_table`
+                WHERE sale_date >= current_date() - INTERVAL {days} DAYS
+                """.format(days=days)
+            )
+            avg_order_row = execute_databricks_query(
+                """
+                SELECT COALESCE(AVG(total_amount), 0) AS avg_transaction_value
+                FROM `catalog`.`schema`.`sales_table`
+                WHERE sale_date >= current_date() - INTERVAL {days} DAYS
+                """.format(days=days)
+            )
 
-            if not kpis_data:
-                logger.warning("No KPI data available")
-                return []
+            def get_val(rows: List[Dict[str, Any]], key: str) -> float:
+                return float(rows[0].get(key, 0)) if rows else 0.0
 
-            kpi = kpis_data[0]
-
-            # Calculate growth metrics (comparing with previous period)
-            prev_kpis_data = list(SalesKPIs.fetch(days=days * 2))  # Get double the period for comparison
-            growth_metrics = BIDashboardService._calculate_growth_metrics(kpi, prev_kpis_data, days)
+            total_revenue = get_val(revenue_row, "total_revenue")
+            total_transactions = get_val(transactions_row, "total_transactions")
+            unique_customers = get_val(customers_row, "unique_customers")
+            avg_transaction_value = get_val(avg_order_row, "avg_transaction_value")
 
             return [
-                KPIMetric(
-                    name="Total Revenue",
-                    value=kpi.total_revenue,
-                    unit="$",
-                    change_percent=growth_metrics.get("revenue_growth"),
-                    trend=BIDashboardService._get_trend(growth_metrics.get("revenue_growth")),
-                    emoji="💰",
-                ),
-                KPIMetric(
-                    name="Transactions",
-                    value=kpi.total_transactions,
-                    unit="",
-                    change_percent=growth_metrics.get("transactions_growth"),
-                    trend=BIDashboardService._get_trend(growth_metrics.get("transactions_growth")),
-                    emoji="🛒",
-                ),
-                KPIMetric(
-                    name="Avg Transaction",
-                    value=kpi.avg_transaction_value,
-                    unit="$",
-                    change_percent=growth_metrics.get("avg_transaction_growth"),
-                    trend=BIDashboardService._get_trend(growth_metrics.get("avg_transaction_growth")),
-                    emoji="💳",
-                ),
-                KPIMetric(
-                    name="Active Customers",
-                    value=kpi.unique_customers,
-                    unit="",
-                    change_percent=growth_metrics.get("customers_growth"),
-                    trend=BIDashboardService._get_trend(growth_metrics.get("customers_growth")),
-                    emoji="👥",
-                ),
-                KPIMetric(name="Product Variety", value=kpi.unique_products, unit="", emoji="🍰"),
-                KPIMetric(name="Active Franchises", value=kpi.unique_franchises, unit="", emoji="🏪"),
+                {"name": "Total Revenue", "value": total_revenue, "unit": "$", "emoji": "💰", "trend": "neutral", "change_percent": None},
+                {"name": "Transactions", "value": total_transactions, "unit": "", "emoji": "🛒", "trend": "neutral", "change_percent": None},
+                {"name": "Avg Transaction", "value": avg_transaction_value, "unit": "$", "emoji": "💳", "trend": "neutral", "change_percent": None},
+                {"name": "Active Customers", "value": unique_customers, "unit": "", "emoji": "👥", "trend": "neutral", "change_percent": None},
             ]
         except Exception as e:
             logger.error(f"Error fetching KPI metrics: {e}")
             return []
 
     @staticmethod
-    def get_daily_revenue_trend(days: int = 30) -> List[TimeSeriesPoint]:
+    def get_daily_revenue_trend(days: int = 30) -> List[Dict[str, Any]]:
         """Get daily revenue trend data for charts"""
         try:
-            revenue_data = DailySalesRevenue.fetch(days=days)
-
-            return [
-                TimeSeriesPoint(date=item.sale_date, value=item.total_revenue, label=f"${item.total_revenue:,.2f}")
-                for item in revenue_data
-            ]
+            rows = execute_databricks_query(
+                """
+                SELECT CAST(sale_date AS DATE) AS day, SUM(total_amount) AS total_revenue
+                FROM `catalog`.`schema`.`sales_table`
+                WHERE sale_date >= current_date() - INTERVAL {days} DAYS
+                GROUP BY day
+                ORDER BY day
+                LIMIT 1000
+                """.format(days=days)
+            )
+            return [{"date": r.get("day"), "value": r.get("total_revenue", 0), "label": f"${r.get('total_revenue', 0):,.2f}"} for r in rows]
         except Exception as e:
             logger.error(f"Error fetching daily revenue trend: {e}")
             return []
@@ -112,8 +106,20 @@ class BIDashboardService:
     def get_product_performance_data(days: int = 30, limit: int = 10) -> Dict[str, Any]:
         """Get top performing products with sales data"""
         try:
-            products = ProductPerformance.fetch(days=days, limit=limit)
-
+            products = execute_databricks_query(
+                """
+                SELECT product_name AS product,
+                       SUM(total_amount) AS total_revenue,
+                       SUM(quantity) AS total_quantity,
+                       COALESCE(AVG(unit_price), 0) AS avg_unit_price,
+                       100.0 * SUM(total_amount) / NULLIF(SUM(SUM(total_amount)) OVER (), 0) AS revenue_percentage
+                FROM `catalog`.`schema`.`sales_table`
+                WHERE sale_date >= current_date() - INTERVAL {days} DAYS
+                GROUP BY product_name
+                ORDER BY total_revenue DESC
+                LIMIT {limit}
+                """.format(days=days, limit=limit)
+            )
             return {
                 "columns": [
                     {"name": "product", "label": "Product 🥐", "field": "product"},
@@ -124,13 +130,13 @@ class BIDashboardService:
                 ],
                 "rows": [
                     {
-                        "product": product.product,
-                        "revenue": f"${product.total_revenue:,.2f}",
-                        "quantity": f"{product.total_quantity:,}",
-                        "avg_price": f"${product.avg_unit_price:.2f}",
-                        "share": f"{product.revenue_percentage:.1f}%",
+                        "product": p.get("product", ""),
+                        "revenue": f"${p.get('total_revenue', 0):,.2f}",
+                        "quantity": f"{int(p.get('total_quantity', 0)):,}",
+                        "avg_price": f"${float(p.get('avg_unit_price', 0)):.2f}",
+                        "share": f"{float(p.get('revenue_percentage', 0)):.1f}%",
                     }
-                    for product in products
+                    for p in products
                 ],
             }
         except Exception as e:
@@ -141,8 +147,22 @@ class BIDashboardService:
     def get_franchise_performance_data(days: int = 30, limit: int = 15) -> Dict[str, Any]:
         """Get franchise performance metrics"""
         try:
-            franchises = FranchisePerformance.fetch(days=days, limit=limit)
-
+            franchises = execute_databricks_query(
+                """
+                SELECT franchise_name,
+                       city,
+                       country,
+                       SUM(total_amount) AS total_revenue,
+                       COUNT(*) AS transaction_count,
+                       COALESCE(AVG(total_amount), 0) AS avg_transaction_value,
+                       COUNT(DISTINCT franchise_id) AS size
+                FROM `catalog`.`schema`.`sales_table`
+                WHERE sale_date >= current_date() - INTERVAL {days} DAYS
+                GROUP BY franchise_name, city, country
+                ORDER BY total_revenue DESC
+                LIMIT {limit}
+                """.format(days=days, limit=limit)
+            )
             return {
                 "columns": [
                     {"name": "name", "label": "Franchise 🏪", "field": "name"},
@@ -154,14 +174,14 @@ class BIDashboardService:
                 ],
                 "rows": [
                     {
-                        "name": franchise.franchise_name,
-                        "location": f"{franchise.city}, {franchise.country}",
-                        "revenue": f"${franchise.total_revenue:,.2f}",
-                        "transactions": f"{franchise.transaction_count:,}",
-                        "avg_order": f"${franchise.avg_transaction_value:.2f}",
-                        "size": franchise.size,
+                        "name": f.get("franchise_name", ""),
+                        "location": f"{f.get('city', '')}, {f.get('country', '')}",
+                        "revenue": f"${f.get('total_revenue', 0):,.2f}",
+                        "transactions": f"{int(f.get('transaction_count', 0)):,}",
+                        "avg_order": f"${float(f.get('avg_transaction_value', 0)):.2f}",
+                        "size": int(f.get('size', 0)),
                     }
-                    for franchise in franchises
+                    for f in franchises
                 ],
             }
         except Exception as e:
@@ -172,23 +192,29 @@ class BIDashboardService:
     def get_customer_segments_data(days: int = 30) -> Dict[str, Any]:
         """Get customer segmentation analysis"""
         try:
-            customers = CustomerSpendingAnalysis.fetch(days=days, limit=100)
+            customers = execute_databricks_query(
+                """
+                SELECT customer_segment,
+                       SUM(total_amount) AS total_spent,
+                       COUNT(*) AS transaction_count
+                FROM `catalog`.`schema`.`sales_table`
+                WHERE sale_date >= current_date() - INTERVAL {days} DAYS
+                GROUP BY customer_segment
+                """.format(days=days)
+            )
 
-            # Aggregate by segment
-            segments = {}
-            for customer in customers:
-                segment = customer.customer_segment
-                if segment not in segments:
-                    segments[segment] = {"count": 0, "total_spent": 0.0, "avg_transactions": 0.0}
-                segments[segment]["count"] += 1
-                segments[segment]["total_spent"] += customer.total_spent
-                segments[segment]["avg_transactions"] += customer.transaction_count
+            segments: Dict[str, Dict[str, float]] = {}
+            for c in customers:
+                segment = str(c.get("customer_segment", "Unknown"))
+                entry = segments.setdefault(segment, {"count": 0.0, "total_spent": 0.0, "avg_transactions": 0.0})
+                entry["count"] += float(c.get("transaction_count", 0))
+                entry["total_spent"] += float(c.get("total_spent", 0))
+                entry["avg_transactions"] += float(c.get("transaction_count", 0))
 
-            # Calculate averages
-            for segment_data in segments.values():
-                if segment_data["count"] > 0:
-                    segment_data["avg_spent"] = segment_data["total_spent"] / segment_data["count"]
-                    segment_data["avg_transactions"] = segment_data["avg_transactions"] / segment_data["count"]
+            for seg in segments.values():
+                if seg["count"] > 0:
+                    seg["avg_spent"] = seg["total_spent"] / seg["count"]
+                    seg["avg_transactions"] = seg["avg_transactions"] / seg["count"]
 
             return {
                 "segments": segments,
@@ -206,13 +232,25 @@ class BIDashboardService:
     def get_payment_methods_data(days: int = 30) -> Dict[str, Any]:
         """Get payment method preferences and performance"""
         try:
-            payment_methods = PaymentMethodAnalysis.fetch(days=days)
-
+            payment_methods = execute_databricks_query(
+                """
+                SELECT payment_method,
+                       COUNT(*) AS transaction_count,
+                       100.0 * COUNT(*) / NULLIF(COUNT(*) OVER (), 0) AS percentage_of_transactions,
+                       SUM(total_amount) AS total_revenue,
+                       COALESCE(AVG(total_amount), 0) AS avg_transaction_value
+                FROM `catalog`.`schema`.`sales_table`
+                WHERE sale_date >= current_date() - INTERVAL {days} DAYS
+                GROUP BY payment_method
+                ORDER BY transaction_count DESC
+                LIMIT 10
+                """.format(days=days)
+            )
             return {
                 "chart_data": {
-                    "labels": [method.payment_method for method in payment_methods],
-                    "values": [method.percentage_of_transactions for method in payment_methods],
-                    "revenue": [method.total_revenue for method in payment_methods],
+                    "labels": [m.get("payment_method", "") for m in payment_methods],
+                    "values": [float(m.get("percentage_of_transactions", 0)) for m in payment_methods],
+                    "revenue": [float(m.get("total_revenue", 0)) for m in payment_methods],
                 },
                 "table_data": {
                     "columns": [
@@ -224,13 +262,13 @@ class BIDashboardService:
                     ],
                     "rows": [
                         {
-                            "method": method.payment_method,
-                            "transactions": f"{method.transaction_count:,}",
-                            "percentage": f"{method.percentage_of_transactions:.1f}%",
-                            "revenue": f"${method.total_revenue:,.2f}",
-                            "avg_value": f"${method.avg_transaction_value:.2f}",
+                            "method": m.get("payment_method", ""),
+                            "transactions": f"{int(m.get('transaction_count', 0)):,}",
+                            "percentage": f"{float(m.get('percentage_of_transactions', 0)):.1f}%",
+                            "revenue": f"${float(m.get('total_revenue', 0)):,.2f}",
+                            "avg_value": f"${float(m.get('avg_transaction_value', 0)):.2f}",
                         }
-                        for method in payment_methods
+                        for m in payment_methods
                     ],
                 },
             }
@@ -245,13 +283,26 @@ class BIDashboardService:
     def get_geographic_performance(days: int = 30) -> Dict[str, Any]:
         """Get geographic sales performance by country"""
         try:
-            geo_data = GeographicSales.fetch(days=days)
-
+            geo_data = execute_databricks_query(
+                """
+                SELECT country,
+                       SUM(total_amount) AS total_revenue,
+                       COUNT(*) AS transaction_count,
+                       COUNT(DISTINCT customer_id) AS unique_customers,
+                       COUNT(DISTINCT franchise_id) AS unique_franchises,
+                       COALESCE(AVG(total_amount), 0) AS avg_transaction_value
+                FROM `catalog`.`schema`.`sales_table`
+                WHERE sale_date >= current_date() - INTERVAL {days} DAYS
+                GROUP BY country
+                ORDER BY total_revenue DESC
+                LIMIT 20
+                """.format(days=days)
+            )
             return {
                 "chart_data": {
-                    "countries": [geo.country for geo in geo_data],
-                    "revenue": [geo.total_revenue for geo in geo_data],
-                    "customers": [geo.unique_customers for geo in geo_data],
+                    "countries": [g.get("country", "") for g in geo_data],
+                    "revenue": [float(g.get("total_revenue", 0)) for g in geo_data],
+                    "customers": [int(g.get("unique_customers", 0)) for g in geo_data],
                 },
                 "table_data": {
                     "columns": [
@@ -264,14 +315,14 @@ class BIDashboardService:
                     ],
                     "rows": [
                         {
-                            "country": geo.country,
-                            "revenue": f"${geo.total_revenue:,.2f}",
-                            "transactions": f"{geo.transaction_count:,}",
-                            "customers": f"{geo.unique_customers:,}",
-                            "franchises": f"{geo.unique_franchises:,}",
-                            "avg_order": f"${geo.avg_transaction_value:.2f}",
+                            "country": g.get("country", ""),
+                            "revenue": f"${float(g.get('total_revenue', 0)):,.2f}",
+                            "transactions": f"{int(g.get('transaction_count', 0)):,}",
+                            "customers": f"{int(g.get('unique_customers', 0)):,}",
+                            "franchises": f"{int(g.get('unique_franchises', 0)):,}",
+                            "avg_order": f"${float(g.get('avg_transaction_value', 0)):.2f}",
                         }
-                        for geo in geo_data
+                        for g in geo_data
                     ],
                 },
             }
@@ -286,19 +337,26 @@ class BIDashboardService:
     def get_hourly_sales_pattern(days: int = 30) -> Dict[str, Any]:
         """Get hourly sales patterns for operational insights"""
         try:
-            hourly_data = list(HourlySalesPattern.fetch(days=days))
-
-            # Sort by hour to ensure proper order
-            hourly_data.sort(key=lambda x: x.hour_of_day)
+            hourly_data = execute_databricks_query(
+                """
+                SELECT EXTRACT(HOUR FROM sale_datetime) AS hour_of_day,
+                       COUNT(*) AS transaction_count,
+                       SUM(total_amount) AS total_revenue
+                FROM `catalog`.`schema`.`sales_table`
+                WHERE sale_datetime >= current_timestamp() - INTERVAL {days} DAYS
+                GROUP BY hour_of_day
+                ORDER BY hour_of_day
+                """.format(days=days)
+            )
 
             return {
                 "chart_data": {
-                    "hours": [f"{hour.hour_of_day:02d}:00" for hour in hourly_data],
-                    "transactions": [hour.transaction_count for hour in hourly_data],
-                    "revenue": [hour.total_revenue for hour in hourly_data],
+                    "hours": [f"{int(h.get('hour_of_day', 0)):02d}:00" for h in hourly_data],
+                    "transactions": [int(h.get('transaction_count', 0)) for h in hourly_data],
+                    "revenue": [float(h.get('total_revenue', 0)) for h in hourly_data],
                 },
-                "peak_hour": max(hourly_data, key=lambda x: x.transaction_count).hour_of_day if hourly_data else 0,
-                "peak_revenue_hour": max(hourly_data, key=lambda x: x.total_revenue).hour_of_day if hourly_data else 0,
+                "peak_hour": (max(hourly_data, key=lambda x: x.get('transaction_count', 0)).get('hour_of_day', 0) if hourly_data else 0),
+                "peak_revenue_hour": (max(hourly_data, key=lambda x: x.get('total_revenue', 0)).get('hour_of_day', 0) if hourly_data else 0),
             }
         except Exception as e:
             logger.error(f"Error fetching hourly sales pattern: {e}")
@@ -310,7 +368,7 @@ class BIDashboardService:
 
     @staticmethod
     def _calculate_growth_metrics(
-        current_kpi: SalesKPIs, historical_data: List[SalesKPIs], days: int
+        current_kpi: Dict[str, Any], historical_data: List[Dict[str, Any]], days: int
     ) -> Dict[str, Optional[float]]:
         """Calculate growth percentages by comparing current period with previous period"""
         if len(historical_data) < 2:
@@ -321,9 +379,9 @@ class BIDashboardService:
             total_kpi = historical_data[0]  # This includes both periods
 
             # Calculate previous period values
-            prev_revenue = total_kpi.total_revenue - current_kpi.total_revenue
-            prev_transactions = total_kpi.total_transactions - current_kpi.total_transactions
-            prev_customers = total_kpi.unique_customers - current_kpi.unique_customers
+            prev_revenue = float(total_kpi.get("total_revenue", 0)) - float(current_kpi.get("total_revenue", 0))
+            prev_transactions = float(total_kpi.get("total_transactions", 0)) - float(current_kpi.get("total_transactions", 0))
+            prev_customers = float(total_kpi.get("unique_customers", 0)) - float(current_kpi.get("unique_customers", 0))
             prev_avg_transaction = prev_revenue / prev_transactions if prev_transactions > 0 else 0
 
             return {

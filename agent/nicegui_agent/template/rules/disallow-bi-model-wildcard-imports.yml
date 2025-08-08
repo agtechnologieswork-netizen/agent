@@ -1,0 +1,6 @@
+id: disallow-bi-model-wildcard-imports
+language: python
+message: "Do not import BI model symbols from app.models; use query-first via WidgetTools instead."
+severity: error
+rule:
+  pattern-regex: "^from\s+app\\.models\s+import\s+.*(Sales|KPI|Revenue|Performance|Franchise|Customer|Payment|Geographic|Hourly|TimeSeries)"
