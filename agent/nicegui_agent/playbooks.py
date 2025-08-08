@@ -232,7 +232,77 @@ class WeatherExtremes(DatabricksModel):
 
 
 def get_databricks_rules(use_databricks: bool = False) -> str:
-    return DATABRICKS_RULES if use_databricks else ""
+    return (
+        """
+# Databricks Integration: Discovery-First and Query-First
+
+## Discover real tables before building widgets
+- SHOW CATALOGS;
+- SHOW SCHEMAS IN <catalog>;
+- SHOW TABLES IN <catalog>.<schema>;
+- Or search:
+  SELECT catalog_name, schema_name, table_name
+  FROM system.information_schema.tables
+  WHERE lower(table_name) LIKE '%bake%'
+  ORDER BY 1,2,3
+  LIMIT 200;
+
+## Use fully-qualified backtick names and LIMIT
+- Use `catalog`.`schema`.`table` (backticks in SQL if needed)
+- Use LIMIT, not TOP
+
+## Validate queries first
+- Run execute_databricks_query(sql) for discovery/sample
+- Keep queries fast via aggregation and LIMIT
+
+## Prefer query-first widgets via WidgetTools
+- When Databricks env is set, WidgetTools.create_*_from_query uses databricks_query
+- Examples:
+  from app.widget_tools import WidgetTools
+
+  # KPI metric
+  WidgetTools.create_metric_from_query(
+      name="Total Orders",
+      query="SELECT COUNT(*) AS value FROM `samples`.`nyctaxi`.`trips` WHERE pickup_datetime >= current_date() - INTERVAL 30 DAYS"
+  )
+
+  # Trend chart
+  WidgetTools.create_chart_from_query(
+      name="Daily Revenue (30d)",
+      query=\"\"\"
+        SELECT CAST(pickup_datetime AS DATE) AS day,
+               SUM(total_amount) AS revenue
+        FROM `samples`.`nyctaxi`.`trips`
+        WHERE pickup_datetime >= current_date() - INTERVAL 30 DAYS
+        GROUP BY day
+        ORDER BY day
+        LIMIT 100
+      \"\"\",
+      chart_type="line"
+  )
+
+  # Top-N bar chart
+  WidgetTools.create_chart_from_query(
+      name="Top Products",
+      query=\"\"\"
+        SELECT product_name AS label, SUM(revenue) AS value
+        FROM `catalog`.`schema`.`sales`
+        GROUP BY product_name
+        ORDER BY value DESC
+        LIMIT 10
+      \"\"\",
+      chart_type="bar"
+  )
+
+  # Recent transactions table
+  WidgetTools.create_table_from_query(
+      name="Recent Transactions",
+      query="SELECT * FROM `catalog`.`schema`.`transactions` ORDER BY created_at DESC LIMIT 50"
+  )
+        """
+        if use_databricks
+        else ""
+    )
 
 
 PYTHON_RULES = f"""
@@ -290,12 +360,12 @@ Use the following tools to manage files:
 
 # Databricks Integration Guidelines
 
-When working with Databricks:
-- Use read_file to examine existing Databricks models and queries
-- Use edit_file to modify Databricks integration code
-- Ensure all Databricks queries use the execute_databricks_query function
-- Follow the DatabricksModel pattern for creating new Databricks-backed models
-- Test Databricks integrations by verifying the fetch() methods work correctly"""
+When working with Databricks (query-first workflow):
+- Discover catalogs/schemas/tables first; only then write widgets
+- Validate SQL with execute_databricks_query before wiring
+- Use fully-qualified backtick names and LIMIT
+- Create widgets via WidgetTools.create_*_from_query (auto-uses databricks_query when env is set)
+"""
 
     return base_rules + (databricks_section if use_databricks else "")
 
@@ -305,7 +375,7 @@ TOOL_USAGE_RULES = get_tool_usage_rules()
 
 def get_data_model_rules(use_databricks: bool = False) -> str:
     """Return data model rules with optional databricks integration"""
-    databricks_section = "\n" + DATABRICKS_RULES if use_databricks else ""
+    databricks_section = "\n" + get_databricks_rules(True) if use_databricks else ""
 
     return f"""
 {NONE_HANDLING_RULES}
@@ -1045,42 +1115,12 @@ data_source = {
 }
 ```
 
-## Available Databricks Models (USE THESE for BI dashboards!)
-
-```python
-from app.models import (
-    SalesKPIs,
-    DailySalesRevenue,
-    ProductPerformance,
-    FranchisePerformance,
-    CustomerSpendingAnalysis,
-    PaymentMethodAnalysis,
-    GeographicSales,
-    HourlySalesPattern
-)
-
-# Example: Fetch real KPI data
-kpis = SalesKPIs.fetch(days=30)
-revenue = DailySalesRevenue.fetch(days=30)
-products = ProductPerformance.fetch(days=30, limit=10)
-
-# Use the fetched data in widgets
-if kpis:
-    kpi = kpis[0]
-    WidgetTools.create_metric_from_query(
-        name="Total Revenue",
-        query=f"SELECT {kpi.total_revenue} as value",
-        icon="attach_money"
-    )
-```
-
 ## Complete Dashboard Example (COPY THIS PATTERN)
 
 ```python
 from app.widget_tools import WidgetTools
 from app.widget_service import WidgetService
 from app.data_source_service import DataSourceService
-from app.models import SalesKPIs, ProductPerformance
 
 def create_data_driven_dashboard():
     '''Generate a complete dashboard with REAL data'''
@@ -1091,34 +1131,43 @@ def create_data_driven_dashboard():
         if w.id:
             WidgetService.delete_widget(w.id)
     
-    # Create KPI metrics from Databricks
-    kpis = SalesKPIs.fetch(days=30)
-    if kpis:
-        kpi = kpis[0]
-        WidgetTools.create_metric_from_query(
-            name="Total Revenue",
-            query=f"SELECT {kpi.total_revenue} as value",
-            icon="attach_money"
-        )
-        WidgetTools.create_metric_from_query(
-            name="Total Transactions",
-            query=f"SELECT {kpi.total_transactions} as value",
-            icon="shopping_cart"
-        )
+    # Create KPI metrics via query-first (Databricks when configured)
+    WidgetTools.create_metric_from_query(
+        name="Total Revenue (30d)",
+        query=\"\"\"
+          SELECT COALESCE(SUM(total_amount), 0) AS value
+          FROM `catalog`.`schema`.`sales`
+          WHERE sale_date >= current_date() - INTERVAL 30 DAYS
+        \"\"\",
+        icon="attach_money"
+    )
+    WidgetTools.create_metric_from_query(
+        name="Total Transactions (30d)",
+        query=\"\"\"
+          SELECT COUNT(*) AS value
+          FROM `catalog`.`schema`.`sales`
+          WHERE sale_date >= current_date() - INTERVAL 30 DAYS
+        \"\"\",
+        icon="shopping_cart"
+    )
     
-    # Create product performance chart
-    WidgetTools.create_chart_from_table(
+    # Create product performance chart (query-first)
+    WidgetTools.create_chart_from_query(
         name="Top Products",
-        table="product_performance",
-        x_column="product",
-        y_column="total_revenue",
+        query=\"\"\"
+          SELECT product_name AS label, SUM(revenue) AS value
+          FROM `catalog`.`schema`.`sales`
+          GROUP BY product_name
+          ORDER BY value DESC
+          LIMIT 10
+        \"\"\",
         chart_type="bar"
     )
     
     # Create table from real query
     WidgetTools.create_table_from_query(
         name="Recent Sales",
-        query="SELECT * FROM daily_sales_revenue ORDER BY sale_date DESC LIMIT 20"
+        query="SELECT * FROM `catalog`.`schema`.`sales` ORDER BY sale_date DESC LIMIT 20"
     )
     
     # Auto-generate widgets for all tables
