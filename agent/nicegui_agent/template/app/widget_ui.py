@@ -29,9 +29,9 @@ class WidgetManager:
 
                 with ui.row().classes("gap-2"):
                     ui.button(
-                        "Edit Mode" if not self.edit_mode else "View Mode",
-                        icon="edit" if not self.edit_mode else "visibility",
-                        on_click=self.toggle_edit_mode,
+                        "Refresh Data",
+                        icon="refresh",
+                        on_click=self.refresh_widgets,
                     ).props("outline")
 
                     ui.button("Add Widget", icon="add", on_click=self.show_add_widget_dialog).props("color=primary")
@@ -43,20 +43,7 @@ class WidgetManager:
             # Render widgets
             self.refresh_widgets()
 
-            # Set up auto-refresh based on the smallest configured widget refresh interval
-            try:
-                widgets = self.widget_service.get_widgets_for_page(self.current_page)
-                intervals: list[int] = []
-                for w in widgets:
-                    if isinstance(getattr(w, "data_source", None), dict):
-                        val = w.data_source.get("refresh_interval")
-                        if isinstance(val, (int, float)) and val > 0:
-                            intervals.append(int(val))
-                refresh_seconds = min(intervals) if intervals else None
-                if refresh_seconds:
-                    ui.timer(refresh_seconds, self.refresh_widgets)
-            except Exception as e:
-                logger.warning(f"Failed to initialize auto-refresh timer: {e}")
+            # Auto-refresh disabled to prefer manual refresh via button
 
     def refresh_widgets(self):
         """Refresh the widget display"""
@@ -72,9 +59,9 @@ class WidgetManager:
                         ui.label("No widgets yet").classes("text-xl text-gray-600 mt-4")
                         ui.label("Click 'Add Widget' to get started").classes("text-gray-500")
                 else:
-                    # Set callbacks for edit and delete
+                    # Always editable: set callbacks and render in edit mode
                     self.grid.set_callbacks(on_edit=self.edit_widget, on_delete=self.delete_widget)
-                    self.grid.render(widgets, editable=self.edit_mode)
+                    self.grid.render(widgets, editable=True)
 
     def toggle_edit_mode(self):
         """Toggle between edit and view mode"""
