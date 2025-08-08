@@ -1,24 +1,61 @@
 from typing import List, Dict, Any, ClassVar, Sequence, TypeVar
 from databricks.sdk import WorkspaceClient
 from databricks.sdk.service.sql import StatementState, State
+import os
+import time
+from collections import OrderedDict
 
 from pydantic import BaseModel
 from logging import getLogger
 
 logger = getLogger(__name__)
 
+# Simple in-process LRU cache with TTL for Databricks queries
+_CACHE: "OrderedDict[str, tuple[float, List[Dict[str, Any]]]]" = OrderedDict()
+
+def _cache_ttl_seconds() -> int:
+    try:
+        return max(0, int(os.getenv("DATABRICKS_CACHE_TTL_SECONDS", "30")))
+    except Exception:
+        return 30
+
+def _cache_max_entries() -> int:
+    try:
+        return max(1, int(os.getenv("DATABRICKS_CACHE_MAX_ENTRIES", "128")))
+    except Exception:
+        return 128
+
+def _normalize_query(query: str) -> str:
+    # Collapse whitespace to increase cache hit rate; keep case as-is
+    return " ".join(query.split())
+
 T = TypeVar("T", bound="DatabricksModel")
 
 
 def execute_databricks_query(query: str) -> List[Dict[str, Any]]:
-    """helper function to execute SQL query via WorkspaceClient"""
-    import os
-    
+    """Execute SQL via WorkspaceClient with a small in-memory TTL cache."""
     # Check if credentials are configured
     if not os.getenv("DATABRICKS_HOST") or not os.getenv("DATABRICKS_TOKEN"):
         logger.warning("Databricks credentials not configured. Returning empty result.")
         return []
-    
+
+    # Cache lookup
+    ttl = _cache_ttl_seconds()
+    qkey = _normalize_query(query)
+    if ttl > 0 and qkey in _CACHE:
+        ts, rows = _CACHE[qkey]
+        if (time.time() - ts) <= ttl:
+            # LRU: move to end and return cached
+            _CACHE.move_to_end(qkey, last=True)
+            logger.info("Databricks cache hit for query: %s", qkey[:120])
+            return rows
+        else:
+            # Expired
+            try:
+                _CACHE.pop(qkey, None)
+            except Exception:
+                pass
+
     try:
         client = WorkspaceClient()
     except Exception as e:
@@ -61,7 +98,18 @@ def execute_databricks_query(query: str) -> List[Dict[str, Any]]:
     ):
         col_names = [col.name or "" for col in execution.manifest.schema.columns]
         rows = execution.result.data_array
-        return [dict(zip(col_names, row)) for row in rows]
+        result = [dict(zip(col_names, row)) for row in rows]
+        # Store in cache on success
+        if ttl > 0:
+            try:
+                _CACHE[qkey] = (time.time(), result)
+                _CACHE.move_to_end(qkey, last=True)
+                # Evict if beyond capacity
+                while len(_CACHE) > _cache_max_entries():
+                    _CACHE.popitem(last=False)
+            except Exception:
+                pass
+        return result
 
     return []
 
