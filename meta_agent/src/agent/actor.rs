@@ -1,5 +1,7 @@
 use crate::{
-    agent::{AgentNode, AgentTool, Checker, NodeTool, Rollout, Search, ToolCallExt, Tree},
+    agent::{
+        AgentNode, AgentTool, Checker, Command, Event, NodeTool, Rollout, Search, ToolCallExt, Tree,
+    },
     llm::{Completion, CompletionResponse, LLMClientDyn},
     workspace::WorkspaceDyn,
 };
@@ -238,19 +240,16 @@ pub struct AgentPipeline {
 impl AgentPipeline {
     async fn handle_command(
         &mut self,
-        cmd: &PipelineCmd,
+        cmd: &Command<PipelineCmd>,
         state: &mut Option<Tree<Node>>,
-        event_tx: &tokio::sync::mpsc::Sender<PipelineEvent>,
+        event_tx: &tokio::sync::mpsc::Sender<Event<PipelineEvent>>,
     ) -> Result<()> {
-        match cmd {
-            PipelineCmd::Start {
-                prompt,
-                root_workspace,
-            } => {
+        match &cmd.cmd {
+            PipelineCmd::Start { prompt, workspace } => {
                 let node = Node {
                     kind: NodeKind::Step,
                     history: vec![prompt.into()],
-                    workspace: root_workspace.fork().await?,
+                    workspace: workspace.fork().await?,
                     metrics: Default::default(),
                 };
                 *state = Some(Tree::new(node));
@@ -264,7 +263,7 @@ impl AgentPipeline {
     pub async fn search_solution(
         &mut self,
         root: &mut Tree<Node>,
-        event_tx: &tokio::sync::mpsc::Sender<PipelineEvent>,
+        event_tx: &tokio::sync::mpsc::Sender<Event<PipelineEvent>>,
     ) -> Result<usize> {
         let mut set = tokio::task::JoinSet::new();
         loop {
@@ -276,7 +275,8 @@ impl AgentPipeline {
                         set.spawn(async move {
                             rollout.rollout(trajectory).await.map(|node| (node, p_idx))
                         });
-                        let _ = event_tx.send(PipelineEvent::Scheduled(p_idx)).await;
+                        let event = PipelineEvent::Scheduled(p_idx);
+                        let _ = event_tx.send(Event::new(root.num_nodes(), event)).await;
                     }
                 }
                 SearchAction::Done(solution_id) => return Ok(solution_id),
@@ -286,7 +286,8 @@ impl AgentPipeline {
                     let (node, p_idx) = result??;
                     let node_id = root.add_node(node, p_idx)?;
                     self.search.unlock(p_idx)?;
-                    let _ = event_tx.send(PipelineEvent::Expanded(node_id, p_idx)).await;
+                    let event = PipelineEvent::Expanded(node_id, p_idx);
+                    let _ = event_tx.send(Event::new(root.num_nodes(), event)).await;
                 }
                 None => eyre::bail!("No rollouts selected"),
             }
@@ -296,8 +297,8 @@ impl AgentPipeline {
 
 impl super::Pipeline for AgentPipeline {
     type Checkpoint = Option<Tree<Node>>;
-    type Command = PipelineCmd;
-    type Event = PipelineEvent;
+    type Command = Command<PipelineCmd>;
+    type Event = Event<PipelineEvent>;
 
     async fn execute(
         &mut self,
@@ -326,7 +327,7 @@ impl super::Pipeline for AgentPipeline {
 pub enum PipelineCmd {
     Start {
         prompt: String,
-        root_workspace: Box<dyn WorkspaceDyn + 'static>,
+        workspace: Box<dyn WorkspaceDyn + 'static>,
     },
 }
 
@@ -394,10 +395,13 @@ Program will be run using uv run main.py command.
     let (cmd_tx, cmd_rx) = mpsc::channel(1);
     let (event_tx, mut event_rx) = mpsc::channel(1);
     let mut pipeline = AgentPipeline { rollout, search };
-    let command = PipelineCmd::Start {
-        prompt: prompt.to_string(),
-        root_workspace: Box::new(workspace),
-    };
+    let cmd = Command::new(
+        None,
+        PipelineCmd::Start {
+            prompt: prompt.to_string(),
+            workspace: Box::new(workspace),
+        },
+    );
 
     tokio::spawn(async move {
         tracing::info!("started event consumer");
@@ -410,7 +414,7 @@ Program will be run using uv run main.py command.
     tokio::spawn({
         let cmd_tx = cmd_tx.clone();
         async move {
-            let _ = cmd_tx.send(command).await;
+            let _ = cmd_tx.send(cmd).await;
         }
     });
 

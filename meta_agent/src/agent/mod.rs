@@ -32,10 +32,25 @@ pub struct Command<T> {
     pub cmd: T,
 }
 
-#[derive(Deserialize, Serialize)]
+impl<T> Command<T> {
+    pub fn new(node_seq_num: Option<usize>, cmd: T) -> Self {
+        Self { node_seq_num, cmd }
+    }
+}
+
+#[derive(Deserialize, Serialize, Debug)]
 pub struct Event<T> {
     pub node_seq_num: usize,
     pub event: T,
+}
+
+impl<T> Event<T> {
+    pub fn new(node_seq_num: usize, event: T) -> Self {
+        Self {
+            node_seq_num,
+            event,
+        }
+    }
 }
 
 pub trait Pipeline {

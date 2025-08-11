@@ -1,0 +1,1 @@
+[{% for msg in messages %}({{ msg.role }}, {% for item in msg.content %}"{{ item }}"{% if not loop.last %}, {% endif %}{% endfor %}){% if not loop.last %}, {% endif %}{% endfor %}]

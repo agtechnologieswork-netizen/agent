@@ -58,6 +58,17 @@ impl<T> Tree<T> {
         trajectory.reverse();
         trajectory
     }
+
+    pub fn get_children(&self, idx: usize) -> Vec<usize> {
+        self.edges
+            .iter()
+            .filter_map(
+                |&(parent, child)| {
+                    if parent == idx { Some(child) } else { None }
+                },
+            )
+            .collect()
+    }
 }
 
 #[cfg(test)]
