@@ -274,7 +274,7 @@ def matrix() -> None:
     summary_only = False
     filter_template = None
     filter_prompt = None
-    timeout_minutes = 10
+    timeout_minutes = 30
 
     if summary_only:
         generate_summary()

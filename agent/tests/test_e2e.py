@@ -109,7 +109,7 @@ async def run_e2e(prompt: str, standalone: bool, with_edit=True, template_id=Non
                     # Read all files from the patched directory to provide as context
                     files_for_snapshot = get_all_files_from_project_dir(temp_dir)
                     all_files = [f.model_dump() for f in files_for_snapshot]
-                    
+
                     new_events, new_request = await client.continue_conversation(
                         previous_events=events,
                         previous_request=request,
@@ -121,7 +121,7 @@ async def run_e2e(prompt: str, standalone: bool, with_edit=True, template_id=Non
                     updated_diff = latest_unified_diff(new_events)
                     assert updated_diff, "No diff was generated in the agent response after edit"
                     assert updated_diff != diff, "Edit did not produce a new diff"
-                    
+
                     # Apply the second diff (incremental on top of first)
                     success, message = apply_patch(updated_diff, temp_dir, template_paths[template_id])
                     assert success, f"Failed to apply second patch: {message}"
@@ -159,7 +159,6 @@ async def run_e2e(prompt: str, standalone: bool, with_edit=True, template_id=Non
                     )
 
                     if not container_healthy:
-                        breakpoint()
                         raise RuntimeError("Containers did not become healthy within the timeout period")
 
                     if standalone:
