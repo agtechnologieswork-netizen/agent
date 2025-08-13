@@ -14,6 +14,7 @@ from tenacity import (
     stop_after_attempt,
     wait_exponential_jitter,
     retry_if_exception,
+    retry_if_exception_type,
     before_sleep_log,
 )
 import uuid
