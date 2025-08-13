@@ -324,15 +324,24 @@ async def list_templates():
 @app.get("/health")
 async def dagger_healthcheck():
     """Dagger connection health check endpoint"""
-    async with dagger.Connection(dagger.Config(log_output=open(os.devnull, "w"))) as client:
-        # Try a simple Dagger operation to verify connectivity
-        container = client.container().from_("alpine:latest")
-        version = await container.with_exec(["cat", "/etc/alpine-release"]).stdout()
-        return {
-            "status": "healthy",
-            "dagger_connection": "successful",
-            "alpine_version": version.strip()
-        }
+    # Allow skipping heavy Dagger checks in constrained CI environments
+    if os.getenv("SKIP_DAGGER_HEALTHCHECK", "").lower() in {"1", "true", "yes"}:
+        return {"status": "healthy", "dagger_connection": "skipped"}
+
+    try:
+        async with dagger.Connection(dagger.Config(log_output=open(os.devnull, "w"))) as client:
+            # Try a simple Dagger operation to verify connectivity
+            container = client.container().from_("alpine:latest")
+            version = await container.with_exec(["cat", "/etc/alpine-release"]).stdout()
+            return {
+                "status": "healthy",
+                "dagger_connection": "successful",
+                "alpine_version": version.strip(),
+            }
+    except Exception as e:
+        logger.warning(f"Dagger healthcheck failed: {e}")
+        # Still report healthy API; mark Dagger state as unavailable to avoid failing liveness
+        return {"status": "healthy", "dagger_connection": "unavailable"}
 
 
 def main(

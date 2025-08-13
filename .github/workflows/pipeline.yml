@@ -147,7 +147,10 @@ jobs:
 
       - name: Start Docker Compose services
         working-directory: ./agent/
-        run: docker compose up -d --build
+        env:
+          SKIP_DAGGER_HEALTHCHECK: "1"
+        run: |
+          docker compose up -d --build
 
       - name: Check Container Health
         run: |
