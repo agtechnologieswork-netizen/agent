@@ -2,17 +2,18 @@ from typing import List
 
 from google import genai
 from google.genai import types as genai_types
-from google.genai.errors import ServerError
+from google.genai.errors import ServerError, ClientError
 import os
 from llm import common
 from llm.telemetry import LLMTelemetry
 from log import get_logger
 import logging
+import asyncio
 from tenacity import (
     retry,
     stop_after_attempt,
     wait_exponential_jitter,
-    retry_if_exception_type,
+    retry_if_exception,
     before_sleep_log,
 )
 import uuid
@@ -25,11 +26,32 @@ class RetryableError(RuntimeError):
     pass
 
 
-# retry decorator for gemini API errors
+# Concurrency throttle to reduce rate-limit bursts
+_GEMINI_MAX_CONCURRENCY = int(os.getenv("GEMINI_MAX_CONCURRENCY", "2"))
+_GEMINI_SEMAPHORE = asyncio.Semaphore(_GEMINI_MAX_CONCURRENCY)
+
+
+def _is_retryable_gemini_error(exception: BaseException) -> bool:
+    """Return True when the exception is retryable (rate limit or server error).
+
+    Gemini SDK raises ClientError for 4xx, ServerError for 5xx. We want to retry
+    on explicit 429 and on all 5xx. We also retry our own RetryableError sentinel.
+    """
+    if isinstance(exception, RetryableError):
+        return True
+    if isinstance(exception, ServerError):
+        return True
+    if isinstance(exception, ClientError):
+        status = getattr(exception, "status_code", None)
+        return status == 429
+    return False
+
+
+# retry decorator for gemini API errors (handles 429 and 5xx)
 retry_gemini_errors = retry(
     stop=stop_after_attempt(5),
     wait=wait_exponential_jitter(initial=1.5, max=30),
-    retry=retry_if_exception_type((RetryableError, ServerError, RuntimeError)),
+    retry=retry_if_exception(_is_retryable_gemini_error),
     before_sleep=before_sleep_log(logger, logging.WARNING),
     reraise=True,
 )
@@ -106,11 +128,20 @@ class GeminiLLM(common.AsyncLLM):
         telemetry = LLMTelemetry()
         telemetry.start_timing()
 
-        response = await self._async_client.models.generate_content(
-            model=self.model_name,
-            contents=gemini_messages,
-            config=config,
-        )
+        try:
+            async with _GEMINI_SEMAPHORE:
+                response = await self._async_client.models.generate_content(
+                    model=self.model_name,
+                    contents=gemini_messages,
+                    config=config,
+                )
+        except ClientError as e:
+            # Log context and let tenacity retry for 429
+            status = getattr(e, "status_code", None)
+            logger.warning(
+                f"Gemini client error (status={status}) while generating content for model {self.model_name}: {e}"
+            )
+            raise
 
         # Log telemetry if usage metadata is available
         if hasattr(response, "usage_metadata"):
