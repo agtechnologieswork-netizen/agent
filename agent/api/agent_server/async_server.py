@@ -47,6 +47,7 @@ from api.agent_server.template_diff_impl import TemplateDiffAgentImplementation
 from api.config import CONFIG
 
 from log import get_logger, configure_uvicorn_logging, set_trace_id, clear_trace_id
+from llm.telemetry import save_cumulative_stats
 
 logger = get_logger(__name__)
 
@@ -63,6 +64,9 @@ async def lifespan(app: FastAPI):
 
     yield
     logger.info("Shutting down Async Agent Server API")
+    
+    # save cumulative telemetry stats on shutdown
+    save_cumulative_stats()
 
 
 app = FastAPI(
