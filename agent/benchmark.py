@@ -69,16 +69,40 @@ def get_matrix_configurations() -> Tuple[Dict[str, str], List[str], Dict[str, st
     """Define the matrix components for ablation study."""
 
     prompts = {
-        "counter": "Implement a simple app with a counter of clicks on a single button with a backend with persistence in DB and a frontend. The simplest one possible!",
-        "todo": "Create a todo list app with backend persistence and ability to add, delete, and mark items as done. The simplest one possible!",
-        # "blog": "Build a blog application with posts, comments, and user authentication"
+        "plant-care-tracker": "A simple web app that lets users track the condition of their plants using fun plant moods based on custom rule-based logic. Avoid using AI, ML, or external APIs.",
+        "roommate-chore-wheel": "An app that randomly assigns chores each week and tracks completion.",
+        "car-maintenance-dashboard": "A dashboard to monitor car maintenance history and upcoming service dates.",
+        "city-trip-advisor": "A simple web app that suggests if tomorrow's trip to a given city is a good idea, based on open-meteo API's weather forecast for that city.",
+        "currency-converter": "A currency conversion app that takes an amount, source currency and target currency as input and converts it using the Frankfurter API.",
+        "book-library-manager": "A web app for managing a book library where users can add, view, update, and remove books, each with details like title, author, genre, and reading status. Include user-friendly forms, list views, and the ability to search or filter books.",
+        "wellness-score-tracker": "An app where users input hours of sleep, stress levels, caffeine/alcohol intake—then get a daily 'wellness score' with historical trends.",
+        "event-tracker": "A basic event tracker that lets users add, view, and delete events with a title, date, and description. Use a clean, modern UI with minimal code in your preferred framework.",
+        "daily-pattern-visualizer": "A dashboard where users log sleep, work hours, social time, screen time, and emotional energy. Visualize patterns and suggest when to take breaks.",
+        "pantry-inventory-app": "An app where users can add and track pantry items, get expiry notifications, and, if possible, generate recipe suggestions using AI based on available ingredients.",
+        "home-lab-inventory": "An application to catalog and manage home lab infrastructure. Users should be able to track hardware assets (servers, switches), software (VMs, containers), and manage IP address allocations.",
+        "basic-inventory-system": "A web-based inventory management system for small businesses. Key features should include product management (tracking names, SKUs, and stock levels) and a system for recording stock-in and stock-out transactions.",
+        "pastel-blue-notes-app": "A minimalist notes application with a pastel blue color scheme. It should allow users to create, edit, and organize notes into folders or categories, with user accounts for syncing across devices.",
+        "teacher-question-bank": "A question bank system for teachers to create and manage questions by subject and topic. Must include a feature to automatically generate quizzes from the bank and export them to a printable format.",
+        "beer-counter-app": "A simple, single-page web app to count beers. It should feature increment, decrement, and reset buttons, and use local storage to save the count without needing a login.",
+        "plumbing-business-landing-page": "A professional, responsive landing page for a plumbing business designed for lead generation. It must include sections for services offered, customer testimonials, and a clear contact form.",
+        "kanji-flashcards": "A Kanji learning app using a spaced repetition system (SRS). It should feature interactive flashcards with Kanji, meanings, and readings, allowing users to track progress across different JLPT levels.",
+        "bookmark-management-app": "A bookmark management application that allows users to save, tag, and organize links into collections. The system should support user accounts for syncing and include a powerful search feature.",
+        "personal-expense-tracker": "A personal expense tracking application for logging income and expenses. Users should be able to assign transactions to categories, set budgets, and view a dashboard with spending visualizations.",
+        "gym-crm": "A CRM for a gym to manage class reservations. It should feature a class schedule calendar where members can book spots, and an admin interface for managing classes and attendance.",
+        "todo-list-with-mood": "A daily journal application that combines a to-do list with a mood tracker. Users can manage tasks and log their daily mood, with a view to see the relationship over time.",
+        "birthday-wish-app": "A simple, single-page static website to serve as a digital birthday card. It should feature a personalized message, a small photo gallery, and a simple celebratory animation.",
+        "pc-gaming-niche-site": "A content-focused niche website featuring reviews of budget PC gaming peripherals. The site should be organized by product categories (mice, keyboards, etc.) and include a simple CMS for publishing articles.",
+        "tennis-enthusiast-platform": "A social platform for tennis players to find partners. Users can create profiles with their skill level and location, and search for other players nearby to schedule matches.",
+        "engineering-job-board": "A niche job board for engineering positions. It should allow employers to post jobs and job seekers to search and filter listings by engineering discipline and location.",
+        "indonesian-inventory-app": "Buatkan aplikasi manajemen inventaris (stok barang) dalam Bahasa Indonesia. Fitur utama harus mencakup pengelolaan daftar barang (tambah, edit, hapus) serta pencatatan transaksi barang masuk dan barang keluar."
     }
 
     template_ids = ["trpc_agent", "nicegui_agent"]
 
     coding_models = {
         "claude": "anthropic:claude-sonnet-4-20250514",
-        "qwen3-480b-35a": "openrouter:qwen/qwen3-coder"
+        "qwen3-480b-35a": "openrouter:qwen/qwen3-coder",
+        "gpt-oss": "openai/gpt-oss-120b",
     }
 
     universal_models = {
@@ -302,7 +326,7 @@ def single(prompt: str, template_id: str, output_dir: str) -> None:
     asyncio.run(run_single_generation(prompt, template_id, output_dir))
 
 
-def run_single_benchmark(config: Tuple, idx: int, total: int, results_dir: Path, 
+def run_single_benchmark(config: Tuple, idx: int, total: int, results_dir: Path,
                         timeout_minutes: int, resume: bool) -> None:
     """Run a single benchmark configuration."""
     (prompt_name, prompt_text), template_id, (coding_name, coding_model), (universal_name, universal_model) = config
@@ -319,7 +343,7 @@ def run_single_benchmark(config: Tuple, idx: int, total: int, results_dir: Path,
     # Allocate a unique port for this run
     host_port = find_free_port()
     trpc_port = find_free_port(host_port + 1000)  # tRPC backend port offset to avoid conflicts
-    
+
     try:
         log(f"[{idx}/{total}] Running: {run_name} (ports: {host_port}, {trpc_port})")
         run_dir.mkdir(parents=True, exist_ok=True)
@@ -370,7 +394,7 @@ def run_single_benchmark(config: Tuple, idx: int, total: int, results_dir: Path,
 
         # Save results
         save_run_results(run_dir, result, env, duration, config_info)
-        
+
     finally:
         # Always release the allocated ports
         release_port(host_port)
@@ -379,7 +403,7 @@ def run_single_benchmark(config: Tuple, idx: int, total: int, results_dir: Path,
 
 def matrix(concurrent: int = 1) -> None:
     """Run the full matrix benchmark study.
-    
+
     Args:
         concurrent: Number of parallel runs (1 = sequential, >1 = concurrent)
     """
@@ -420,16 +444,16 @@ def matrix(concurrent: int = 1) -> None:
     if concurrent <= 1:
         # Sequential execution (backward compatible)
         for idx, config in enumerate(matrix_combinations, 1):
-            run_single_benchmark(config, idx, len(matrix_combinations), 
+            run_single_benchmark(config, idx, len(matrix_combinations),
                                 results_dir, timeout_minutes, resume)
     else:
         # Concurrent execution using ThreadPoolExecutor
         from concurrent.futures import ThreadPoolExecutor, as_completed
-        
+
         # Limit concurrency to avoid resource exhaustion
         max_concurrent = min(concurrent, 8)  # Hard limit of 8 parallel runs
         log(f"Using {max_concurrent} concurrent workers")
-        
+
         with ThreadPoolExecutor(max_workers=max_concurrent) as executor:
             # Submit all tasks
             futures = []
@@ -439,7 +463,7 @@ def matrix(concurrent: int = 1) -> None:
                     results_dir, timeout_minutes, resume
                 )
                 futures.append(future)
-            
+
             # Wait for completion and handle any exceptions
             completed = 0
             for future in as_completed(futures):
