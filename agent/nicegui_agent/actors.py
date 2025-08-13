@@ -126,6 +126,10 @@ class NiceguiActor(FileOperationsActor):
 
             for i, new_node in enumerate(nodes):
                 logger.info(f"Evaluating node {i + 1}/{len(nodes)}")
+                # Guard: skip nodes that didn't produce any file edits
+                if not new_node.data.files:
+                    logger.info("Skipping node with no file changes (empty diff)")
+                    continue
                 if await self.eval_node(new_node, user_prompt):
                     logger.info(f"Found solution at depth {new_node.depth}")
                     await notify_stage(
