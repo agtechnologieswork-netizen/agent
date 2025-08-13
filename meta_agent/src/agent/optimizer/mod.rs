@@ -1,59 +1,81 @@
-use super::Tree;
+use super::{Pipeline, Tree};
+use crate::{agent::Command, llm::LLMClientDyn, workspace::WorkspaceDyn};
+use eyre::OptionExt;
 use serde::{Deserialize, Serialize};
+use std::sync::Arc;
 use tera::{Context, Tera};
+use tokio::sync::mpsc;
 
 const STEP_TEMPLATE: &'static str = include_str!("./templates/formatter/step.jinja2");
 
-#[derive(Deserialize, Serialize)]
+#[derive(Deserialize, Serialize, Clone, Copy)]
 pub enum Role {
     User,
     Assistant,
 }
 
 #[derive(Deserialize, Serialize)]
-pub struct Message {
-    pub role: Role,
-    pub content: Vec<String>,
+pub enum Content {
+    Text(String),
+    ToolCall {
+        id: String,
+        name: String,
+        args: serde_json::Value,
+    },
+    ToolResult {
+        id: String,
+        text: String,
+    },
+}
+
+impl std::fmt::Display for Content {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Content::Text(text) => write!(f, "{text}"),
+            Content::ToolCall { id, name, args } => {
+                write!(f, "tool: {id} name: {name} args: {args}")
+            }
+            Content::ToolResult { id, text } => write!(f, "tool: {id} result: {text}"),
+        }
+    }
 }
 
 #[derive(Deserialize, Serialize)]
-pub struct Step {
-    pub messages: Vec<Message>,
+pub struct Message<T> {
+    pub role: Role,
+    pub content: Vec<T>,
 }
 
-pub struct SimpleTrimmer {
-    pub max_content_len: usize,
-}
-
-impl SimpleTrimmer {
-    pub fn trim(&self, message: &rig::message::Message) -> Message {
+impl From<&rig::message::Message> for Message<Content> {
+    fn from(value: &rig::message::Message) -> Self {
         use rig::message::*;
         let mut m_content = Vec::new();
-        match message {
+        match value {
             Message::User { content } => {
                 for item in content.iter() {
                     match item {
                         UserContent::Text(text) => {
-                            let s = Self::up_to_n_chars(&text.text, self.max_content_len);
-                            m_content.push(s);
+                            m_content.push(Content::Text(text.text.clone()));
                         }
                         UserContent::ToolResult(tool) => {
-                            let mut buffer = String::new();
+                            let mut buffer = Vec::new();
                             for tool_item in tool.content.iter() {
                                 match tool_item {
                                     ToolResultContent::Text(text) => {
-                                        buffer.push_str(&text.text);
+                                        buffer.push(text.text.clone());
                                     }
                                     _ => continue,
                                 }
                             }
-                            let s = Self::up_to_n_chars(&buffer, self.max_content_len);
-                            m_content.push(format!("tool: {} content: {}", tool.id, s));
+                            m_content.push(Content::ToolResult {
+                                id: tool.id.clone(),
+                                text: buffer.join(" "),
+                            });
                         }
                         _ => continue,
                     }
                 }
-                super::optimizer::Message {
+                Self {
                     role: Role::User,
                     content: m_content,
                 }
@@ -62,22 +84,71 @@ impl SimpleTrimmer {
                 for item in content.iter() {
                     match item {
                         AssistantContent::Text(text) => {
-                            let s = Self::up_to_n_chars(&text.text, self.max_content_len);
-                            m_content.push(s);
+                            m_content.push(Content::Text(text.text.clone()));
                         }
                         AssistantContent::ToolCall(ToolCall { id, function, .. }) => {
-                            let s = serde_json::to_string(&function.arguments).unwrap();
-                            let s = Self::up_to_n_chars(&s, self.max_content_len);
-                            let s = format!("tool: {} name: {} args: {}", id, function.name, s);
-                            m_content.push(s);
+                            m_content.push(Content::ToolCall {
+                                id: id.clone(),
+                                name: function.name.clone(),
+                                args: function.arguments.clone(),
+                            });
                         }
                     }
                 }
-                super::optimizer::Message {
+                Self {
                     role: Role::Assistant,
                     content: m_content,
                 }
             }
+        }
+    }
+}
+
+impl From<&Message<Content>> for Message<String> {
+    fn from(value: &Message<Content>) -> Self {
+        Self {
+            role: value.role,
+            content: value.content.iter().map(|x| x.to_string()).collect(),
+        }
+    }
+}
+
+#[derive(Deserialize, Serialize)]
+pub struct Step {
+    pub messages: Vec<Message<String>>,
+}
+
+pub struct Trimmer {
+    pub max_len: usize,
+}
+
+impl Default for Trimmer {
+    fn default() -> Self {
+        Self { max_len: 50 }
+    }
+}
+
+impl Trimmer {
+    pub fn trim(&self, message: &Message<Content>) -> Message<String> {
+        let content = message
+            .content
+            .iter()
+            .map(|item| match item {
+                Content::Text(text) => Self::up_to_n_chars(text, self.max_len),
+                Content::ToolCall { id, name, args } => {
+                    let args =
+                        Self::up_to_n_chars(&serde_json::to_string(args).unwrap(), self.max_len);
+                    format!("tool: {id} name: {name} args: {args}")
+                }
+                Content::ToolResult { id, text } => {
+                    let result = Self::up_to_n_chars(text, self.max_len);
+                    format!("tool: {id} result: {result}")
+                }
+            })
+            .collect();
+        Message {
+            role: message.role,
+            content: content,
         }
     }
 
@@ -94,11 +165,11 @@ impl SimpleTrimmer {
     }
 }
 
-pub struct SimpleFormatter {
+pub struct Formatter {
     tera: Tera,
 }
 
-impl Default for SimpleFormatter {
+impl Default for Formatter {
     fn default() -> Self {
         let mut tera = Tera::default();
         tera.add_raw_template(Self::step_template(), STEP_TEMPLATE)
@@ -107,7 +178,7 @@ impl Default for SimpleFormatter {
     }
 }
 
-impl SimpleFormatter {
+impl Formatter {
     pub fn format(&self, root: &Tree<Step>) -> eyre::Result<String> {
         let mut result = String::new();
         let mut stack = vec![(0, 0)]; // (node_idx, depth)
@@ -130,6 +201,78 @@ impl SimpleFormatter {
     fn step_template() -> &'static str {
         "step"
     }
+}
+
+#[derive(Deserialize, Serialize)]
+pub struct AgentConfig {
+    pub preamble: String,
+}
+
+#[derive(Deserialize, Serialize)]
+pub struct Evaluation {
+    pub trajectories: Vec<Tree<super::actor::Node>>,
+    pub score: f32,
+    //pub metrics: HashMap<String, f32>,
+}
+
+pub struct Evaluator {
+    pub pipeline: super::actor::AgentPipeline,
+    pub workspace: Box<dyn WorkspaceDyn + 'static>,
+    pub dataset: Vec<String>,
+}
+
+impl Evaluator {
+    pub async fn evaluate(&self, config: &AgentConfig) -> eyre::Result<Evaluation> {
+        let mut set = tokio::task::JoinSet::new();
+        for prompt in self.dataset.iter().cloned() {
+            let workspace = self.workspace.fork().await?;
+            let mut pipeline = self.pipeline.clone();
+            pipeline.rollout.preamble = config.preamble.clone();
+            set.spawn(async move {
+                let (cmd_tx, cmd_rx) = mpsc::channel(1);
+                let (event_tx, mut event_rx) = mpsc::channel(1);
+                let cmd = Command::new(
+                    None,
+                    super::actor::PipelineCmd::Start {
+                        prompt: prompt.to_string(),
+                        workspace: workspace,
+                    },
+                );
+
+                tokio::spawn(async move { while let Some(_) = event_rx.recv().await {} });
+                tokio::spawn({
+                    let cmd_tx = cmd_tx.clone();
+                    async move {
+                        let _ = cmd_tx.send(cmd).await;
+                    }
+                });
+
+                let result = pipeline.execute(cmd_rx, event_tx).await?;
+                result.ok_or_eyre("no solutions")
+            });
+        }
+        let mut trajectories = Vec::new();
+        while let Some(result) = set.join_next().await {
+            trajectories.push(result??);
+        }
+        let mut score = 0f32;
+        for t in trajectories.iter() {
+            for idx in 0..t.num_nodes() {
+                score += t.get_node(idx).metrics.output_tokens as f32;
+            }
+        }
+        let score = trajectories.len() as f32 / score;
+        Ok(Evaluation {
+            trajectories,
+            score,
+        })
+    }
+}
+
+pub struct PromptSampler {
+    pub llm: Arc<dyn LLMClientDyn>,
+    pub tools: Arc<Vec<Box<dyn rig::tool::ToolDyn>>>,
+    pub model: String,
 }
 
 pub fn test_step_render() {
@@ -157,14 +300,12 @@ pub fn test_traj_render() {
     let save = std::fs::read("trajectory.json").unwrap();
     let trajectory: Tree<super::actor::Node> = serde_json::from_slice(&save).unwrap();
 
-    let trimmer = SimpleTrimmer {
-        max_content_len: 50,
-    };
+    let trimmer = Trimmer::default();
     let mut steps = Vec::new();
     for idx in 0..trajectory.num_nodes() {
         let mut messages = Vec::new();
         for m in trajectory.get_node(idx).history.iter() {
-            messages.push(trimmer.trim(m));
+            messages.push(trimmer.trim(&m.into()));
         }
         steps.push(Step { messages });
     }
@@ -228,9 +369,26 @@ pub fn test_simple_formatter() {
     tree.add_node(grandchild_step, child1_idx).unwrap();
 
     // Format and print the tree
-    let formatter = SimpleFormatter::default();
+    let formatter = Formatter::default();
     let formatted = formatter.format(&tree).unwrap();
 
     tracing::info!(formatted, "tree_structure");
     std::fs::write("tree_structure.txt", &formatted).unwrap();
+}
+
+pub fn test_traj_formatter() {
+    let save = std::fs::read("trajectory.json").unwrap();
+    let trajectory: Tree<super::actor::Node> = serde_json::from_slice(&save).unwrap();
+
+    let trimmer = Trimmer::default();
+    let tree = trajectory.map_nodes(|n| Step {
+        messages: n.history.iter().map(|m| trimmer.trim(&m.into())).collect(),
+    });
+
+    // Format and print the tree
+    let formatter = Formatter::default();
+    let formatted = formatter.format(&tree).unwrap();
+
+    tracing::info!(formatted, "tree_structure");
+    std::fs::write("tree_trajectory.txt", &formatted).unwrap();
 }

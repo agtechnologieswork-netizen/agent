@@ -232,6 +232,7 @@ impl Search<Node> for SearchActor {
     }
 }
 
+#[derive(Clone)]
 pub struct AgentPipeline {
     pub rollout: AgentActor,
     pub search: SearchActor,
@@ -353,6 +354,60 @@ impl Checker for PythonChecker {
             _ => Some(serde_json::json!({"stdout": result.stdout, "stderr": result.stderr})),
         })
     }
+}
+
+pub async fn eval_demo_agent() -> Result<()> {
+    use crate::agent::optimizer::{self};
+    use crate::{agent::toolset, tools_vec};
+    use rig::client::ProviderClient;
+
+    let client = rig::providers::anthropic::Client::from_env();
+    let preamble = "
+You are a python software engineer.
+Workspace is already set up using uv init.
+Use uv package manager if you need to add extra libraries.
+Program will be run using uv run main.py command.
+"
+    .to_string();
+    let model = "claude-sonnet-4-20250514".to_string();
+    let tools = tools_vec![
+        toolset::BashTool,
+        toolset::WriteFileTool,
+        toolset::ReadFileTool,
+        toolset::LsDirTool,
+        toolset::RmFileTool,
+        toolset::EditFileTool,
+        node: toolset::FinishTool::new(PythonChecker),
+    ];
+    let search = SearchActor::new().with_limit(10);
+    let rollout = AgentActor {
+        llm: Arc::new(client),
+        tools: Arc::new(tools),
+        model,
+        preamble: preamble.clone(),
+    };
+    let dagger_ref = crate::workspace::dagger::DaggerRef::new();
+    let workspace = dagger_ref
+        .workspace("Dockerfile.appbuild".into(), "./src/stacks/python".into())
+        .await?;
+    let pipeline = AgentPipeline { rollout, search };
+    let evaluator = optimizer::Evaluator {
+        pipeline,
+        workspace: Box::new(workspace),
+        dataset: vec![
+            "Create a simple python script that fetches my public ip using one of the common services.".to_string(),
+            "Create s python script that reads a csv file using pandas and prints first 5 rows".to_string(),
+        ],
+    };
+    let evaluation = evaluator
+        .evaluate(&optimizer::AgentConfig {
+            preamble: preamble.clone(),
+        })
+        .await?;
+
+    let result = serde_json::to_string_pretty(&evaluation)?;
+    std::fs::write("evaluation.json", &result)?;
+    Ok(())
 }
 
 pub async fn run_demo_agent() -> Result<()> {

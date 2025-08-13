@@ -36,6 +36,14 @@ impl<T> Tree<T> {
         &self.nodes[idx]
     }
 
+    pub fn get_nodes(&self) -> &[T] {
+        &self.nodes
+    }
+
+    pub fn get_edges(&self) -> &[(usize, usize)] {
+        &self.edges
+    }
+
     pub fn get_leafs_idx(&self) -> Vec<usize> {
         let parents: std::collections::HashSet<usize> =
             self.edges.iter().map(|&(p, _)| p).collect();
@@ -68,6 +76,13 @@ impl<T> Tree<T> {
                 },
             )
             .collect()
+    }
+
+    pub fn map_nodes<F: FnMut(&T) -> U, U>(&self, f: F) -> Tree<U> {
+        Tree {
+            nodes: self.nodes.iter().map(f).collect(),
+            edges: self.edges.clone(),
+        }
     }
 }
 
