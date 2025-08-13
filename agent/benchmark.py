@@ -20,15 +20,49 @@ import csv
 import sys
 import shutil
 import tempfile
+import socket
+import threading
 from pathlib import Path
 from datetime import datetime
-from typing import Dict, List, Tuple, Any
+from typing import Dict, List, Tuple, Any, Set
 import fire
 from tests.test_e2e import run_e2e
 
 
 def log(msg: str) -> None:
     print(f"[{datetime.now().strftime('%H:%M:%S')}] {msg}")
+
+
+# Port allocation for concurrent execution
+_port_lock = threading.Lock()
+_allocated_ports: Set[int] = set()
+
+
+def find_free_port(start_port: int = 8080) -> int:
+    """Find a free port starting from start_port."""
+    with _port_lock:
+        port = start_port
+        while port in _allocated_ports or not _is_port_available(port):
+            port += 1
+        _allocated_ports.add(port)
+        return port
+
+
+def release_port(port: int) -> None:
+    """Release a port back to the pool."""
+    with _port_lock:
+        _allocated_ports.discard(port)
+
+
+def _is_port_available(port: int) -> bool:
+    """Check if a port is available on localhost."""
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            sock.bind(('localhost', port))
+            return True
+    except OSError:
+        return False
 
 
 def get_matrix_configurations() -> Tuple[Dict[str, str], List[str], Dict[str, str], Dict[str, str]]:
@@ -268,8 +302,87 @@ def single(prompt: str, template_id: str, output_dir: str) -> None:
     asyncio.run(run_single_generation(prompt, template_id, output_dir))
 
 
-def matrix() -> None:
-    """Run the full matrix benchmark study."""
+def run_single_benchmark(config: Tuple, idx: int, total: int, results_dir: Path, 
+                        timeout_minutes: int, resume: bool) -> None:
+    """Run a single benchmark configuration."""
+    (prompt_name, prompt_text), template_id, (coding_name, coding_model), (universal_name, universal_model) = config
+
+    # Generate readable run name
+    run_name = f"{prompt_name}_{template_id.replace('_', '-')}_{coding_name}_{universal_name}"
+    run_dir = results_dir / run_name
+
+    # Skip if already completed and in resume mode
+    if resume and (run_dir / "status.json").exists():
+        log(f"[{idx}/{total}] Skipping {run_name} - already completed")
+        return
+
+    # Allocate a unique port for this run
+    host_port = find_free_port()
+    trpc_port = find_free_port(host_port + 1000)  # tRPC backend port offset to avoid conflicts
+    
+    try:
+        log(f"[{idx}/{total}] Running: {run_name} (ports: {host_port}, {trpc_port})")
+        run_dir.mkdir(parents=True, exist_ok=True)
+
+        # Set unique telemetry log path
+        telemetry_path = run_dir / "telemetry.json"
+
+        # Prepare environment
+        env = os.environ.copy()
+        env["CUMULATIVE_TELEMETRY_LOG"] = str(telemetry_path)
+        env["LLM_BEST_CODING_MODEL"] = coding_model
+        env["LLM_UNIVERSAL_MODEL"] = universal_model
+        env["HOST_PORT"] = str(host_port)
+        env["HOST_PORT_TRPC"] = str(trpc_port)
+
+        config_info = {
+            "prompt_name": prompt_name,
+            "template_id": template_id,
+            "coding_model_name": coding_name,
+            "universal_model_name": universal_name
+        }
+
+        # Run generation subprocess
+        start_time = datetime.now()
+        try:
+            result = subprocess.run(
+                ["uv", "run", "python", "benchmark.py", "single",
+                 "--prompt", prompt_text,
+                 "--template-id", template_id,
+                 "--output-dir", str(run_dir)],
+                env=env,
+                capture_output=True,
+                text=True,
+                timeout=timeout_minutes * 60
+            )
+        except subprocess.TimeoutExpired as e:
+            log(f"  [{idx}/{total}] TIMEOUT {run_name} after {timeout_minutes} minutes")
+            # Capture whatever output we got before timeout
+            stdout = e.stdout.decode() if e.stdout else ""
+            stderr = e.stderr.decode() if e.stderr else ""
+            result = subprocess.CompletedProcess(
+                args=e.args, returncode=124,
+                stdout=stdout,
+                stderr=stderr + f"\nProcess timed out after {timeout_minutes} minutes"
+            )
+
+        duration = (datetime.now() - start_time).total_seconds()
+
+        # Save results
+        save_run_results(run_dir, result, env, duration, config_info)
+        
+    finally:
+        # Always release the allocated ports
+        release_port(host_port)
+        release_port(trpc_port)
+
+
+def matrix(concurrent: int = 1) -> None:
+    """Run the full matrix benchmark study.
+    
+    Args:
+        concurrent: Number of parallel runs (1 = sequential, >1 = concurrent)
+    """
     resume = False
     summary_only = False
     filter_template = None
@@ -297,72 +410,45 @@ def matrix() -> None:
     ))
 
     log(f"Total runs to execute: {len(matrix_combinations)}")
+    log(f"Concurrency level: {concurrent}")
     if resume:
         log("Resume mode: will skip completed runs")
 
     results_dir = Path("benchmark_results")
     results_dir.mkdir(exist_ok=True)
 
-    # Sequential execution (required due to Docker port 80)
-    for idx, config in enumerate(matrix_combinations, 1):
-        (prompt_name, prompt_text), template_id, (coding_name, coding_model), (universal_name, universal_model) = config
-
-        # Generate readable run name
-        run_name = f"{prompt_name}_{template_id.replace('_', '-')}_{coding_name}_{universal_name}"
-        run_dir = results_dir / run_name
-
-        # Skip if already completed and in resume mode
-        if resume and (run_dir / "status.json").exists():
-            log(f"[{idx}/{len(matrix_combinations)}] Skipping {run_name} - already completed")
-            continue
-
-        log(f"[{idx}/{len(matrix_combinations)}] Running: {run_name}")
-        run_dir.mkdir(parents=True, exist_ok=True)
-
-        # Set unique telemetry log path
-        telemetry_path = run_dir / "telemetry.json"
-
-        # Prepare environment
-        env = os.environ.copy()
-        env["CUMULATIVE_TELEMETRY_LOG"] = str(telemetry_path)
-        env["LLM_BEST_CODING_MODEL"] = coding_model
-        env["LLM_UNIVERSAL_MODEL"] = universal_model
-
-        config_info = {
-            "prompt_name": prompt_name,
-            "template_id": template_id,
-            "coding_model_name": coding_name,
-            "universal_model_name": universal_name
-        }
-
-        # Run generation subprocess
-        start_time = datetime.now()
-        try:
-            result = subprocess.run(
-                ["uv", "run", "python", "benchmark.py", "single",
-                 "--prompt", prompt_text,
-                 "--template-id", template_id,
-                 "--output-dir", str(run_dir)],
-                env=env,
-                capture_output=True,
-                text=True,
-                timeout=timeout_minutes * 60
-            )
-        except subprocess.TimeoutExpired as e:
-            log(f"  TIMEOUT after {timeout_minutes} minutes")
-            # Capture whatever output we got before timeout
-            stdout = e.stdout.decode() if e.stdout else ""
-            stderr = e.stderr.decode() if e.stderr else ""
-            result = subprocess.CompletedProcess(
-                args=e.args, returncode=124,
-                stdout=stdout,
-                stderr=stderr + f"\nProcess timed out after {timeout_minutes} minutes"
-            )
-
-        duration = (datetime.now() - start_time).total_seconds()
-
-        # Save results
-        save_run_results(run_dir, result, env, duration, config_info)
+    if concurrent <= 1:
+        # Sequential execution (backward compatible)
+        for idx, config in enumerate(matrix_combinations, 1):
+            run_single_benchmark(config, idx, len(matrix_combinations), 
+                                results_dir, timeout_minutes, resume)
+    else:
+        # Concurrent execution using ThreadPoolExecutor
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+        
+        # Limit concurrency to avoid resource exhaustion
+        max_concurrent = min(concurrent, 8)  # Hard limit of 8 parallel runs
+        log(f"Using {max_concurrent} concurrent workers")
+        
+        with ThreadPoolExecutor(max_workers=max_concurrent) as executor:
+            # Submit all tasks
+            futures = []
+            for idx, config in enumerate(matrix_combinations, 1):
+                future = executor.submit(
+                    run_single_benchmark, config, idx, len(matrix_combinations),
+                    results_dir, timeout_minutes, resume
+                )
+                futures.append(future)
+            
+            # Wait for completion and handle any exceptions
+            completed = 0
+            for future in as_completed(futures):
+                try:
+                    future.result()  # This will raise any exception that occurred
+                    completed += 1
+                except Exception as e:
+                    log(f"Error in concurrent execution: {e}")
+                    completed += 1
 
     log("=" * 50)
     log("Matrix benchmark completed!")
