@@ -110,8 +110,16 @@ jobs:
         with:
           version: "0.7.3"
 
+      - name: Sync deps (dev)
+        working-directory: ./agent/
+        run: uv sync --dev
+
       - name: Run tests
         working-directory: ./agent/
+        env:
+          PYTHONPATH: .
+          GEMINI_MAX_CONCURRENCY: "2"
+          LLM_VCR_CACHE_MODE: lru
         run: |
           echo "Running tests..."
           uv run test --verbose --exclude e2e
@@ -194,6 +202,9 @@ jobs:
 
       - name: Run E2E tests
         working-directory: ./agent/
+        env:
+          GEMINI_MAX_CONCURRENCY: "2"
+          LLM_VCR_CACHE_MODE: lru
         run: |
           echo "Running E2E tests for ${{ matrix.template }}..."
           uv run test_e2e ${{ matrix.template }}
