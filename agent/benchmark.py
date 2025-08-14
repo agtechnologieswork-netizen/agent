@@ -69,7 +69,7 @@ def get_matrix_configurations() -> Tuple[Dict[str, str], List[str], Dict[str, st
     """Define the matrix components for ablation study."""
 
     prompts = {
-        plant-care-tracker": "A simple web app that lets users track the condition of their plants using fun plant moods based on custom rule-based logic. Avoid using AI, ML, or external APIs.",
+        "plant-care-tracker": "A simple web app that lets users track the condition of their plants using fun plant moods based on custom rule-based logic. Avoid using AI, ML, or external APIs.",
         "roommate-chore-wheel": "An app that randomly assigns chores each week and tracks completion.",
         "car-maintenance-dashboard": "A dashboard to monitor car maintenance history and upcoming service dates.",
         "city-trip-advisor": "A simple web app that suggests if tomorrow's trip to a given city is a good idea, based on open-meteo API's weather forecast for that city.",
