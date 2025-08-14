@@ -88,16 +88,16 @@ def get_matrix_configurations() -> Tuple[Dict[str, str], List[str], Dict[str, st
         "kanji-flashcards": "A Kanji learning app using a spaced repetition system (SRS). It should feature interactive flashcards with Kanji, meanings, and readings, allowing users to track progress across different JLPT levels.",
         "bookmark-management-app": "A bookmark management application that allows users to save, tag, and organize links into collections. The system should support user accounts for syncing and include a powerful search feature.",
         "personal-expense-tracker": "A personal expense tracking application for logging income and expenses. Users should be able to assign transactions to categories, set budgets, and view a dashboard with spending visualizations.",
-        "gym-crm": "A CRM for a gym to manage class reservations. It should feature a class schedule calendar where members can book spots, and an admin interface for managing classes and attendance.",
+        "gym-crm": "A CRM for a gym to manage class reservations. It should feature a class schedule calendar where members can book spots, and an admin interface for managing classes and attendance. GYM STYLE VISUALS PLEASE!",
         "todo-list-with-mood": "A daily journal application that combines a to-do list with a mood tracker. Users can manage tasks and log their daily mood, with a view to see the relationship over time.",
         "birthday-wish-app": "A simple, single-page static website to serve as a digital birthday card. It should feature a personalized message, a small photo gallery, and a simple celebratory animation.",
         "pc-gaming-niche-site": "A content-focused niche website featuring reviews of budget PC gaming peripherals. The site should be organized by product categories (mice, keyboards, etc.) and include a simple CMS for publishing articles.",
-        "tennis-enthusiast-platform": "A social platform for tennis players to find partners. Users can create profiles with their skill level and location, and search for other players nearby to schedule matches.",
-        "engineering-job-board": "A niche job board for engineering positions. It should allow employers to post jobs and job seekers to search and filter listings by engineering discipline and location.",
+        "tennis-enthusiast-platform": "Hipster-looking social platform for tennis players to find partners. Users can create profiles with their skill level and location, and search for other players nearby to schedule matches.",
+        "engineering-job-board": "A nerd-style niche job board for engineering positions. It should allow employers to post jobs and job seekers to search and filter listings by engineering discipline and location",
         "indonesian-inventory-app": "Buatkan aplikasi manajemen inventaris (stok barang) dalam Bahasa Indonesia. Fitur utama harus mencakup pengelolaan daftar barang (tambah, edit, hapus) serta pencatatan transaksi barang masuk dan barang keluar.",
         "habit-tracker-app": "A simple app to help users build and maintain positive habits. Users can define custom habits, track their daily progress with a simple check-in, and visualize their streaks over time to stay motivated.",
-        "recipe-sharing-platform": "A community-based platform where users can post, browse, and save their favorite recipes. Each recipe includes ingredients, instructions, and categories, with a search feature to find new meals.",
-        "pomodoro-study-timer": "A minimalist Pomodoro timer to boost productivity. It features customizable work and break intervals, audio alerts, and a simple log to track completed study sessions throughout the day."
+        "recipe-sharing-platform": "A warm community-based platform where users can post, browse, and save their favorite recipes. Each recipe includes ingredients, instructions, and categories, with a search feature to find new meals.",
+        "pomodoro-study-timer": "Brutally minimalistic Pomodoro timer to boost productivity. It features customizable work and break intervals, audio alerts, and a simple log to track completed study sessions throughout the day."
     }
 
     template_ids = ["trpc_agent", "nicegui_agent"]
