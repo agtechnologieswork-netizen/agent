@@ -97,7 +97,8 @@ def get_matrix_configurations() -> Tuple[Dict[str, str], List[str], Dict[str, st
         "indonesian-inventory-app": "Buatkan aplikasi manajemen inventaris (stok barang) dalam Bahasa Indonesia. Fitur utama harus mencakup pengelolaan daftar barang (tambah, edit, hapus) serta pencatatan transaksi barang masuk dan barang keluar.",
         "habit-tracker-app": "A simple app to help users build and maintain positive habits. Users can define custom habits, track their daily progress with a simple check-in, and visualize their streaks over time to stay motivated.",
         "recipe-sharing-platform": "A warm community-based platform where users can post, browse, and save their favorite recipes. Each recipe includes ingredients, instructions, and categories, with a search feature to find new meals.",
-        "pomodoro-study-timer": "Brutally minimalistic Pomodoro timer to boost productivity. It features customizable work and break intervals, audio alerts, and a simple log to track completed study sessions throughout the day."
+        "pomodoro-study-timer": "Brutally minimalistic Pomodoro timer to boost productivity. It features customizable work and break intervals, audio alerts, and a simple log to track completed study sessions throughout the day.",
+        "cat-conspiracy-tracker": "A humorous app for paranoid cat owners to log their pet's suspicious activities. The app uses a custom, non-scientific scoring system based on logged behaviors (like prolonged staring or 'gifts' of dead insects) to calculate a daily 'conspiracy level'."
     }
 
     template_ids = ["trpc_agent", "nicegui_agent"]
