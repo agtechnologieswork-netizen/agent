@@ -13,6 +13,9 @@ from llm.common import Tool, ToolUse, ToolUseResult, TextRaw
 from llm.utils import get_ultra_fast_llm_client
 from log import get_logger
 
+# ExceptionGroup support for Python 3.11+
+from builtins import BaseExceptionGroup
+
 logger = get_logger(__name__)
 
 
@@ -246,6 +249,17 @@ class FileOperationsActor(BaseActor, LLMActor, ABC):
             for k, v in d.items()
             if isinstance(v, str)
         )
+
+    def _unpack_exception_group(self, exc: BaseException) -> list[BaseException]:
+        """Recursively unpack ExceptionGroup to get all individual exceptions."""
+        if isinstance(exc, BaseExceptionGroup):
+            exceptions = []
+            for e in exc.exceptions:
+                exceptions.extend(self._unpack_exception_group(e))
+            return exceptions
+        else:
+            # base case: regular exception
+            return [exc]
 
     async def handle_custom_tool(
         self, tool_use: ToolUse, node: Node[BaseData]
@@ -550,8 +564,18 @@ class FileOperationsActor(BaseActor, LLMActor, ABC):
                 logger.info(f"Value error: {e}")
                 result.append(ToolUseResult.from_tool_use(block, str(e), is_error=True))
             except Exception as e:
-                logger.error(f"Unknown error: {e}")
-                result.append(ToolUseResult.from_tool_use(block, str(e), is_error=True))
+                # handle ExceptionGroup by unpacking recursively
+                if isinstance(e, BaseExceptionGroup):
+                    all_exceptions = self._unpack_exception_group(e)
+                    error_messages = []
+                    for exc in all_exceptions:
+                        logger.error(f"Exception in group: {type(exc).__name__}: {exc}")
+                        error_messages.append(f"{type(exc).__name__}: {str(exc)}")
+                    combined_error = "Multiple errors occurred:\n" + "\n".join(error_messages)
+                    result.append(ToolUseResult.from_tool_use(block, combined_error, is_error=True))
+                else:
+                    logger.error(f"Unknown error: {e}")
+                    result.append(ToolUseResult.from_tool_use(block, str(e), is_error=True))
 
         return result, is_completed
 
