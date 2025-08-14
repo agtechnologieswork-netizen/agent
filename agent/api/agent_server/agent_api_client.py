@@ -1161,11 +1161,14 @@ def spawn_local_server(
     Args:
         command: Command to run the server as a list of strings
         host: Host to use for connection
-        port: Port to use for connection
+        port: Port to use for connection (can be overridden by AGENT_SERVER_PORT env var)
 
     Yields:
         Tuple of (host, port) for connecting to the server
     """
+    # allow port override via environment variable for concurrent execution
+    port = int(os.getenv("AGENT_SERVER_PORT", port))
+    
     proc = None
     std_err_file = None
     temp_dir = None
@@ -1173,8 +1176,14 @@ def spawn_local_server(
     try:
         temp_dir = tempfile.mkdtemp()
         std_err_file = open(os.path.join(temp_dir, "server_stderr.log"), "a+")
+        
+        # add port argument to the command if it's different from default
+        cmd = command.copy()
+        if port != 8001:
+            cmd.extend(["--port", str(port)])
+        
         proc = subprocess.Popen(
-            command, stdout=subprocess.PIPE, stderr=std_err_file, text=True
+            cmd, stdout=subprocess.PIPE, stderr=std_err_file, text=True
         )
         print(
             f"Local server started, pid {proc.pid}, check `tail -f {std_err_file.name}` for logs"

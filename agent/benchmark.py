@@ -344,12 +344,13 @@ def run_single_benchmark(config: Tuple, idx: int, total: int, results_dir: Path,
         log(f"[{idx}/{total}] Skipping {run_name} - already completed")
         return
 
-    # Allocate a unique port for this run
+    # Allocate unique ports for this run
     host_port = find_free_port()
     trpc_port = find_free_port(host_port + 1000)  # tRPC backend port offset to avoid conflicts
+    agent_server_port = find_free_port(host_port + 2000)  # agent server port offset to avoid conflicts
 
     try:
-        log(f"[{idx}/{total}] Running: {run_name} (ports: {host_port}, {trpc_port})")
+        log(f"[{idx}/{total}] Running: {run_name} (ports: {host_port}, {trpc_port}, agent: {agent_server_port})")
         run_dir.mkdir(parents=True, exist_ok=True)
 
         # Set unique telemetry log path
@@ -362,6 +363,7 @@ def run_single_benchmark(config: Tuple, idx: int, total: int, results_dir: Path,
         env["LLM_UNIVERSAL_MODEL"] = universal_model
         env["HOST_PORT"] = str(host_port)
         env["HOST_PORT_TRPC"] = str(trpc_port)
+        env["AGENT_SERVER_PORT"] = str(agent_server_port)
 
         config_info = {
             "prompt_name": prompt_name,
@@ -384,17 +386,17 @@ def run_single_benchmark(config: Tuple, idx: int, total: int, results_dir: Path,
                 stderr=subprocess.PIPE,
                 text=True
             )
-            
+
             # wait for completion with timeout
             stdout, stderr = process.communicate(timeout=timeout_minutes * 60)
             result = subprocess.CompletedProcess(
                 args=process.args, returncode=process.returncode,
                 stdout=stdout, stderr=stderr
             )
-            
+
         except subprocess.TimeoutExpired:
             log(f"  [{idx}/{total}] TIMEOUT {run_name} after {timeout_minutes} minutes")
-            
+
             # first try graceful termination to allow telemetry saving
             if process:
                 try:
@@ -406,7 +408,7 @@ def run_single_benchmark(config: Tuple, idx: int, total: int, results_dir: Path,
                     log("  Graceful termination failed, force killing process")
                     process.kill()
                     stdout, stderr = process.communicate()
-                
+
                 result = subprocess.CompletedProcess(
                     args=process.args, returncode=124,
                     stdout=stdout or "",
@@ -428,6 +430,7 @@ def run_single_benchmark(config: Tuple, idx: int, total: int, results_dir: Path,
         # Always release the allocated ports
         release_port(host_port)
         release_port(trpc_port)
+        release_port(agent_server_port)
 
 
 def matrix(concurrent: int = 1, resume = True) -> None:
