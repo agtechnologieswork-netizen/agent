@@ -156,7 +156,26 @@ jobs:
       - name: Check Container Health
         run: |
           sleep 30
+          echo "=== CI Environment Debug ==="
+          echo "Docker info:"
+          docker info | grep -E "(Storage Driver|Cgroup Driver|Security Options)"
+          echo "Container runtime:"
+          docker system info --format '{{.DefaultRuntime}}'
+          
+          echo "=== Container Debug ==="
           echo "Checking health of container: ${{ env.CONTAINER_NAME }}"
+          docker logs --tail 10 ${{ env.CONTAINER_NAME }} || echo "Could not get logs"
+          
+          # Test direct health endpoint before checking Docker health status
+          echo "=== Testing health endpoint directly ==="
+          if docker exec ${{ env.CONTAINER_NAME }} curl -f http://localhost:8001/health 2>/dev/null; then
+            echo "✅ Direct curl to /health succeeded - issue is with Docker health check"
+          else
+            echo "❌ Direct curl to /health failed - issue is with the endpoint itself"
+            docker exec ${{ env.CONTAINER_NAME }} ps aux || true
+            docker exec ${{ env.CONTAINER_NAME }} netstat -tlnp || true
+          fi
+          
           status=$(docker inspect --format='{{.State.Health.Status}}' ${{ env.CONTAINER_NAME }})
 
           if [ "$status" = "healthy" ]; then
