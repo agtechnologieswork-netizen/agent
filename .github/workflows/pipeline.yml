@@ -137,6 +137,18 @@ jobs:
       - name: Set up Docker Compose
         uses: docker/setup-compose-action@v1
 
+      - name: Pre-warm Docker and Dagger
+        run: |
+          echo "=== Pre-warming Docker daemon ==="
+          timeout 60 bash -c 'until docker info >/dev/null 2>&1; do echo "Waiting for docker daemon..."; sleep 1; done'
+          
+          # Pre-load Alpine image AND test container execution (what Dagger actually does)
+          echo "Pre-loading Alpine and testing container execution..."
+          docker pull alpine:latest || echo "Failed to pre-load alpine"
+          docker run --rm alpine:latest cat /etc/alpine-release || echo "Failed to test container execution"
+          
+          echo "=== Docker pre-warm complete ==="
+
       - name: Start Docker Compose services
         working-directory: ./agent/
         run: docker compose up -d --build
