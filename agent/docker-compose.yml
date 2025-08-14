@@ -9,8 +9,17 @@ services:
     environment:
       - PYTHONPATH=/app
       - BUILDER_TOKEN=${BUILDER_TOKEN:-}  # Optional auth token, empty string disables auth
+      # Dagger environment variables for CI compatibility
+      - DAGGER_CACHE_PATH=/tmp/dagger-cache
+      - TMPDIR=/tmp
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
+      - /tmp:/tmp  # Share host tmp for Dagger cache
+    privileged: true  # Required for Dagger engine in container
+    security_opt:
+      - seccomp:unconfined  # Allow container syscalls needed by Dagger
+    cap_add:
+      - SYS_ADMIN  # Required for container management
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
       interval: 3s
