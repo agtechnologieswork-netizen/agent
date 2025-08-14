@@ -104,8 +104,8 @@ def get_matrix_configurations() -> Tuple[Dict[str, str], List[str], Dict[str, st
 
     coding_models = {
         "claude": "anthropic:claude-sonnet-4-20250514",
-        "qwen3-480b-35a": "openrouter:qwen/qwen3-coder",
-        "gpt-oss": "openrouter:openai/gpt-oss-120b",
+        # "qwen3-480b-35a": "openrouter:qwen/qwen3-coder",
+        # "gpt-oss": "openrouter:openai/gpt-oss-120b",
     }
 
     universal_models = {
