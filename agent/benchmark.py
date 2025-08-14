@@ -372,27 +372,52 @@ def run_single_benchmark(config: Tuple, idx: int, total: int, results_dir: Path,
 
         # Run generation subprocess
         start_time = datetime.now()
+        process = None
         try:
-            result = subprocess.run(
+            process = subprocess.Popen(
                 ["uv", "run", "python", "benchmark.py", "single",
                  "--prompt", prompt_text,
                  "--template-id", template_id,
                  "--output-dir", str(run_dir)],
                 env=env,
-                capture_output=True,
-                text=True,
-                timeout=timeout_minutes * 60
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True
             )
-        except subprocess.TimeoutExpired as e:
-            log(f"  [{idx}/{total}] TIMEOUT {run_name} after {timeout_minutes} minutes")
-            # Capture whatever output we got before timeout
-            stdout = e.stdout.decode() if e.stdout else ""
-            stderr = e.stderr.decode() if e.stderr else ""
+            
+            # wait for completion with timeout
+            stdout, stderr = process.communicate(timeout=timeout_minutes * 60)
             result = subprocess.CompletedProcess(
-                args=e.args, returncode=124,
-                stdout=stdout,
-                stderr=stderr + f"\nProcess timed out after {timeout_minutes} minutes"
+                args=process.args, returncode=process.returncode,
+                stdout=stdout, stderr=stderr
             )
+            
+        except subprocess.TimeoutExpired:
+            log(f"  [{idx}/{total}] TIMEOUT {run_name} after {timeout_minutes} minutes")
+            
+            # first try graceful termination to allow telemetry saving
+            if process:
+                try:
+                    process.terminate()  # sends SIGTERM
+                    stdout, stderr = process.communicate(timeout=5)  # give 5 seconds for graceful shutdown
+                    log("  Process terminated gracefully")
+                except subprocess.TimeoutExpired:
+                    # if graceful termination fails, force kill
+                    log("  Graceful termination failed, force killing process")
+                    process.kill()
+                    stdout, stderr = process.communicate()
+                
+                result = subprocess.CompletedProcess(
+                    args=process.args, returncode=124,
+                    stdout=stdout or "",
+                    stderr=(stderr or "") + f"\nProcess timed out after {timeout_minutes} minutes"
+                )
+            else:
+                # fallback for the unlikely case where process wasn't created
+                result = subprocess.CompletedProcess(
+                    args=[], returncode=124,
+                    stdout="", stderr=f"Process timed out after {timeout_minutes} minutes"
+                )
 
         duration = (datetime.now() - start_time).total_seconds()
 

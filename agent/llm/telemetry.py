@@ -4,6 +4,8 @@ import time
 import json
 import atexit
 import os
+import signal
+import threading
 from typing import Optional, Any, Dict
 from log import get_logger
 
@@ -12,6 +14,8 @@ logger = get_logger(__name__)
 # global accumulator for cumulative telemetry stats per model
 _cumulative_stats: Dict[str, Dict[str, int | float]] = {}
 _cumulative_enabled = os.getenv("CUMULATIVE_TELEMETRY_LOG") is not None
+_stats_lock = threading.Lock()
+_call_count_since_save = 0
 
 
 class LLMTelemetry:
@@ -107,6 +111,13 @@ class LLMTelemetry:
                 cache_creation_input_tokens or 0,
                 cache_read_input_tokens or 0
             )
+            
+            # periodically save stats to avoid loss on unexpected termination
+            global _call_count_since_save
+            _call_count_since_save += 1
+            if _call_count_since_save >= 10:  # save every 10 calls
+                _periodic_save()
+                _call_count_since_save = 0
 
     def _validate_tokens(self, input_tokens: Optional[int], output_tokens: Optional[int], provider: Optional[str]) -> None:
         """validate that token counts make sense for non-empty requests/responses"""
@@ -137,41 +148,78 @@ def _accumulate_stats(
     cache_read_tokens: int = 0
 ) -> None:
     """accumulate telemetry stats for a model"""
-    if model not in _cumulative_stats:
-        _cumulative_stats[model] = {
-            "total_calls": 0,
-            "total_input_tokens": 0,
-            "total_output_tokens": 0,
-            "total_time_seconds": 0.0,
-            "total_cache_creation_tokens": 0,
-            "total_cache_read_tokens": 0,
-        }
-    
-    _cumulative_stats[model]["total_calls"] += 1
-    _cumulative_stats[model]["total_input_tokens"] += input_tokens
-    _cumulative_stats[model]["total_output_tokens"] += output_tokens
-    _cumulative_stats[model]["total_time_seconds"] += elapsed_time
-    _cumulative_stats[model]["total_cache_creation_tokens"] += cache_creation_tokens
-    _cumulative_stats[model]["total_cache_read_tokens"] += cache_read_tokens
+    with _stats_lock:
+        if model not in _cumulative_stats:
+            _cumulative_stats[model] = {
+                "total_calls": 0,
+                "total_input_tokens": 0,
+                "total_output_tokens": 0,
+                "total_time_seconds": 0.0,
+                "total_cache_creation_tokens": 0,
+                "total_cache_read_tokens": 0,
+            }
+        
+        _cumulative_stats[model]["total_calls"] += 1
+        _cumulative_stats[model]["total_input_tokens"] += input_tokens
+        _cumulative_stats[model]["total_output_tokens"] += output_tokens
+        _cumulative_stats[model]["total_time_seconds"] += elapsed_time
+        _cumulative_stats[model]["total_cache_creation_tokens"] += cache_creation_tokens
+        _cumulative_stats[model]["total_cache_read_tokens"] += cache_read_tokens
 
 
 def save_cumulative_stats() -> None:
     """save cumulative telemetry stats to file specified by CUMULATIVE_TELEMETRY_LOG"""
-    if not _cumulative_enabled or not _cumulative_stats:
+    if not _cumulative_enabled:
         return
     
     log_file = os.getenv("CUMULATIVE_TELEMETRY_LOG")
     if not log_file:
         return
     
-    try:
-        with open(log_file, "w") as f:
-            json.dump(_cumulative_stats, f, indent=2)
-        logger.info(f"Saved cumulative telemetry stats to {log_file}")
-    except Exception as e:
-        logger.error(f"Failed to save cumulative telemetry stats to {log_file}: {e}")
+    with _stats_lock:
+        if not _cumulative_stats:
+            return
+        
+        try:
+            with open(log_file, "w") as f:
+                json.dump(_cumulative_stats, f, indent=2)
+            logger.info(f"Saved cumulative telemetry stats to {log_file}")
+        except Exception as e:
+            logger.error(f"Failed to save cumulative telemetry stats to {log_file}: {e}")
 
 
-# register atexit handler if cumulative telemetry is enabled
+def _periodic_save() -> None:
+    """periodic save without excessive logging"""
+    if not _cumulative_enabled:
+        return
+    
+    log_file = os.getenv("CUMULATIVE_TELEMETRY_LOG")
+    if not log_file:
+        return
+    
+    with _stats_lock:
+        if not _cumulative_stats:
+            return
+        
+        try:
+            with open(log_file, "w") as f:
+                json.dump(_cumulative_stats, f, indent=2)
+        except Exception as e:
+            logger.error(f"Failed to save cumulative telemetry stats to {log_file}: {e}")
+
+
+def _signal_handler(signum: int, frame) -> None:
+    """handle termination signals by saving telemetry before exit"""
+    logger.info(f"Received signal {signum}, saving telemetry before exit")
+    save_cumulative_stats()
+    # re-raise the signal with default handler to ensure proper termination
+    signal.signal(signum, signal.SIG_DFL)
+    os.kill(os.getpid(), signum)
+
+
+# register atexit handler and signal handlers if cumulative telemetry is enabled
 if _cumulative_enabled:
     atexit.register(save_cumulative_stats)
+    # register signal handlers for graceful shutdown
+    signal.signal(signal.SIGTERM, _signal_handler)
+    signal.signal(signal.SIGINT, _signal_handler)
