@@ -69,7 +69,7 @@ def get_matrix_configurations() -> Tuple[Dict[str, str], List[str], Dict[str, st
     """Define the matrix components for ablation study."""
 
     prompts = {
-        "plant-care-tracker": "A simple web app that lets users track the condition of their plants using fun plant moods based on custom rule-based logic. Avoid using AI, ML, or external APIs.",
+        plant-care-tracker": "A simple web app that lets users track the condition of their plants using fun plant moods based on custom rule-based logic. Avoid using AI, ML, or external APIs.",
         "roommate-chore-wheel": "An app that randomly assigns chores each week and tracks completion.",
         "car-maintenance-dashboard": "A dashboard to monitor car maintenance history and upcoming service dates.",
         "city-trip-advisor": "A simple web app that suggests if tomorrow's trip to a given city is a good idea, based on open-meteo API's weather forecast for that city.",
@@ -94,7 +94,10 @@ def get_matrix_configurations() -> Tuple[Dict[str, str], List[str], Dict[str, st
         "pc-gaming-niche-site": "A content-focused niche website featuring reviews of budget PC gaming peripherals. The site should be organized by product categories (mice, keyboards, etc.) and include a simple CMS for publishing articles.",
         "tennis-enthusiast-platform": "A social platform for tennis players to find partners. Users can create profiles with their skill level and location, and search for other players nearby to schedule matches.",
         "engineering-job-board": "A niche job board for engineering positions. It should allow employers to post jobs and job seekers to search and filter listings by engineering discipline and location.",
-        "indonesian-inventory-app": "Buatkan aplikasi manajemen inventaris (stok barang) dalam Bahasa Indonesia. Fitur utama harus mencakup pengelolaan daftar barang (tambah, edit, hapus) serta pencatatan transaksi barang masuk dan barang keluar."
+        "indonesian-inventory-app": "Buatkan aplikasi manajemen inventaris (stok barang) dalam Bahasa Indonesia. Fitur utama harus mencakup pengelolaan daftar barang (tambah, edit, hapus) serta pencatatan transaksi barang masuk dan barang keluar.",
+        "habit-tracker-app": "A simple app to help users build and maintain positive habits. Users can define custom habits, track their daily progress with a simple check-in, and visualize their streaks over time to stay motivated.",
+        "recipe-sharing-platform": "A community-based platform where users can post, browse, and save their favorite recipes. Each recipe includes ingredients, instructions, and categories, with a search feature to find new meals.",
+        "pomodoro-study-timer": "A minimalist Pomodoro timer to boost productivity. It features customizable work and break intervals, audio alerts, and a simple log to track completed study sessions throughout the day."
     }
 
     template_ids = ["trpc_agent", "nicegui_agent"]
@@ -102,7 +105,7 @@ def get_matrix_configurations() -> Tuple[Dict[str, str], List[str], Dict[str, st
     coding_models = {
         "claude": "anthropic:claude-sonnet-4-20250514",
         "qwen3-480b-35a": "openrouter:qwen/qwen3-coder",
-        "gpt-oss": "openai/gpt-oss-120b",
+        "gpt-oss": "openrouter:openai/gpt-oss-120b",
     }
 
     universal_models = {
@@ -401,13 +404,12 @@ def run_single_benchmark(config: Tuple, idx: int, total: int, results_dir: Path,
         release_port(trpc_port)
 
 
-def matrix(concurrent: int = 1) -> None:
+def matrix(concurrent: int = 1, resume = True) -> None:
     """Run the full matrix benchmark study.
 
     Args:
         concurrent: Number of parallel runs (1 = sequential, >1 = concurrent)
     """
-    resume = False
     summary_only = False
     filter_template = None
     filter_prompt = None
