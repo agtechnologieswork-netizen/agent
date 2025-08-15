@@ -14,41 +14,47 @@ This document explains how the widget system works in this branch, covering data
 
 ```mermaid
 graph TD
-  subgraph UI[User UI]
-    WPage[/"/widgets" page/]
+  subgraph UI [User UI]
+    WPage["/widgets page"]
     WMgr[WidgetManager]
     Grid[WidgetGrid]
   end
 
-  subgraph Agent[Agent SDK]
+  subgraph Agent [Agent SDK]
     WTools[WidgetTools]
     WGen[WidgetGenerator]
   end
 
-  subgraph Core[Core Services]
+  subgraph Core [Core Services]
     WService[WidgetService]
     DSvc[DataSourceService]
     WRender[WidgetRenderer]
   end
 
-  subgraph DB[(Database)]
-    T1[widget]
-    T2[widgettemplate]
-    T3[userwidgetpreset]
+  subgraph DB [Database]
+    T1[(widget)]
+    T2[(widgettemplate)]
+    T3[(userwidgetpreset)]
   end
 
-  subgraph External[External Sources]
-    DBRX[Databricks Warehouse]
+  subgraph External [External Sources]
+    DBRX[(Databricks Warehouse)]
   end
 
-WPage --> WMgr -->|CRUD, reorder| WService
-WMgr --> Grid -->|render| WRender
-WTools -->|create/update| WService
-WGen -->|programmatic creation| WService
-WRender -->|fetch data| DSvc
-WService <--> DB
-DSvc -->|SQL/Introspection| DB
-DSvc -->|databricks_query| DBRX
+  WPage --> WMgr
+  WMgr --> WService
+  WMgr --> Grid
+  Grid --> WRender
+  WTools --> WService
+  WGen --> WService
+  WRender --> DSvc
+  WService --> T1
+  WService --> T2
+  WService --> T3
+  DSvc --> T1
+  DSvc --> T2
+  DSvc --> T3
+  DSvc --> DBRX
 ```
 
 ---
