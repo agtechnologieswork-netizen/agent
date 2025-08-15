@@ -275,6 +275,10 @@ pub struct PromptSampler {
     pub model: String,
 }
 
+impl PromptSampler {
+    pub async fn suggest(&self, config: &AgentConfig, evaluation: &Evaluation) {}
+}
+
 pub fn test_step_render() {
     let mut tera = Tera::default();
     tera.add_raw_template("step", STEP_TEMPLATE).unwrap();
