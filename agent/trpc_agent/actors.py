@@ -599,7 +599,7 @@ class TrpcActor(FileOperationsActor):
             ["bun", "run", "tsc", "--noEmit"], cwd="server"
         )
         if result.exit_code != 0:
-            error_output = result.stdout or result.stderr
+            error_output = f"{result.stdout}\n{result.stderr}"
             return f"TypeScript errors (backend):\n{error_output}"
         return None
 
@@ -609,7 +609,7 @@ class TrpcActor(FileOperationsActor):
             ["bun", "run", "tsc", "-p", "tsconfig.app.json", "--noEmit"], cwd="client"
         )
         if result.exit_code != 0:
-            error_output = result.stdout or result.stderr
+            error_output = f"{result.stdout}\n{result.stderr}"
             return f"TypeScript errors (frontend):\n{error_output}"
         return None
 
@@ -619,7 +619,7 @@ class TrpcActor(FileOperationsActor):
             node.data.workspace.client, node.data.workspace.ctr, postgresdb=None
         )
         if result.exit_code != 0:
-            error_output = result.stderr or result.stdout
+            error_output = f"{result.stdout}\n{result.stderr}"
             return f"Drizzle errors:\n{error_output}"
         return None
 
@@ -627,12 +627,12 @@ class TrpcActor(FileOperationsActor):
         """Run frontend build check."""
         result = await node.data.workspace.exec(["bun", "run", "build"], cwd="client")
         if result.exit_code != 0:
-            error_output = result.stdout or result.stderr
+            error_output = f"{result.stdout}\n{result.stderr}"
             return f"Build errors:\n{error_output}"
 
         result = await node.data.workspace.exec(["bun", "run", "lint"], cwd="client")
         if result.exit_code != 0:
-            error_output = result.stdout or result.stderr
+            error_output = f"{result.stdout}\n{result.stderr}"
             return f"Lint errors:\n{error_output}\n"
         return None
 
