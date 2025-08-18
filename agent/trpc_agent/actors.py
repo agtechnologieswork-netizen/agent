@@ -629,6 +629,11 @@ class TrpcActor(FileOperationsActor):
         if result.exit_code != 0:
             error_output = result.stdout or result.stderr
             return f"Build errors:\n{error_output}"
+
+        result = await node.data.workspace.exec(["bun", "run", "lint"], cwd="client")
+        if result.exit_code != 0:
+            error_output = result.stdout or result.stderr
+            return f"Lint errors:\n{error_output}\n"
         return None
 
     async def run_test_check(
