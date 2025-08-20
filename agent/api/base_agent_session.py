@@ -121,6 +121,7 @@ class BaseAgentSession(AgentInterface, ABC):
                 "app_name": None,
                 "template_diff_sent": False,
             }
+            snapshot_files = {}
 
             async def emit_intermediate_message(message: str) -> None:
                 logger.info(f"Emitting intermediate message: {message}")
@@ -144,6 +145,7 @@ class BaseAgentSession(AgentInterface, ABC):
                     fsm_state = req_fsm_state
                     if request.all_files:
                         fsm_state["context"]["files"].update({p.path: p.content for p in request.all_files})  # pyright: ignore
+                        snapshot_files.update({p.path: p.content for p in request.all_files})
                     fsm_app = await self.fsm_application_class.load(self.client, req_fsm_state, fsm_settings)
                     snapshot_saver.save_snapshot(trace_id=self._snapshot_key, key="fsm_enter", data=req_fsm_state)
                 if (req_metadata := request.agent_state.get("metadata")):
@@ -158,7 +160,6 @@ class BaseAgentSession(AgentInterface, ABC):
                 "fsm_state": fsm_state,
                 "metadata": metadata,
             }
-            snapshot_files = {**fsm_state["context"]["files"]} if fsm_state else {}  # pyright: ignore
 
             # Processing
             logger.info(f"Last user message: {fsm_message_history[-1].content}")
@@ -197,7 +198,7 @@ class BaseAgentSession(AgentInterface, ABC):
                     logger.info("Getting initial template diff")
 
                     # Communicate the app name and commit message and template diff to the client
-                    initial_template_diff = await self.processor_instance.fsm_app.get_diff_with({})
+                    initial_template_diff = await self.processor_instance.fsm_app.get_diff_with(snapshot_files)
 
                     logger.info("Sending initial template diff")
                     agent_state["metadata"].update({"app_name": app_name, "template_diff_sent": True})

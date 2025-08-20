@@ -361,25 +361,18 @@ class FSMApplication:
         logger.info(
             "SERVER get_diff_with: Calling workspace.diff() to generate final diff."
         )
-        diff = ""
-        try:
-            diff = (
-                await start.with_exec(["git", "add", "."])
-                .with_exec(["git", "diff", "HEAD"])
-                .stdout()
+        diff = (
+            await start.with_exec(["git", "add", "."])
+            .with_exec(["git", "diff", "HEAD"])
+            .stdout()
+        )
+        logger.info(
+            f"SERVER get_diff_with: workspace.diff() Succeeded. Diff length: {len(diff)}"
+        )
+        if not diff:
+            logger.warning(
+                "SERVER get_diff_with: Diff output is EMPTY. This might be expected if states match or an issue."
             )
-            logger.info(
-                f"SERVER get_diff_with: workspace.diff() Succeeded. Diff length: {len(diff)}"
-            )
-            if not diff:
-                logger.warning(
-                    "SERVER get_diff_with: Diff output is EMPTY. This might be expected if states match or an issue."
-                )
-        except Exception as e:
-            logger.exception(
-                "SERVER get_diff_with: Error during workspace.diff() execution."
-            )
-            diff = f"# ERROR GENERATING DIFF: {e}"
 
         return diff
 
