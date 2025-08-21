@@ -249,6 +249,10 @@ class TrpcActor(FileOperationsActor):
             await notify_if_callback(
                 self.event_callback, "✅ Schema and types generated!", "draft complete"
             )
+        else:
+            raise AgentSearchFailedException(
+                agent_name="TrpcActor", message="Draft generation failed - no solution found"
+            )
 
         return solution
 
@@ -329,10 +333,16 @@ class TrpcActor(FileOperationsActor):
                     if solution:
                         results[f"handler_{handler_name}"] = solution
                         logger.info(f"Handler {handler_name} completed")
+                    else:
+                        await notify_if_callback(
+                            self.event_callback,
+                            f"💥 Handler {handler_name} failed to generate",
+                            "handler failure",
+                        )
 
         await notify_if_callback(
             self.event_callback,
-            "✅ All backend handlers generated!",
+            "✅ Backend handlers generation finished!",
             "handlers complete",
         )
 
@@ -383,7 +393,12 @@ class TrpcActor(FileOperationsActor):
                 "✅ Frontend application generated!",
                 "frontend complete",
             )
-
+        else:
+            await notify_if_callback(
+                self.event_callback,
+                f"💥 Frontend failed to generate, keeping the template page as is",
+                "handler failure",
+            )
     async def _search_single_node(
         self, root_node: Node[BaseData], system_prompt: str
     ) -> Optional[Node[BaseData]]:
