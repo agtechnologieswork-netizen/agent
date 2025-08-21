@@ -166,10 +166,7 @@ async def test_llm_vision_completion():
 
 
 def _has_ollama_available() -> bool:
-    """Check if Ollama is available (either configured models or host available)."""
-    # Check if Ollama host is configured
-    if os.getenv("OLLAMA_HOST") or os.getenv("OLLAMA_API_BASE"):
-        return True
+    """Check if Ollama is configured with ollama: prefixed models."""
     # Check if any models are explicitly configured to use Ollama
     model_vars = ["LLM_BEST_CODING_MODEL", "LLM_UNIVERSAL_MODEL", "LLM_ULTRA_FAST_MODEL", "LLM_VISION_MODEL"]
     return any(

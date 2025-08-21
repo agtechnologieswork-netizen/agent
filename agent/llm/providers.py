@@ -110,15 +110,26 @@ def get_model_mapping(model_name: str, backend: str) -> str:
     - "anthropic:claude-sonnet" → "claude-sonnet"
     - "lmstudio:http://localhost:1234" → "model"
     - "ollama:phi4" → "phi4"
+    - "ollama:http://localhost:11434:llama3.3" → "llama3.3"
     """
     # extract model name if backend:model format is used
     if ":" in model_name:
+        # for ollama, handle special case of host:model format first
+        if backend == "ollama" and model_name.count(":") >= 3:  # ollama:http://host:model
+            # find the last colon which separates model from URL
+            backend_prefix, rest = model_name.split(":", 1)  # ollama, http://localhost:11434:model
+            if "://" in rest:  # contains URL
+                url_parts = rest.rsplit(":", 1)  # split on last colon
+                if len(url_parts) == 2 and not url_parts[1].startswith("//"):
+                    return url_parts[1]  # return model part after URL
+        
+        # standard handling for other cases
         _, model_part = model_name.split(":", 1)
+        
         # for lmstudio, if model_part is a URL, use a default model name
-        if backend == "lmstudio" and (
-            model_part.startswith("http://") or model_part.startswith("https://")
-        ):
+        if backend == "lmstudio" and (model_part.startswith("http://") or model_part.startswith("https://")):
             return "model"  # lmstudio doesn't care about model name
+            
         return model_part
 
     # shouldn't happen with new format but handle gracefully

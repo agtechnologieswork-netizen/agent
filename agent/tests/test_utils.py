@@ -23,9 +23,8 @@ def is_llm_provider_available() -> bool:
     if os.getenv("AWS_SECRET_ACCESS_KEY") or os.getenv("PREFER_BEDROCK"):
         return True
     
-    # Check if Ollama is available (works offline with local Ollama server)
-    if (os.getenv("OLLAMA_HOST") or os.getenv("OLLAMA_API_BASE") or
-        any(os.getenv(f"LLM_{category}_MODEL", "").startswith("ollama:") for category in ["BEST_CODING", "UNIVERSAL", "ULTRA_FAST", "VISION"])):
+    # Check if Ollama is configured (works offline with local Ollama server)
+    if any(os.getenv(f"LLM_{category}_MODEL", "").startswith("ollama:") for category in ["BEST_CODING", "UNIVERSAL", "ULTRA_FAST", "VISION"]):
         return True
     
     # Check for explicit model overrides (indicates user has configured some provider)
