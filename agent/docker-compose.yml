@@ -9,7 +9,8 @@ services:
     environment:
       - PYTHONPATH=/app
       - BUILDER_TOKEN=${BUILDER_TOKEN:-}  # Optional auth token, empty string disables auth
-      - _EXPERIMENTAL_DAGGER_RUNNER_HOST=unix:///var/run/docker.sock
+      - DOCKER_HOST=unix:///var/run/docker.sock
+      - DAGGER_CACHE_PATH=/tmp/dagger-cache
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
     healthcheck:
