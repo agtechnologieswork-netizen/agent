@@ -2,10 +2,15 @@ FROM python:3.12-slim AS prod
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
-    docker.io \
+    ca-certificates \
+    gnupg \
+    && curl -fsSL https://download.docker.com/linux/debian/gpg | gpg --dearmor -o /usr/share/keyrings/docker-archive-keyring.gpg \
+    && echo "deb [arch=amd64 signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] https://download.docker.com/linux/debian bullseye stable" > /etc/apt/sources.list.d/docker.list \
+    && apt-get update \
+    && apt-get install -y docker-ce-cli \
     && rm -rf /var/lib/apt/lists/*
 COPY --from=ghcr.io/astral-sh/uv:0.7.20-debian /usr/local/bin/uv /usr/local/bin/uvx /usr/local/bin
-RUN curl -fsSL https://dl.dagger.io/dagger/install.sh | BIN_DIR=/usr/local/bin sh
+RUN curl -fsSL https://dl.dagger.io/dagger/install.sh | DAGGER_VERSION=0.18.16 BIN_DIR=/usr/local/bin sh
 
 WORKDIR /app
 
