@@ -1,5 +1,9 @@
 FROM python:3.12-slim AS prod
 
+# Install Docker CE CLI for Dagger engine compatibility
+# Dagger requires Docker CLI to manage containers, but the default Debian docker.io 
+# package doesn't work reliably. We need the official Docker CE CLI which puts
+# the 'docker' command in PATH correctly for Dagger to find.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     ca-certificates \

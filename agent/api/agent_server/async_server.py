@@ -376,10 +376,8 @@ async def dagger_healthcheck():
         dagger.Config(log_output=open(os.devnull, "w"))
     ) as client:
         # Try a simple Dagger operation to verify connectivity
-        logger.info("Checking Dagger connection by pulling Alpine image")
         container = client.container().from_("alpine:latest")
         version = await container.with_exec(["cat", "/etc/alpine-release"]).stdout()
-        logger.info("Health check successful, Dagger connection is healthy")
         return {
             "status": "healthy",
             "dagger_connection": "successful",
