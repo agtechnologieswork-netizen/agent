@@ -117,9 +117,13 @@ class AnthropicLLM(common.AsyncLLM):
         # Log telemetry if usage data is available
         if hasattr(completion, "usage"):
             # extract cached tokens if available
-            cache_creation_tokens = getattr(completion.usage, 'cache_creation_input_tokens', None)
-            cache_read_tokens = getattr(completion.usage, 'cache_read_input_tokens', None)
-            
+            cache_creation_tokens = getattr(
+                completion.usage, "cache_creation_input_tokens", None
+            )
+            cache_read_tokens = getattr(
+                completion.usage, "cache_read_input_tokens", None
+            )
+
             telemetry.log_completion(
                 model=call_args.get("model", "unknown"),
                 input_tokens=completion.usage.input_tokens,

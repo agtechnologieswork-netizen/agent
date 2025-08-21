@@ -59,13 +59,15 @@ def _is_port_available(port: int) -> bool:
     try:
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
             sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-            sock.bind(('localhost', port))
+            sock.bind(("localhost", port))
             return True
     except OSError:
         return False
 
 
-def get_matrix_configurations() -> Tuple[Dict[str, str], List[str], Dict[str, str], Dict[str, str]]:
+def get_matrix_configurations() -> Tuple[
+    Dict[str, str], List[str], Dict[str, str], Dict[str, str]
+]:
     """Define the matrix components for ablation study."""
 
     prompts = {
@@ -132,7 +134,7 @@ class GenerationCapture:
                 prompt=prompt,
                 standalone=False,  # ensures Docker validation
                 with_edit=False,
-                template_id=template_id
+                template_id=template_id,
             )
 
             self.success = True
@@ -184,9 +186,11 @@ async def run_single_generation(prompt: str, template_id: str, output_dir: str) 
 
         def __exit__(self, exc_type, exc_val, exc_tb):
             # Copy contents before the original __exit__ deletes the directory
-            if (capture.captured_temp_dir and
-                Path(capture.captured_temp_dir).exists() and
-                capture.captured_temp_dir == self.name):
+            if (
+                capture.captured_temp_dir
+                and Path(capture.captured_temp_dir).exists()
+                and capture.captured_temp_dir == self.name
+            ):
                 try:
                     source_dir = output_path / "source_code"
                     if source_dir.exists():
@@ -220,6 +224,7 @@ async def run_single_generation(prompt: str, template_id: str, output_dir: str) 
     except Exception as e:
         print(f"Fatal error in generation: {e}")
         import traceback
+
         traceback.print_exc()
         sys.exit(2)
 
@@ -228,8 +233,13 @@ async def run_single_generation(prompt: str, template_id: str, output_dir: str) 
         tempfile.TemporaryDirectory = original_tempdir
 
 
-def save_run_results(run_dir: Path, subprocess_result: subprocess.CompletedProcess,
-                     env_vars: Dict[str, str], duration: float, config_info: Dict[str, Any]) -> None:
+def save_run_results(
+    run_dir: Path,
+    subprocess_result: subprocess.CompletedProcess,
+    env_vars: Dict[str, str],
+    duration: float,
+    config_info: Dict[str, Any],
+) -> None:
     """Save all run artifacts and results."""
 
     # Determine success based on exit code (run_e2e raises exception if Docker unhealthy)
@@ -249,8 +259,8 @@ def save_run_results(run_dir: Path, subprocess_result: subprocess.CompletedProce
             "universal_model_name": config_info["universal_model_name"],
             "LLM_BEST_CODING_MODEL": env_vars.get("LLM_BEST_CODING_MODEL"),
             "LLM_UNIVERSAL_MODEL": env_vars.get("LLM_UNIVERSAL_MODEL"),
-            "CUMULATIVE_TELEMETRY_LOG": env_vars.get("CUMULATIVE_TELEMETRY_LOG")
-        }
+            "CUMULATIVE_TELEMETRY_LOG": env_vars.get("CUMULATIVE_TELEMETRY_LOG"),
+        },
     }
 
     # Save all artifacts
@@ -260,7 +270,9 @@ def save_run_results(run_dir: Path, subprocess_result: subprocess.CompletedProce
 
     log(f"  Result: {'✓ SUCCESS' if success else '✗ FAILED'}")
     if not success:
-        log(f"  Error: Exit code {subprocess_result.returncode}, Docker healthy: {docker_healthy}")
+        log(
+            f"  Error: Exit code {subprocess_result.returncode}, Docker healthy: {docker_healthy}"
+        )
 
 
 def generate_summary(results_dir: Path = Path("benchmark_results")) -> None:
@@ -285,24 +297,28 @@ def generate_summary(results_dir: Path = Path("benchmark_results")) -> None:
         if telemetry_file.exists():
             telemetry = json.loads(telemetry_file.read_text())
             for model_stats in telemetry.values():
-                total_tokens += model_stats.get("total_input_tokens", 0) + model_stats.get("total_output_tokens", 0)
+                total_tokens += model_stats.get(
+                    "total_input_tokens", 0
+                ) + model_stats.get("total_output_tokens", 0)
                 total_calls += model_stats.get("total_calls", 0)
 
         config = status.get("config", {})
-        results.append({
-            "run_name": run_dir.name,
-            "prompt_name": config.get("prompt_name"),
-            "template_id": config.get("template_id"),
-            "coding_model": config.get("coding_model_name"),
-            "universal_model": config.get("universal_model_name"),
-            "success": status["success"],
-            "docker_healthy": status["docker_healthy"],
-            "duration_seconds": status["duration_seconds"],
-            "total_tokens": total_tokens,
-            "total_model_calls": total_calls,
-            "exit_code": status["exit_code"],
-            "timestamp": status["timestamp"]
-        })
+        results.append(
+            {
+                "run_name": run_dir.name,
+                "prompt_name": config.get("prompt_name"),
+                "template_id": config.get("template_id"),
+                "coding_model": config.get("coding_model_name"),
+                "universal_model": config.get("universal_model_name"),
+                "success": status["success"],
+                "docker_healthy": status["docker_healthy"],
+                "duration_seconds": status["duration_seconds"],
+                "total_tokens": total_tokens,
+                "total_model_calls": total_calls,
+                "exit_code": status["exit_code"],
+                "timestamp": status["timestamp"],
+            }
+        )
 
     if not results:
         print("No results found to summarize")
@@ -322,7 +338,7 @@ def generate_summary(results_dir: Path = Path("benchmark_results")) -> None:
     successful_runs = sum(1 for r in results if r["success"])
     log(f"Total runs: {total_runs}")
     log(f"Successful runs: {successful_runs}")
-    log(f"Success rate: {successful_runs/total_runs*100:.1f}%")
+    log(f"Success rate: {successful_runs / total_runs * 100:.1f}%")
 
 
 def single(prompt: str, template_id: str, output_dir: str) -> None:
@@ -330,13 +346,26 @@ def single(prompt: str, template_id: str, output_dir: str) -> None:
     asyncio.run(run_single_generation(prompt, template_id, output_dir))
 
 
-def run_single_benchmark(config: Tuple, idx: int, total: int, results_dir: Path,
-                        timeout_minutes: int, resume: bool) -> None:
+def run_single_benchmark(
+    config: Tuple,
+    idx: int,
+    total: int,
+    results_dir: Path,
+    timeout_minutes: int,
+    resume: bool,
+) -> None:
     """Run a single benchmark configuration."""
-    (prompt_name, prompt_text), template_id, (coding_name, coding_model), (universal_name, universal_model) = config
+    (
+        (prompt_name, prompt_text),
+        template_id,
+        (coding_name, coding_model),
+        (universal_name, universal_model),
+    ) = config
 
     # Generate readable run name
-    run_name = f"{prompt_name}_{template_id.replace('_', '-')}_{coding_name}_{universal_name}"
+    run_name = (
+        f"{prompt_name}_{template_id.replace('_', '-')}_{coding_name}_{universal_name}"
+    )
     run_dir = results_dir / run_name
 
     # Skip if already completed and in resume mode
@@ -346,11 +375,17 @@ def run_single_benchmark(config: Tuple, idx: int, total: int, results_dir: Path,
 
     # Allocate unique ports for this run
     host_port = find_free_port()
-    trpc_port = find_free_port(host_port + 1000)  # tRPC backend port offset to avoid conflicts
-    agent_server_port = find_free_port(host_port + 2000)  # agent server port offset to avoid conflicts
+    trpc_port = find_free_port(
+        host_port + 1000
+    )  # tRPC backend port offset to avoid conflicts
+    agent_server_port = find_free_port(
+        host_port + 2000
+    )  # agent server port offset to avoid conflicts
 
     try:
-        log(f"[{idx}/{total}] Running: {run_name} (ports: {host_port}, {trpc_port}, agent: {agent_server_port})")
+        log(
+            f"[{idx}/{total}] Running: {run_name} (ports: {host_port}, {trpc_port}, agent: {agent_server_port})"
+        )
         run_dir.mkdir(parents=True, exist_ok=True)
 
         # Set unique telemetry log path
@@ -369,7 +404,7 @@ def run_single_benchmark(config: Tuple, idx: int, total: int, results_dir: Path,
             "prompt_name": prompt_name,
             "template_id": template_id,
             "coding_model_name": coding_name,
-            "universal_model_name": universal_name
+            "universal_model_name": universal_name,
         }
 
         # Run generation subprocess
@@ -377,21 +412,32 @@ def run_single_benchmark(config: Tuple, idx: int, total: int, results_dir: Path,
         process = None
         try:
             process = subprocess.Popen(
-                ["uv", "run", "python", "benchmark.py", "single",
-                 "--prompt", prompt_text,
-                 "--template-id", template_id,
-                 "--output-dir", str(run_dir)],
+                [
+                    "uv",
+                    "run",
+                    "python",
+                    "benchmark.py",
+                    "single",
+                    "--prompt",
+                    prompt_text,
+                    "--template-id",
+                    template_id,
+                    "--output-dir",
+                    str(run_dir),
+                ],
                 env=env,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
-                text=True
+                text=True,
             )
 
             # wait for completion with timeout
             stdout, stderr = process.communicate(timeout=timeout_minutes * 60)
             result = subprocess.CompletedProcess(
-                args=process.args, returncode=process.returncode,
-                stdout=stdout, stderr=stderr
+                args=process.args,
+                returncode=process.returncode,
+                stdout=stdout,
+                stderr=stderr,
             )
 
         except subprocess.TimeoutExpired:
@@ -401,7 +447,9 @@ def run_single_benchmark(config: Tuple, idx: int, total: int, results_dir: Path,
             if process:
                 try:
                     process.terminate()  # sends SIGTERM
-                    stdout, stderr = process.communicate(timeout=5)  # give 5 seconds for graceful shutdown
+                    stdout, stderr = process.communicate(
+                        timeout=5
+                    )  # give 5 seconds for graceful shutdown
                     log("  Process terminated gracefully")
                 except subprocess.TimeoutExpired:
                     # if graceful termination fails, force kill
@@ -410,15 +458,19 @@ def run_single_benchmark(config: Tuple, idx: int, total: int, results_dir: Path,
                     stdout, stderr = process.communicate()
 
                 result = subprocess.CompletedProcess(
-                    args=process.args, returncode=124,
+                    args=process.args,
+                    returncode=124,
                     stdout=stdout or "",
-                    stderr=(stderr or "") + f"\nProcess timed out after {timeout_minutes} minutes"
+                    stderr=(stderr or "")
+                    + f"\nProcess timed out after {timeout_minutes} minutes",
                 )
             else:
                 # fallback for the unlikely case where process wasn't created
                 result = subprocess.CompletedProcess(
-                    args=[], returncode=124,
-                    stdout="", stderr=f"Process timed out after {timeout_minutes} minutes"
+                    args=[],
+                    returncode=124,
+                    stdout="",
+                    stderr=f"Process timed out after {timeout_minutes} minutes",
                 )
 
         duration = (datetime.now() - start_time).total_seconds()
@@ -433,7 +485,7 @@ def run_single_benchmark(config: Tuple, idx: int, total: int, results_dir: Path,
         release_port(agent_server_port)
 
 
-def matrix(concurrent: int = 1, resume = True) -> None:
+def matrix(concurrent: int = 1, resume=True) -> None:
     """Run the full matrix benchmark study.
 
     Args:
@@ -457,12 +509,14 @@ def matrix(concurrent: int = 1, resume = True) -> None:
         prompts = {k: v for k, v in prompts.items() if k == filter_prompt}
 
     # Generate all combinations
-    matrix_combinations = list(itertools.product(
-        prompts.items(),
-        template_ids,
-        coding_models.items(),
-        universal_models.items()
-    ))
+    matrix_combinations = list(
+        itertools.product(
+            prompts.items(),
+            template_ids,
+            coding_models.items(),
+            universal_models.items(),
+        )
+    )
 
     log(f"Total runs to execute: {len(matrix_combinations)}")
     log(f"Concurrency level: {concurrent}")
@@ -475,8 +529,14 @@ def matrix(concurrent: int = 1, resume = True) -> None:
     if concurrent <= 1:
         # Sequential execution (backward compatible)
         for idx, config in enumerate(matrix_combinations, 1):
-            run_single_benchmark(config, idx, len(matrix_combinations),
-                                results_dir, timeout_minutes, resume)
+            run_single_benchmark(
+                config,
+                idx,
+                len(matrix_combinations),
+                results_dir,
+                timeout_minutes,
+                resume,
+            )
     else:
         # Concurrent execution using ThreadPoolExecutor
         from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -490,8 +550,13 @@ def matrix(concurrent: int = 1, resume = True) -> None:
             futures = []
             for idx, config in enumerate(matrix_combinations, 1):
                 future = executor.submit(
-                    run_single_benchmark, config, idx, len(matrix_combinations),
-                    results_dir, timeout_minutes, resume
+                    run_single_benchmark,
+                    config,
+                    idx,
+                    len(matrix_combinations),
+                    results_dir,
+                    timeout_minutes,
+                    resume,
                 )
                 futures.append(future)
 
@@ -513,11 +578,9 @@ def matrix(concurrent: int = 1, resume = True) -> None:
 
 if __name__ == "__main__":
     import sys
+
     if len(sys.argv) == 1:
         # Default to matrix if no args
         matrix()
     else:
-        fire.Fire({
-            'single': single,
-            'matrix': matrix
-        })
+        fire.Fire({"single": single, "matrix": matrix})

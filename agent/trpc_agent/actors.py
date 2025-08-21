@@ -251,7 +251,8 @@ class TrpcActor(FileOperationsActor):
             )
         else:
             raise AgentSearchFailedException(
-                agent_name="TrpcActor", message="Draft generation failed - no solution found"
+                agent_name="TrpcActor",
+                message="Draft generation failed - no solution found",
             )
 
         return solution
@@ -396,9 +397,10 @@ class TrpcActor(FileOperationsActor):
         else:
             await notify_if_callback(
                 self.event_callback,
-                f"💥 Frontend failed to generate, keeping the template page as is",
+                "💥 Frontend failed to generate, keeping the template page as is",
                 "handler failure",
             )
+
     async def _search_single_node(
         self, root_node: Node[BaseData], system_prompt: str
     ) -> Optional[Node[BaseData]]:

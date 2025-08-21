@@ -66,7 +66,7 @@ class LLMTelemetry:
         # keep original values for logging, use 0 only for arithmetic
         input_tokens_display = "N/A" if input_tokens is None else str(input_tokens)
         output_tokens_display = "N/A" if output_tokens is None else str(output_tokens)
-        
+
         # for total calculation, treat None as 0
         input_for_total = input_tokens if input_tokens is not None else 0
         output_for_total = output_tokens if output_tokens is not None else 0
@@ -91,7 +91,9 @@ class LLMTelemetry:
 
         # add cached token info if available
         if cache_creation_input_tokens is not None:
-            message_parts.append(f"Cache creation tokens: {cache_creation_input_tokens}")
+            message_parts.append(
+                f"Cache creation tokens: {cache_creation_input_tokens}"
+            )
         if cache_read_input_tokens is not None:
             message_parts.append(f"Cache read tokens: {cache_read_input_tokens}")
 
@@ -100,18 +102,18 @@ class LLMTelemetry:
             message_parts.append(f"{key.replace('_', ' ').title()}: {value}")
 
         logger.info(" | ".join(message_parts))
-        
+
         # accumulate stats globally if enabled
         if _cumulative_enabled:
             _accumulate_stats(
-                model, 
-                input_for_total, 
-                output_for_total, 
+                model,
+                input_for_total,
+                output_for_total,
                 elapsed_time,
                 cache_creation_input_tokens or 0,
-                cache_read_input_tokens or 0
+                cache_read_input_tokens or 0,
             )
-            
+
             # periodically save stats to avoid loss on unexpected termination
             global _call_count_since_save
             _call_count_since_save += 1
@@ -119,33 +121,46 @@ class LLMTelemetry:
                 _periodic_save()
                 _call_count_since_save = 0
 
-    def _validate_tokens(self, input_tokens: Optional[int], output_tokens: Optional[int], provider: Optional[str]) -> None:
+    def _validate_tokens(
+        self,
+        input_tokens: Optional[int],
+        output_tokens: Optional[int],
+        provider: Optional[str],
+    ) -> None:
         """validate that token counts make sense for non-empty requests/responses"""
         provider_str = f" for {provider}" if provider else ""
-        
+
         # raise error if we have None tokens - this indicates a provider integration issue
         # that must be fixed to ensure research data accuracy
         if input_tokens is None:
-            raise ValueError(f"Input tokens must not be None{provider_str} - provider integration error")
-        
+            raise ValueError(
+                f"Input tokens must not be None{provider_str} - provider integration error"
+            )
+
         if output_tokens is None:
-            raise ValueError(f"Output tokens must not be None{provider_str} - provider integration error")
-            
+            raise ValueError(
+                f"Output tokens must not be None{provider_str} - provider integration error"
+            )
+
         # warn for zero tokens as this might be legitimate in some edge cases
         if input_tokens == 0:
-            logger.warning(f"Input tokens is zero{provider_str} - verify this is expected")
-        
+            logger.warning(
+                f"Input tokens is zero{provider_str} - verify this is expected"
+            )
+
         if output_tokens == 0:
-            logger.warning(f"Output tokens is zero{provider_str} - verify this is expected")
+            logger.warning(
+                f"Output tokens is zero{provider_str} - verify this is expected"
+            )
 
 
 def _accumulate_stats(
-    model: str, 
-    input_tokens: int, 
-    output_tokens: int, 
+    model: str,
+    input_tokens: int,
+    output_tokens: int,
     elapsed_time: float,
     cache_creation_tokens: int = 0,
-    cache_read_tokens: int = 0
+    cache_read_tokens: int = 0,
 ) -> None:
     """accumulate telemetry stats for a model"""
     with _stats_lock:
@@ -158,7 +173,7 @@ def _accumulate_stats(
                 "total_cache_creation_tokens": 0,
                 "total_cache_read_tokens": 0,
             }
-        
+
         _cumulative_stats[model]["total_calls"] += 1
         _cumulative_stats[model]["total_input_tokens"] += input_tokens
         _cumulative_stats[model]["total_output_tokens"] += output_tokens
@@ -171,41 +186,45 @@ def save_cumulative_stats() -> None:
     """save cumulative telemetry stats to file specified by CUMULATIVE_TELEMETRY_LOG"""
     if not _cumulative_enabled:
         return
-    
+
     log_file = os.getenv("CUMULATIVE_TELEMETRY_LOG")
     if not log_file:
         return
-    
+
     with _stats_lock:
         if not _cumulative_stats:
             return
-        
+
         try:
             with open(log_file, "w") as f:
                 json.dump(_cumulative_stats, f, indent=2)
             logger.info(f"Saved cumulative telemetry stats to {log_file}")
         except Exception as e:
-            logger.error(f"Failed to save cumulative telemetry stats to {log_file}: {e}")
+            logger.error(
+                f"Failed to save cumulative telemetry stats to {log_file}: {e}"
+            )
 
 
 def _periodic_save() -> None:
     """periodic save without excessive logging"""
     if not _cumulative_enabled:
         return
-    
+
     log_file = os.getenv("CUMULATIVE_TELEMETRY_LOG")
     if not log_file:
         return
-    
+
     with _stats_lock:
         if not _cumulative_stats:
             return
-        
+
         try:
             with open(log_file, "w") as f:
                 json.dump(_cumulative_stats, f, indent=2)
         except Exception as e:
-            logger.error(f"Failed to save cumulative telemetry stats to {log_file}: {e}")
+            logger.error(
+                f"Failed to save cumulative telemetry stats to {log_file}: {e}"
+            )
 
 
 def _signal_handler(signum: int, frame) -> None:
