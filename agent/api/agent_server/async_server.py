@@ -60,7 +60,6 @@ async def lifespan(app: FastAPI):
     load_dotenv()
     logger.info("Initializing Async Agent Server API")
     logger.info(f"Current working directory: {os.getcwd()}")
-    logger.info(f"PREFER_OLLAMA: {os.getenv('PREFER_OLLAMA', 'NOT_SET')}")
     logger.info(
         f"AWS_SECRET_ACCESS_KEY: {'SET' if os.getenv('AWS_SECRET_ACCESS_KEY') else 'NOT_SET'}"
     )

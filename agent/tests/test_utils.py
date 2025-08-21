@@ -23,12 +23,13 @@ def is_llm_provider_available() -> bool:
     if os.getenv("AWS_SECRET_ACCESS_KEY") or os.getenv("PREFER_BEDROCK"):
         return True
     
-    # Check for Ollama preference (works offline with local Ollama server)
-    if os.getenv("PREFER_OLLAMA"):
+    # Check if Ollama is available (works offline with local Ollama server)
+    if (os.getenv("OLLAMA_HOST") or os.getenv("OLLAMA_API_BASE") or
+        any(os.getenv(f"LLM_{category}_MODEL", "").startswith("ollama:") for category in ["BEST_CODING", "UNIVERSAL", "ULTRA_FAST", "VISION"])):
         return True
     
     # Check for explicit model overrides (indicates user has configured some provider)
-    if any(os.getenv(f"LLM_{category}_MODEL") for category in ["FAST", "CODEGEN", "VISION"]):
+    if any(os.getenv(f"LLM_{category}_MODEL") for category in ["BEST_CODING", "UNIVERSAL", "ULTRA_FAST", "VISION"]):
         return True
     
     return False
@@ -49,7 +50,7 @@ def requires_llm_provider() -> bool:
     """Return True if LLM provider is not available, for use with pytest.mark.skipif."""
     return not is_llm_provider_available()
 
-requires_llm_provider_reason = "No LLM provider configured (set GEMINI_API_KEY, ANTHROPIC_API_KEY, PREFER_OLLAMA, or configure specific models)"
+requires_llm_provider_reason = "No LLM provider configured (set GEMINI_API_KEY, ANTHROPIC_API_KEY, or configure specific models with 'backend:model' format)"
 
 
 # Reusable skipif condition for tests that require Databricks
