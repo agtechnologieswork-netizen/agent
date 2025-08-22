@@ -4,7 +4,7 @@ import anyio
 from typing import Callable, Awaitable
 from core.base_node import Node
 from core.workspace import Workspace
-from core.actors import BaseData, FileOperationsActor
+from core.actors import BaseData, FileOperationsActor, AgentSearchFailedException
 from llm.common import AsyncLLM, Message, TextRaw, Tool, ToolUse, ToolUseResult
 from nicegui_agent import playbooks
 from core.notification_utils import notify_if_callback, notify_stage
@@ -60,9 +60,8 @@ class NiceguiActor(FileOperationsActor):
 
         workspace = self.workspace.clone()
         if self.databricks_client:
-            await workspace.exec_mut(
-                ["uv", "add", "databricks-sdk>=0.57.0"]
-            )
+            logger.info("Adding databricks-sdk dependency to the workspace")
+            await workspace.exec_mut(["uv", "add", "databricks-sdk>=0.57.0"])
 
         logger.info(
             f"Start {self.__class__.__name__} execution with files: {files.keys()}"
@@ -97,14 +96,16 @@ class NiceguiActor(FileOperationsActor):
             iteration += 1
             candidates = self.select(self.root)
             if not candidates:
-                logger.info("No candidates to evaluate, search terminated")
-                break
-
-            await notify_if_callback(
-                self.event_callback,
-                f"🔄 Working on implementation (step {iteration})...",
-                "iteration progress",
-            )
+                logger.error("No candidates to evaluate, search terminated")
+                await notify_stage(
+                    self.event_callback,
+                    "❌ NiceGUI agent failed: No candidates to evaluate",
+                    "failed"
+                )
+                raise AgentSearchFailedException(
+                    agent_name="NiceguiActor",
+                    message="No candidates to evaluate, search terminated"
+                )
 
             logger.info(
                 f"Iteration {iteration}: Running LLM on {len(candidates)} candidates"
@@ -119,6 +120,15 @@ class NiceguiActor(FileOperationsActor):
 
             for i, new_node in enumerate(nodes):
                 logger.info(f"Evaluating node {i + 1}/{len(nodes)}")
+
+                # show what actions are being taken
+                file_actions = self._get_file_actions(new_node)
+                await notify_if_callback(
+                    self.event_callback,
+                    f"💭 {file_actions}",
+                    "iteration progress",
+                )
+
                 if await self.eval_node(new_node, user_prompt):
                     logger.info(f"Found solution at depth {new_node.depth}")
                     await notify_stage(
@@ -135,7 +145,10 @@ class NiceguiActor(FileOperationsActor):
                 "❌ NiceGUI application generation failed",
                 "failed",
             )
-            raise ValueError("No solutions found")
+            raise AgentSearchFailedException(
+                agent_name="NiceguiActor",
+                message="Failed to find a solution after all iterations"
+            )
         return solution
 
     def select(self, node: Node[BaseData]) -> list[Node[BaseData]]:
@@ -506,12 +519,16 @@ class NiceguiActor(FileOperationsActor):
 
             async def run_and_store(key, coro):
                 """Helper to run a coroutine and store its result in the results dict."""
+                start_time = anyio.current_time()
                 try:
                     results[key] = await coro
                 except Exception as e:
                     # Catch unexpected exceptions during check execution
                     logger.error(f"Error running check {key}: {e}")
                     results[key] = f"Internal error running check {key}: {e}"
+                finally:
+                    duration = anyio.current_time() - start_time
+                    logger.info(f"Check '{key}' completed in {duration:.2f} seconds")
 
             tg.start_soon(run_and_store, "lint", self.run_lint_checks(node))
             tg.start_soon(run_and_store, "type_check", self.run_type_checks(node))
@@ -549,7 +566,6 @@ class NiceguiActor(FileOperationsActor):
         )
         return None
 
-
     async def get_repo_files(
         self, workspace: Workspace, files: dict[str, str]
     ) -> list[str]:
@@ -570,3 +586,33 @@ class NiceguiActor(FileOperationsActor):
             ]:
                 repo_files.add(file_path)
         return sorted(list(repo_files))
+
+    def _get_file_actions(self, node: Node[BaseData]) -> str:
+        """analyze what file operations are being performed in a node"""
+        actions = []
+
+        for block in node.data.head().content:
+            if isinstance(block, ToolUse):
+                match block.name:
+                    case "write_file":
+                        path = block.input.get("path", "unknown") if isinstance(block.input, dict) else "unknown"
+                        actions.append(f"Writing `{path}`")
+                    case "edit_file":
+                        path = block.input.get("path", "unknown") if isinstance(block.input, dict) else "unknown"
+                        actions.append(f"Editing `{path}`")
+                    case "read_file":
+                        path = block.input.get("path", "unknown") if isinstance(block.input, dict) else "unknown"
+                        actions.append(f"Reading `{path}`")
+                    case "uv_add":
+                        packages = block.input.get("packages", []) if isinstance(block.input, dict) else []
+                        if packages:
+                            actions.append(f"Adding packages: {', '.join(packages[:2])}{'...' if len(packages) > 2 else ''}")
+                    case "databricks_list_tables" | "databricks_describe_table" | "databricks_execute_query":
+                        actions.append("Querying databricks")
+                    case "complete" | "mark_completed":
+                        actions.append("Verifying solution")
+
+        if not actions:
+            return "Analyzing code"
+
+        return ", ".join(actions[:3]) + ("..." if len(actions) > 3 else "")
