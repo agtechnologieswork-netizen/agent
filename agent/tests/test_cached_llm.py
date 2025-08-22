@@ -165,7 +165,15 @@ async def test_llm_vision_completion():
             raise
 
 
-@pytest.mark.skipif(os.getenv("PREFER_OLLAMA") is None, reason="PREFER_OLLAMA is not set")
+def _has_ollama_available() -> bool:
+    """Check if Ollama is configured with ollama: prefixed models."""
+    # Check if any models are explicitly configured to use Ollama
+    model_vars = ["LLM_BEST_CODING_MODEL", "LLM_UNIVERSAL_MODEL", "LLM_ULTRA_FAST_MODEL", "LLM_VISION_MODEL"]
+    return any(
+        os.getenv(var, "").startswith("ollama:") for var in model_vars
+    )
+
+@pytest.mark.skipif(not _has_ollama_available(), reason="Ollama not available")
 async def test_ollama_function_calling():
     """Test that Ollama function calling infrastructure works correctly"""
 

@@ -51,12 +51,23 @@ def create_client(
             return client_class(model_name=mapped_model, **client_params)
 
         case "ollama":
-            # use OLLAMA_HOST/OLLAMA_API_BASE env vars or default
-            host = (
-                os.getenv("OLLAMA_HOST")
-                or os.getenv("OLLAMA_API_BASE")
-                or client_params.get("host", "http://localhost:11434")
-            )
+            # check if model_name contains host (e.g., ollama:http://localhost:11434:llama3.3)
+            host = "http://localhost:11434"  # default
+            
+            if ":" in model_name and model_name.startswith("ollama:"):
+                # for ollama:http://host:model format
+                if model_name.count(":") >= 3:  # has URL with port and model
+                    _, rest = model_name.split(":", 1)  # http://localhost:11434:model
+                    if "://" in rest:  # contains URL
+                        url_parts = rest.rsplit(":", 1)  # split on last colon
+                        if len(url_parts) == 2 and not url_parts[1].startswith("//"):
+                            host = url_parts[0]  # http://localhost:11434
+                # for ollama:http://host format (no model)            
+                elif model_name.count(":") >= 2:
+                    _, potential_url = model_name.split(":", 1)
+                    if potential_url.startswith("http://") or potential_url.startswith("https://"):
+                        host = potential_url
+            
             return client_class(host=host, model_name=mapped_model)
 
         case "lmstudio":
