@@ -56,7 +56,7 @@ class FSMToolProcessor:
         settings = settings or {}
         # check for credentials in settings or environment
         return bool(
-            settings.get("google_sheets_credentials") or 
+            settings.get("google_sheets_credentials") or
             os.getenv("GOOGLE_SHEETS_CREDENTIALS") or
             os.path.exists(os.path.expanduser("~/.config/gspread/credentials.json"))
         )
@@ -127,7 +127,7 @@ class FSMToolProcessor:
                 "input_schema": {"type": "object", "properties": {}, "required": []},
             },
         ]
-        
+
         # conditionally add spreadsheet tool if available
         if self.is_spreadsheet_available(settings):
             self.tool_definitions.append({
@@ -144,6 +144,9 @@ class FSMToolProcessor:
                     "required": ["spreadsheet_url"],
                 },
             })
+            logger.info("Spreadsheet analysis tool is available")
+        else:
+            logger.info("Spreadsheet analysis tool is not available - no credentials configured")
 
         # Map tool names to their implementation methods
         self.tool_mapping: dict[str, Callable[..., Awaitable[CommonToolResult]]] = {
@@ -152,7 +155,7 @@ class FSMToolProcessor:
             "change": self.tool_change,
             "complete_fsm": self.tool_complete_fsm,
         }
-        
+
         # conditionally add spreadsheet tool mapping if available
         if self.is_spreadsheet_available(settings):
             self.tool_mapping["analyze_spreadsheet"] = self.tool_analyze_spreadsheet
@@ -275,12 +278,12 @@ class FSMToolProcessor:
             if not self.is_spreadsheet_available(self.settings):
                 logger.warning("Spreadsheet integration not available - no credentials configured")
                 return CommonToolResult(
-                    content="Google Sheets integration is not available. Please configure GOOGLE_SHEETS_CREDENTIALS environment variable or provide credentials.", 
+                    content="Google Sheets integration is not available. Please configure GOOGLE_SHEETS_CREDENTIALS environment variable or provide credentials.",
                     is_error=True
                 )
-            
+
             logger.info(f"Analyzing spreadsheet: {spreadsheet_url}")
-            
+
             # Create analyzer instance
             analyzer = SpreadsheetAnalyzer()
 
@@ -299,7 +302,7 @@ class FSMToolProcessor:
         except ImportError as e:
             logger.exception(f"Failed to import spreadsheet dependencies: {str(e)}")
             return CommonToolResult(
-                content="Google Sheets integration dependencies are not installed. Please install gspread and related packages.", 
+                content="Google Sheets integration dependencies are not installed. Please install gspread and related packages.",
                 is_error=True
             )
         except Exception as e:
@@ -456,7 +459,7 @@ class FSMToolProcessor:
             spreadsheet_part = """
 
 If the user provides a Google Spreadsheet URL or requests to analyze spreadsheet data, use the analyze_spreadsheet tool first to generate a technical specification. This tool will analyze the spreadsheet structure and content to create a detailed specification for building a web application based on that data."""
-        
+
         return f"""You are a software engineering expert who can generate application code using a code generation framework. This framework uses a Finite State Machine (FSM) to guide the generation process.
 
 Your task is to control the FSM through the following stages of code generation:
