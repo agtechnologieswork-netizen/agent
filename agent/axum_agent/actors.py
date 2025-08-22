@@ -20,8 +20,10 @@ class RustPaths:
 
     files_allowed_draft: list[str]
     files_allowed_handlers: list[str]
+    files_allowed_ui: list[str]
     files_relevant_draft: list[str]
     files_relevant_handlers: list[str]
+    files_relevant_ui: list[str]
 
     @classmethod
     def default(cls) -> "RustPaths":
@@ -35,6 +37,11 @@ class RustPaths:
                 "src/main.rs",
                 "src/handlers.rs",
             ],
+            files_allowed_ui=[
+                "templates/",
+                "src/http/handlers/",
+                "src/main.rs",
+            ],
             files_relevant_draft=[
                 "Cargo.toml",
                 "diesel.toml",
@@ -43,6 +50,12 @@ class RustPaths:
             files_relevant_handlers=[
                 "src/models.rs",
                 "src/schema.rs",
+                "Cargo.toml",
+            ],
+            files_relevant_ui=[
+                "src/models.rs",
+                "src/schema.rs",
+                "src/http/handlers/",
                 "Cargo.toml",
             ],
         )
@@ -59,10 +72,12 @@ class RustActor(FileOperationsActor):
         beam_width: int = 3,
         max_depth: int = 30,
         event_callback: Callable[[str, str], Awaitable[None]] | None = None,
+        mode: str = "auto",  # "data_model", "handlers", "ui", or "auto"
     ):
         super().__init__(llm, workspace, beam_width, max_depth)
         self.vlm = vlm
         self.event_callback = event_callback
+        self.mode = mode
 
         # User prompt for validation
         self._user_prompt: str = ""
@@ -76,7 +91,7 @@ class RustActor(FileOperationsActor):
         user_prompt: str,
         feedback: str | None = None,
     ) -> Node[BaseData]:
-        """Execute Rust generation or editing based on parameters."""
+        """Execute Rust generation or editing based on mode and parameters."""
         self._user_prompt = user_prompt
 
         # If feedback is provided, route to edit functionality
@@ -86,46 +101,25 @@ class RustActor(FileOperationsActor):
         # Update workspace with input files
         self.workspace = self._create_workspace_with_permissions(files, [], [])
 
-        # Determine what to generate based on existing files
-        has_models = any(
-            f in files for f in ["src/models.rs", "src/schema.rs"]
-        )
-
-        if not has_models:
-            # Stage 1: Generate data model only
-            await notify_stage(
-                self.event_callback, "🎯 Starting data model generation", "in_progress"
-            )
-
-            solution = await self._generate_draft(user_prompt)
-            if not solution:
-                raise AgentSearchFailedException(
-                    agent_name="RustActor", message="Data model generation failed"
+        # Execute based on mode
+        match self.mode:
+            case "data_model":
+                return await self._generate_data_model(user_prompt)
+            case "handlers":
+                return await self._generate_handlers(files, user_prompt)
+            case "ui":
+                return await self._generate_ui(files, user_prompt)
+            case "auto":
+                # Legacy auto-detection logic
+                has_models = any(
+                    f in files for f in ["src/models.rs", "src/schema.rs"]
                 )
-
-            await notify_stage(
-                self.event_callback, "✅ Data model generated successfully", "completed"
-            )
-            return solution
-
-        else:
-            # Stage 2: Generate application based on existing models
-            await notify_stage(
-                self.event_callback, "🚀 Starting application generation", "in_progress"
-            )
-
-            solution = await self._generate_implementation(files, user_prompt)
-            if not solution:
-                raise AgentSearchFailedException(
-                    agent_name="RustActor", message="Application generation failed"
-                )
-
-            await notify_stage(
-                self.event_callback,
-                "✅ Application generated successfully",
-                "completed",
-            )
-            return solution
+                if not has_models:
+                    return await self._generate_data_model(user_prompt)
+                else:
+                    return await self._generate_handlers(files, user_prompt)
+            case _:
+                raise ValueError(f"Unknown mode: {self.mode}")
 
     async def execute_edit(
         self,
@@ -179,7 +173,7 @@ class RustActor(FileOperationsActor):
 
         return solution
 
-    async def _generate_draft(self, user_prompt: str) -> Optional[Node[BaseData]]:
+    async def _generate_data_model(self, user_prompt: str) -> Optional[Node[BaseData]]:
         """Generate models and schema definitions."""
 
         await notify_if_callback(
@@ -224,7 +218,7 @@ class RustActor(FileOperationsActor):
 
         return solution
 
-    async def _generate_implementation(
+    async def _generate_handlers(
         self,
         draft_files: dict[str, str],
         user_prompt: str,
@@ -273,6 +267,59 @@ class RustActor(FileOperationsActor):
             raise AgentSearchFailedException(
                 agent_name="RustActor",
                 message="Handlers generation failed - no solution found",
+            )
+
+        return solution
+
+    async def _generate_ui(
+        self,
+        files: dict[str, str],
+        user_prompt: str,
+    ) -> Optional[Node[BaseData]]:
+        """Generate UI templates and HTMX components."""
+
+        await notify_if_callback(
+            self.event_callback,
+            "🎨 Generating UI templates and components...",
+            "ui start",
+        )
+
+        # Create UI workspace with all existing files
+        workspace = self._create_workspace_with_permissions(
+            files,
+            allowed=["templates/", "src/http/handlers/", "src/main.rs"],
+            protected=[],
+        )
+
+        # Build context for UI generation
+        context = await self._build_context(workspace, "ui")
+
+        # Prepare prompt
+        user_prompt_rendered = self._render_prompt(
+            "UI_USER_PROMPT",
+            project_context=context,
+            user_prompt=user_prompt,
+        )
+
+        # Create root node
+        message = Message(role="user", content=[TextRaw(user_prompt_rendered)])
+        ui_node = Node(BaseData(workspace, [message], {}, True, "ui"))
+
+        # Search for solution
+        solution = await self._search_single_node(
+            ui_node, playbooks.UI_SYSTEM_PROMPT
+        )
+
+        if solution:
+            await notify_if_callback(
+                self.event_callback,
+                "✅ UI templates generated!",
+                "ui complete",
+            )
+        else:
+            raise AgentSearchFailedException(
+                agent_name="RustActor",
+                message="UI generation failed - no solution found",
             )
 
         return solution
@@ -355,6 +402,8 @@ class RustActor(FileOperationsActor):
                 success = await self._validate_draft(node)
             case "handlers":
                 success = await self._validate_handlers(node)
+            case "ui":
+                success = await self._validate_ui(node)
             case "edit":
                 success = await self._validate_edit(node)
             case _:
@@ -379,18 +428,9 @@ class RustActor(FileOperationsActor):
         """Validate draft: Cargo check + Diesel migration."""
         errors = []
 
-        async with anyio.create_task_group() as tg:
-
-            async def check_cargo():
-                if error := await self.run_cargo_check(node):
-                    errors.append(error)
-
-            async def check_diesel():
-                if error := await self.run_diesel_check(node):
-                    errors.append(error)
-
-            tg.start_soon(check_cargo)
-            tg.start_soon(check_diesel)
+        # Run cargo check for compilation errors
+        if error := await self.run_cargo_check(node):
+            errors.append(error)
 
         return await self._handle_validation_errors(node, errors)
 
@@ -413,6 +453,16 @@ class RustActor(FileOperationsActor):
 
         return await self._handle_validation_errors(node, errors)
 
+    async def _validate_ui(self, node: Node[BaseData]) -> bool:
+        """Validate UI: Cargo check (for template compilation)."""
+        errors = []
+
+        # Check that templates compile correctly (Askama templates are checked during cargo build)
+        if error := await self.run_cargo_check(node):
+            errors.append(error)
+
+        return await self._handle_validation_errors(node, errors)
+
     async def _validate_edit(self, node: Node[BaseData]) -> bool:
         """Validate edit: Full validation."""
         await notify_if_callback(
@@ -431,13 +481,8 @@ class RustActor(FileOperationsActor):
                 if error := await self.run_test_check(node):
                     errors.append(error)
 
-            async def check_diesel():
-                if error := await self.run_diesel_check(node):
-                    errors.append(error)
-
             tg.start_soon(check_cargo)
             tg.start_soon(check_tests)
-            tg.start_soon(check_diesel)
 
         if not await self._handle_validation_errors(node, errors):
             return False
@@ -449,30 +494,17 @@ class RustActor(FileOperationsActor):
 
     async def run_cargo_check(self, node: Node[BaseData]) -> str | None:
         """Run Cargo check for compilation errors."""
-        result = await node.data.workspace.exec(["cargo", "check"])
+        result = await node.data.workspace.exec(["cargo", "check", "--quiet"])
         if result.exit_code != 0:
-            error_output = f"{result.stdout}\n{result.stderr}"
-            return f"Cargo check errors:\n{error_output}"
+            return f"Cargo check errors:\n{result.stderr}"
         return None
 
-    async def run_diesel_check(self, node: Node[BaseData]) -> str | None:
-        """Run Diesel migration check."""
-        # First, try to generate migrations if needed
-        result = await node.data.workspace.exec(["diesel", "migration", "generate", "auto"])
-
-        # Then check if migrations can be applied
-        result = await node.data.workspace.exec_with_pg(["diesel", "migration", "run"])
-        if result.exit_code != 0:
-            error_output = f"{result.stdout}\n{result.stderr}"
-            return f"Diesel migration errors:\n{error_output}"
-        return None
 
     async def run_test_check(self, node: Node[BaseData]) -> str | None:
         """Run Cargo tests."""
-        result = await node.data.workspace.exec_with_pg(["cargo", "test"])
+        result = await node.data.workspace.exec_with_pg(["cargo", "test", "--quiet"])
         if result.exit_code != 0:
-            error_output = f"{result.stdout}\n{result.stderr}"
-            return f"Test errors:\n{error_output}"
+            return f"Test errors:\n{result.stderr}"
         return None
 
     def _render_prompt(self, template_name: str, **kwargs) -> str:
@@ -499,7 +531,7 @@ class RustActor(FileOperationsActor):
     ) -> bool:
         """Handle validation errors by adding to node messages."""
         if errors:
-            error_msg = await self.compact_error_message("\n".join(errors))
+            error_msg = await self.compact_error_message("\n".join(errors), max_length=1e6)
             node.data.messages.append(
                 Message(role="user", content=[TextRaw(error_msg)])
             )
@@ -534,6 +566,9 @@ class RustActor(FileOperationsActor):
             case "handlers":
                 relevant_files = self.paths.files_relevant_handlers
                 allowed_files = self.paths.files_allowed_handlers
+            case "ui":
+                relevant_files = self.paths.files_relevant_ui
+                allowed_files = self.paths.files_allowed_ui
             case "edit":
                 relevant_files = (
                     self.paths.files_relevant_draft + self.paths.files_relevant_handlers

@@ -27,8 +27,12 @@ class FSMState(str, enum.Enum):
     DATA_MODEL_GENERATION = "data_model_generation"
     REVIEW_DATA_MODEL = "review_data_model"
     DATA_MODEL_APPLY_FEEDBACK = "data_model_apply_feedback"
-    APPLICATION_GENERATION = "application_generation"
-    REVIEW_APPLICATION = "review_application"
+    HANDLERS_GENERATION = "handlers_generation"
+    REVIEW_HANDLERS = "review_handlers"
+    HANDLERS_APPLY_FEEDBACK = "handlers_apply_feedback"
+    UI_GENERATION = "ui_generation"
+    REVIEW_UI = "review_ui"
+    UI_APPLY_FEEDBACK = "ui_apply_feedback"
     APPLY_FEEDBACK = "apply_feedback"
     COMPLETE = "complete"
     FAILURE = "failure"
@@ -99,7 +103,8 @@ class FSMApplication:
         return "\n".join(
             [
                 "1. Data model generation - Define Rust structs, database schema via Diesel migrations",
-                "2. Application generation - Implement Axum handlers and HTMX templates",
+                "2. Handlers generation - Implement Axum route handlers and API logic",
+                "3. UI generation - Create HTMX templates and frontend interactions",
                 "",
                 "The result application will be based on Rust, Axum, Diesel ORM and HTMX. Focus on type safety and simplicity.",
             ]
@@ -148,17 +153,20 @@ class FSMApplication:
 
         workspace = await Workspace.create(
             client=client,
-            base_image="rust:1.82-alpine",
+            base_image="rust:1.85-alpine",
             context=client.host().directory("./axum_agent/template"),
             setup_cmd=[
-                ["apk", "add", "--no-cache", "postgresql-dev", "musl-dev", "gcc", "pkgconfig", "openssl-libs-static", "build-base"],
-                ["sh", "-c", "RUSTFLAGS='-lpgcommon -lpgport -lssl -lcrypto' cargo install diesel_cli --no-default-features --features postgres --version 2.2.0"],
+                ["apk", "add", "--no-cache", "musl-dev", "gcc", "pkgconfig", "build-base", "perl"],
+                ["mkdir", "-p", "src"],
+                ["sh", "-c", "echo 'fn main() {}' > src/main.rs"],
+                ["cargo", "build", "--release", "--quiet"],
+                ["rm", "-rf", "src", "target/release/deps/*main*", "target/release/*main*"],
             ],
         )
 
         event_callback = settings.get("event_callback") if settings else None
 
-        # Create separate actor instances for data model, application, and editing
+        # Create separate actor instances for data model, handlers, UI, and editing
         data_model_actor = RustActor(
             llm=llm,
             vlm=vlm,
@@ -166,15 +174,27 @@ class FSMApplication:
             beam_width=settings.get("beam_width", 1) if settings else 1,
             max_depth=settings.get("max_depth", 50) if settings else 50,
             event_callback=event_callback,
+            mode="data_model",
         )
 
-        app_actor = RustActor(
+        handlers_actor = RustActor(
             llm=llm,
             vlm=vlm,
             workspace=workspace.clone(),
             beam_width=settings.get("beam_width", 1) if settings else 1,
             max_depth=settings.get("max_depth", 50) if settings else 50,
             event_callback=event_callback,
+            mode="handlers",
+        )
+
+        ui_actor = RustActor(
+            llm=llm,
+            vlm=vlm,
+            workspace=workspace.clone(),
+            beam_width=settings.get("beam_width", 1) if settings else 1,
+            max_depth=settings.get("max_depth", 50) if settings else 50,
+            event_callback=event_callback,
+            mode="ui",
         )
 
         edit_actor = RustActor(
@@ -184,6 +204,7 @@ class FSMApplication:
             beam_width=1,  # Use narrower beam for edits
             max_depth=50,  # Shorter depth for focused edits
             event_callback=event_callback,
+            mode="auto",  # Edit mode uses auto-detection
         )
 
         # Define state machine states
@@ -212,7 +233,7 @@ class FSMApplication:
                 ),
                 FSMState.REVIEW_DATA_MODEL: State(
                     on={
-                        FSMEvent("CONFIRM"): FSMState.APPLICATION_GENERATION,
+                        FSMEvent("CONFIRM"): FSMState.HANDLERS_GENERATION,
                         FSMEvent("FEEDBACK"): FSMState.DATA_MODEL_APPLY_FEEDBACK,
                     },
                 ),
@@ -233,15 +254,15 @@ class FSMApplication:
                         },
                     },
                 ),
-                FSMState.APPLICATION_GENERATION: State(
+                FSMState.HANDLERS_GENERATION: State(
                     invoke={
-                        "src": app_actor,
+                        "src": handlers_actor,
                         "input_fn": lambda ctx: (
                             ctx.files,
                             ctx.feedback_data or ctx.user_prompt,
                         ),
                         "on_done": {
-                            "target": FSMState.REVIEW_APPLICATION,
+                            "target": FSMState.REVIEW_HANDLERS,
                             "actions": [update_node_files],
                         },
                         "on_error": {
@@ -250,10 +271,67 @@ class FSMApplication:
                         },
                     },
                 ),
-                FSMState.REVIEW_APPLICATION: State(
+                FSMState.REVIEW_HANDLERS: State(
+                    on={
+                        FSMEvent("CONFIRM"): FSMState.UI_GENERATION,
+                        FSMEvent("FEEDBACK"): FSMState.HANDLERS_APPLY_FEEDBACK,
+                    },
+                ),
+                FSMState.HANDLERS_APPLY_FEEDBACK: State(
+                    invoke={
+                        "src": handlers_actor,
+                        "input_fn": lambda ctx: (
+                            ctx.files,
+                            ctx.feedback_data,
+                        ),
+                        "on_done": {
+                            "target": FSMState.REVIEW_HANDLERS,
+                            "actions": [update_node_files],
+                        },
+                        "on_error": {
+                            "target": FSMState.FAILURE,
+                            "actions": [set_error],
+                        },
+                    },
+                ),
+                FSMState.UI_GENERATION: State(
+                    invoke={
+                        "src": ui_actor,
+                        "input_fn": lambda ctx: (
+                            ctx.files,
+                            ctx.feedback_data or ctx.user_prompt,
+                        ),
+                        "on_done": {
+                            "target": FSMState.REVIEW_UI,
+                            "actions": [update_node_files],
+                        },
+                        "on_error": {
+                            "target": FSMState.FAILURE,
+                            "actions": [set_error],
+                        },
+                    },
+                ),
+                FSMState.REVIEW_UI: State(
                     on={
                         FSMEvent("CONFIRM"): FSMState.COMPLETE,
-                        FSMEvent("FEEDBACK"): FSMState.APPLY_FEEDBACK,
+                        FSMEvent("FEEDBACK"): FSMState.UI_APPLY_FEEDBACK,
+                    },
+                ),
+                FSMState.UI_APPLY_FEEDBACK: State(
+                    invoke={
+                        "src": ui_actor,
+                        "input_fn": lambda ctx: (
+                            ctx.files,
+                            ctx.feedback_data,
+                        ),
+                        "on_done": {
+                            "target": FSMState.REVIEW_UI,
+                            "actions": [update_node_files],
+                        },
+                        "on_error": {
+                            "target": FSMState.FAILURE,
+                            "actions": [set_error],
+                        },
                     },
                 ),
                 FSMState.APPLY_FEEDBACK: State(
@@ -328,8 +406,10 @@ class FSMApplication:
         match self.current_state:
             case FSMState.REVIEW_DATA_MODEL:
                 return {"data_models": self.truncated_files}
-            case FSMState.REVIEW_APPLICATION:
-                return {"application": self.truncated_files}
+            case FSMState.REVIEW_HANDLERS:
+                return {"handlers": self.truncated_files}
+            case FSMState.REVIEW_UI:
+                return {"ui": self.truncated_files}
             case FSMState.COMPLETE:
                 return {"application": self.fsm.context.files}
             case FSMState.FAILURE:
@@ -344,7 +424,7 @@ class FSMApplication:
     def available_actions(self) -> dict[str, str]:
         actions = {}
         match self.current_state:
-            case FSMState.REVIEW_DATA_MODEL | FSMState.REVIEW_APPLICATION:
+            case FSMState.REVIEW_DATA_MODEL | FSMState.REVIEW_HANDLERS | FSMState.REVIEW_UI:
                 actions = {"confirm": "Accept current output and continue"}
                 logger.debug(
                     f"Review state detected: {self.current_state}, offering confirm action"
