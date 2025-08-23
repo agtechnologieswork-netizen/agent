@@ -73,14 +73,22 @@ def extract_nodes(data: Dict[str, Any]) -> List[Dict]:
 
     if isinstance(actors, list):
         for actor in actors:
-            for node in actor.get("data", []):
-                if node.get("data", {}).get("messages"):
-                    nodes.append(node)
+            actor_data = actor.get("data", [])
+            # handle both list and dict data formats
+            if isinstance(actor_data, list):
+                for node in actor_data:
+                    if isinstance(node, dict) and node.get("data", {}).get("messages"):
+                        nodes.append(node)
+            elif isinstance(actor_data, dict):
+                # skip dict-based actor data for now as it has different structure
+                continue
     else:
         for actor in actors.values():
-            for node in actor.get("data", []):
-                if node.get("data", {}).get("messages"):
-                    nodes.append(node)
+            actor_data = actor.get("data", [])
+            if isinstance(actor_data, list):
+                for node in actor_data:
+                    if isinstance(node, dict) and node.get("data", {}).get("messages"):
+                        nodes.append(node)
 
     return nodes
 
@@ -255,9 +263,9 @@ def display_summary(chains: List[List[Dict]]):
         print(f"Tools used: {', '.join(sorted(all_tools))}")
 
 
-def process_trace_file(json_file: str, output: Optional[str] = None) -> None:
+def process_trace_file(json_file: str, output: Optional[str] = None, quiet: bool = False) -> None:
     """Process a single trace file and display or save the conversation chains.
-    
+
     Args:
         json_file: Path to the JSON trace file
         output: Optional output file path (if None, prints to stdout)
@@ -270,20 +278,25 @@ def process_trace_file(json_file: str, output: Optional[str] = None) -> None:
     # redirect output if specified
     original_stdout = sys.stdout
     output_file = None
-    
+
     try:
         if output:
-            output_file = open(output, 'w')
+            output_file = open(output, "w")
             sys.stdout = output_file
-        
+
         with open(file_path, "r") as f:
             contents = f.read()
-            if "nicegui" not in contents:
-                raise ValueError(f"Skipping {file_path.name}: not a NiceGUI trace file")
-
             data = json.loads(contents)
+            
+        # check if this is an FSM-based trace (works for all agent types)
+        actors = data.get("actors", [])
+        if not actors:
+            raise ValueError(f"Skipping {file_path.name}: no actors found (not an FSM trace)")
 
         nodes = extract_nodes(data)
+        if not nodes:
+            raise ValueError(f"Skipping {file_path.name}: no conversation nodes found")
+            
         chains = build_conversation_chains(nodes)
         chains.sort(key=len, reverse=True)
 
@@ -295,13 +308,13 @@ def process_trace_file(json_file: str, output: Optional[str] = None) -> None:
                 print("=" * 100)
                 print()
 
-    except (json.JSONDecodeError, FileNotFoundError, ValueError) as e:
+    except (json.JSONDecodeError, FileNotFoundError, ValueError):
         # restore stdout before re-raising
         sys.stdout = original_stdout
         if output_file:
             output_file.close()
         raise
-    except Exception as e:
+    except Exception:
         # restore stdout before re-raising
         sys.stdout = original_stdout
         if output_file:
