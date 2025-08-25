@@ -13,7 +13,7 @@ use rig::{
 use serde::{Deserialize, Serialize};
 use std::{collections::HashSet, sync::Arc};
 
-#[derive(Deserialize, Serialize, Clone)]
+#[derive(Deserialize, Serialize, Default, Clone)]
 pub struct Metrics {
     pub output_tokens: u64,
 }
@@ -22,12 +22,6 @@ impl Metrics {
     fn output_tokens(mut self, output_tokens: u64) -> Self {
         self.output_tokens = output_tokens;
         self
-    }
-}
-
-impl Default for Metrics {
-    fn default() -> Self {
-        Self { output_tokens: 0 }
     }
 }
 
@@ -158,7 +152,7 @@ impl Rollout<Node> for AgentActor {
         let tools = self.run_tools(&response, &mut node).await?;
         let message = match tools {
             Some(tools) => {
-                let tools = tools.into_iter().map(|x| UserContent::ToolResult(x));
+                let tools = tools.into_iter().map(UserContent::ToolResult);
                 Message::from(OneOrMany::many(tools)?)
             }
             None => Message::from(self.continue_message()),
@@ -193,7 +187,7 @@ impl SearchActor {
     }
 
     pub fn is_exhausted(&self, root: &Tree<Node>) -> bool {
-        return self.limit.is_some_and(|limit| root.num_nodes() >= limit);
+        self.limit.is_some_and(|limit| root.num_nodes() >= limit)
     }
 }
 
@@ -229,6 +223,12 @@ impl Search<Node> for SearchActor {
 
     fn clear(&mut self) {
         self.locked.clear();
+    }
+}
+
+impl Default for SearchActor {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -398,6 +398,7 @@ Program will be run using uv run main.py command.
             "Create a simple python script that fetches my public ip using one of the common services.".to_string(),
             "Create s python script that reads a csv file using pandas and prints first 5 rows".to_string(),
         ],
+        concurrency: 5,
     };
     let evaluation = evaluator
         .evaluate(&optimizer::AgentConfig {

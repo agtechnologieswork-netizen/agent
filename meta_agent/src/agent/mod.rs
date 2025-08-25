@@ -4,7 +4,6 @@ use serde::{Deserialize, Serialize};
 use std::pin::Pin;
 use tokio::sync::mpsc;
 pub mod actor;
-pub mod demo;
 pub mod optimizer;
 pub mod toolset;
 pub mod tree;

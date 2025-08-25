@@ -5,8 +5,9 @@ use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tera::{Context, Tera};
 use tokio::sync::mpsc;
+pub mod toolset;
 
-const STEP_TEMPLATE: &'static str = include_str!("./templates/formatter/step.jinja2");
+const STEP_TEMPLATE: &str = include_str!("./templates/formatter/step.jinja2");
 
 #[derive(Deserialize, Serialize, Clone, Copy)]
 pub enum Role {
@@ -148,7 +149,7 @@ impl Trimmer {
             .collect();
         Message {
             role: message.role,
-            content: content,
+            content,
         }
     }
 
@@ -212,41 +213,41 @@ pub struct AgentConfig {
 pub struct Evaluation {
     pub trajectories: Vec<Tree<super::actor::Node>>,
     pub score: f32,
-    //pub metrics: HashMap<String, f32>,
 }
 
 pub struct Evaluator {
     pub pipeline: super::actor::AgentPipeline,
     pub workspace: Box<dyn WorkspaceDyn + 'static>,
     pub dataset: Vec<String>,
+    pub concurrency: usize,
 }
 
 impl Evaluator {
     pub async fn evaluate(&self, config: &AgentConfig) -> eyre::Result<Evaluation> {
+        let semaphore = Arc::new(tokio::sync::Semaphore::new(self.concurrency));
         let mut set = tokio::task::JoinSet::new();
-        for prompt in self.dataset.iter().cloned() {
-            let workspace = self.workspace.fork().await?;
+        for prompt in self.dataset.iter() {
+            let semaphore = semaphore.clone();
             let mut pipeline = self.pipeline.clone();
             pipeline.rollout.preamble = config.preamble.clone();
+            let command = Command::new(
+                None,
+                super::actor::PipelineCmd::Start {
+                    prompt: prompt.to_string(),
+                    workspace: self.workspace.fork().await?,
+                },
+            );
             set.spawn(async move {
+                let _permit = semaphore.acquire().await?;
                 let (cmd_tx, cmd_rx) = mpsc::channel(1);
                 let (event_tx, mut event_rx) = mpsc::channel(1);
-                let cmd = Command::new(
-                    None,
-                    super::actor::PipelineCmd::Start {
-                        prompt: prompt.to_string(),
-                        workspace: workspace,
-                    },
-                );
-
-                tokio::spawn(async move { while let Some(_) = event_rx.recv().await {} });
+                tokio::spawn(async move { while (event_rx.recv().await).is_some() {} });
                 tokio::spawn({
                     let cmd_tx = cmd_tx.clone();
                     async move {
-                        let _ = cmd_tx.send(cmd).await;
+                        let _ = cmd_tx.send(command).await;
                     }
                 });
-
                 let result = pipeline.execute(cmd_rx, event_tx).await?;
                 result.ok_or_eyre("no solutions")
             });
@@ -269,6 +270,11 @@ impl Evaluator {
     }
 }
 
+/*
+ * parent prompt + inspirations + [sampled_prompts] -> new prompt
+ *
+ */
+
 pub struct PromptSampler {
     pub llm: Arc<dyn LLMClientDyn>,
     pub tools: Arc<Vec<Box<dyn rig::tool::ToolDyn>>>,
@@ -277,6 +283,16 @@ pub struct PromptSampler {
 
 impl PromptSampler {
     pub async fn suggest(&self, config: &AgentConfig, evaluation: &Evaluation) {}
+
+    pub async fn get_inspirations(
+        &self,
+        config: &AgentConfig,
+        evaluation: &Evaluation,
+    ) -> eyre::Result<Vec<String>> {
+        // render evaluations
+        // run tools for exploration until getting inspirations
+        todo!()
+    }
 }
 
 pub fn test_step_render() {
