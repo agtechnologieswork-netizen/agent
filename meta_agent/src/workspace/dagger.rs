@@ -1,5 +1,18 @@
 use crate::workspace::*;
 use tokio::sync::{mpsc, oneshot};
+use uuid::Uuid;
+
+/// Create a PostgreSQL service with unique instance ID.
+fn create_postgres_service(client: &dagger_sdk::DaggerConn) -> dagger_sdk::Service {
+    client
+        .container()
+        .from("postgres:17.0-alpine")
+        .with_env_variable("POSTGRES_USER", "postgres")
+        .with_env_variable("POSTGRES_PASSWORD", "postgres")
+        .with_env_variable("POSTGRES_DB", "postgres")
+        .with_env_variable("INSTANCE_ID", &Uuid::new_v4().to_string())
+        .as_service()
+}
 
 /// A reference to a Dagger connection that can be used to create and manage workspaces.
 /// Created workspaces are valid for the lifetime of the DaggerRef instance.
@@ -10,9 +23,19 @@ pub struct DaggerRef {
 
 impl DaggerRef {
     pub fn new() -> Self {
+        Self::with_verbose(std::env::var("DAGGER_VERBOSE").is_ok())
+    }
+
+    pub fn with_verbose(verbose: bool) -> Self {
         let (sender, mut receiver) = mpsc::channel::<oneshot::Sender<dagger_sdk::DaggerConn>>(1);
         tokio::spawn(async move {
-            let _ = dagger_sdk::connect(|client| async move {
+            let logger = if verbose { 
+                dagger_sdk::core::config::Config::default().logger 
+            } else { 
+                None 
+            };
+            let config = dagger_sdk::core::config::Config::new(None, None, None, None, logger);
+            let _ = dagger_sdk::connect_opts(config, |client| async move {
                 while let Some(reply) = receiver.recv().await {
                     let _ = reply.send(client.clone());
                 }
@@ -42,7 +65,7 @@ impl DaggerRef {
             .container()
             .build_opts(client.host().directory(context), opts);
         ctr.sync().await?; // Eagerly evaluate and fail if workspace is invalid
-        Ok(DaggerWorkspace { ctr })
+        Ok(DaggerWorkspace { ctr, client })
     }
 }
 
@@ -55,6 +78,7 @@ impl Default for DaggerRef {
 #[derive(Clone)]
 pub struct DaggerWorkspace {
     ctr: dagger_sdk::Container,
+    client: dagger_sdk::DaggerConn, // Add client reference for creating services
 }
 
 impl DaggerWorkspace {
@@ -64,6 +88,34 @@ impl DaggerWorkspace {
             stdout: ctr.stdout().await?,
             stderr: ctr.stderr().await?,
         })
+    }
+
+    async fn bash_with_pg_impl(&mut self, cmd: &str) -> eyre::Result<ExecResult> {
+        let cmd_args: Vec<String> = cmd.split_whitespace().map(String::from).collect();
+        let postgres_service = create_postgres_service(&self.client);
+        let ctr = self.ctr.clone();
+        
+        let (res, ctr) = tokio::spawn(async move {
+            let opts = dagger_sdk::ContainerWithExecOptsBuilder::default()
+                .expect(dagger_sdk::ReturnType::Any)
+                .build()
+                .unwrap();
+                
+            let ctr = ctr
+                .with_exec(vec!["apt-get".to_string(), "update".to_string()])
+                .with_exec(vec!["apt-get".to_string(), "install".to_string(), "-y".to_string(), "postgresql-client".to_string()])
+                .with_service_binding("postgres", postgres_service)
+                .with_env_variable("APP_DATABASE_URL", "postgresql://postgres:postgres@postgres:5432/postgres")
+                .with_exec(vec!["sh".to_string(), "-c".to_string(), "while ! pg_isready -h postgres -U postgres; do sleep 1; done".to_string()])
+                .with_exec_opts(cmd_args, opts);
+                
+            let res = DaggerWorkspace::exec_res(&ctr).await;
+            (res, ctr)
+        })
+        .await?;
+        
+        self.ctr = ctr;
+        res
     }
 }
 
@@ -108,7 +160,72 @@ impl Workspace for DaggerWorkspace {
 
     async fn fork(&self) -> eyre::Result<Self> {
         let ctr = self.ctr.clone();
-        Ok(DaggerWorkspace { ctr })
+        let client = self.client.clone();
+        Ok(DaggerWorkspace { ctr, client })
+    }
+}
+
+// Override WorkspaceDyn to provide PostgreSQL support
+impl crate::workspace::WorkspaceDyn for DaggerWorkspace {
+    fn bash(
+        &mut self,
+        cmd: &str,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = eyre::Result<ExecResult>> + Send + Sync + '_>> {
+        let cmd = Bash(cmd.split_whitespace().map(String::from).collect());
+        Box::pin(async move { Workspace::bash(self, cmd).await })
+    }
+    
+    fn bash_with_pg(
+        &mut self,
+        cmd: &str,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = eyre::Result<ExecResult>> + Send + Sync + '_>> {
+        let cmd = cmd.to_string();
+        Box::pin(async move { self.bash_with_pg_impl(&cmd).await })
+    }
+    
+    fn write_file(
+        &mut self,
+        path: &str,
+        contents: &str,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = eyre::Result<()>> + Send + Sync + '_>> {
+        let cmd = WriteFile {
+            path: path.to_string(),
+            contents: contents.to_string(),
+        };
+        Box::pin(async move { Workspace::write_file(self, cmd).await })
+    }
+    
+    fn read_file(
+        &mut self,
+        path: &str,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = eyre::Result<String>> + Send + Sync + '_>> {
+        let cmd = ReadFile(path.to_string());
+        Box::pin(async move { Workspace::read_file(self, cmd).await })
+    }
+    
+    fn ls(
+        &mut self,
+        path: &str,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = eyre::Result<Vec<String>>> + Send + Sync + '_>> {
+        let cmd = LsDir(path.to_string());
+        Box::pin(async move { Workspace::ls(self, cmd).await })
+    }
+    
+    fn rm(
+        &mut self,
+        path: &str,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = eyre::Result<()>> + Send + Sync + '_>> {
+        let cmd = RmFile(path.to_string());
+        Box::pin(async move { Workspace::rm(self, cmd).await })
+    }
+    
+    fn fork(
+        &self,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = eyre::Result<Box<dyn crate::workspace::WorkspaceDyn>>> + Send + Sync + '_>> {
+        Box::pin(async move {
+            let forked = Workspace::fork(self).await?;
+            Ok(Box::new(forked) as Box<dyn crate::workspace::WorkspaceDyn>)
+        })
     }
 }
 

@@ -282,12 +282,12 @@ pub struct PromptSampler {
 }
 
 impl PromptSampler {
-    pub async fn suggest(&self, config: &AgentConfig, evaluation: &Evaluation) {}
+    pub async fn suggest(&self, _config: &AgentConfig, _evaluation: &Evaluation) {}
 
     pub async fn get_inspirations(
         &self,
-        config: &AgentConfig,
-        evaluation: &Evaluation,
+        _config: &AgentConfig,
+        _evaluation: &Evaluation,
     ) -> eyre::Result<Vec<String>> {
         // render evaluations
         // run tools for exploration until getting inspirations

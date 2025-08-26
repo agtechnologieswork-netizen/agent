@@ -38,11 +38,17 @@ pub struct Node {
     #[serde(skip, default = "crate::workspace::mock::default_mock")]
     pub workspace: Box<dyn WorkspaceDyn>,
     pub metrics: Metrics,
+    /// Files modified by this node - accumulated from tools
+    pub files: std::collections::HashMap<String, String>,
 }
 
 impl AgentNode for Node {
     fn workspace_mut(&mut self) -> &mut Box<dyn WorkspaceDyn> {
         &mut self.workspace
+    }
+
+    fn files_mut(&mut self) -> &mut std::collections::HashMap<String, String> {
+        &mut self.files
     }
 }
 
@@ -91,7 +97,13 @@ impl AgentActor {
                 let result = match tool {
                     Some(tool) => {
                         let args = call.function.arguments.clone();
-                        tool.call(args, node).await?
+                        match tool.call(args, node).await {
+                            Ok(result) => result,
+                            Err(e) => {
+                                tracing::warn!("Tool {} failed: {}", call.function.name, e);
+                                Err(serde_json::json!(e.to_string()))
+                            }
+                        }
                     }
                     None => {
                         let error = format!("Tool {} not found", call.function.name);
@@ -148,6 +160,7 @@ impl Rollout<Node> for AgentActor {
             history: vec![response.message()],
             workspace: trajectory.workspace,
             metrics: Metrics::default().output_tokens(response.output_tokens),
+            files: std::collections::HashMap::new(),
         };
         let tools = self.run_tools(&response, &mut node).await?;
         let message = match tools {
@@ -252,6 +265,7 @@ impl AgentPipeline {
                     history: vec![prompt.into()],
                     workspace: workspace.fork().await?,
                     metrics: Default::default(),
+                    files: std::collections::HashMap::new(),
                 };
                 *state = Some(Tree::new(node));
                 self.search_solution(state.as_mut().unwrap(), event_tx)
@@ -408,6 +422,244 @@ Program will be run using uv run main.py command.
 
     let result = serde_json::to_string_pretty(&evaluation)?;
     std::fs::write("evaluation.json", &result)?;
+    Ok(())
+}
+
+pub async fn run_nicegui_demo_agent() -> Result<()> {
+    use super::Pipeline;
+    use crate::{agent::toolset, stacks::nicegui, tools_vec};
+    use rig::client::ProviderClient;
+    use tokio::sync::mpsc;
+
+    let client = rig::providers::anthropic::Client::from_env();
+    let preamble = "
+You are a NiceGUI application developer.
+Workspace is already set up with a NiceGUI project template.
+Use uv package manager if you need to add extra libraries.
+Create modern, user-friendly web applications using NiceGUI framework.
+Focus on clean code, proper data models, and comprehensive testing.
+Always follow Python best practices and type safety.
+"
+    .to_string();
+    let model = "claude-sonnet-4-20250514".to_string();
+    let tools = tools_vec![
+        toolset::BashTool,
+        node: toolset::WriteFileTool,
+        toolset::ReadFileTool,
+        toolset::LsDirTool,
+        toolset::RmFileTool,
+        node: toolset::EditFileTool,
+        nicegui::UvAddTool,
+        node: toolset::FinishTool::new(nicegui::NiceguiChecker),
+    ];
+    let search = SearchActor::new().with_limit(50); // Allow more exploration for complex NiceGUI apps
+    let rollout = AgentActor {
+        llm: Arc::new(client),
+        tools: Arc::new(tools),
+        model,
+        preamble,
+    };
+    let dagger_ref = crate::workspace::dagger::DaggerRef::new();
+
+    // Get absolute path to the nicegui template
+    let current_dir = std::env::current_dir()
+        .map_err(|e| eyre::eyre!("Failed to get current directory: {}", e))?;
+    let template_path = current_dir
+        .parent()
+        .ok_or_eyre("Could not get parent directory of current working directory")?
+        .join("agent/nicegui_agent/template");
+
+    // Check if template directory exists before trying to use it
+    if !template_path.exists() {
+        eyre::bail!(
+            "NiceGUI template directory not found at '{}'. \
+            Please ensure you're running from the meta_agent directory and the agent/ directory exists.",
+            template_path.display()
+        );
+    }
+
+    // Use the existing Dockerfile but add dev dependencies
+    let mut workspace = dagger_ref
+        .workspace("Dockerfile".into(), template_path.to_string_lossy().into())
+        .await
+        .map_err(|e| {
+            eyre::eyre!(
+                "Failed to create workspace with template at '{}': {}",
+                template_path.display(),
+                e
+            )
+        })?;
+
+    // Add dev dependencies for validation tools (like Python version does)
+    tracing::info!("Installing development dependencies...");
+    let dev_setup_commands = [
+        "apt-get update",
+        "apt-get install -y nodejs npm gcc musl-dev linux-headers-generic",
+        "npm install -g pyright",
+        "uv add --group dev ruff pytest pytest-asyncio pyright ast-grep-cli",
+    ];
+
+    for cmd in &dev_setup_commands {
+        let result = workspace.bash(cmd).await?;
+        if result.exit_code != 0 {
+            return Err(eyre::eyre!(
+                "Dev setup command failed: {} - {}",
+                cmd,
+                result.stderr
+            ));
+        }
+    }
+    let prompt = "Create a simple counter application using NiceGUI with increment/decrement buttons and persistent storage.";
+    let (cmd_tx, cmd_rx) = mpsc::channel(1);
+    let (event_tx, mut event_rx) = mpsc::channel(1);
+    let mut pipeline = AgentPipeline { rollout, search };
+    let cmd = Command::new(
+        None,
+        PipelineCmd::Start {
+            prompt: prompt.to_string(),
+            workspace: Box::new(workspace),
+        },
+    );
+
+    tokio::spawn(async move {
+        tracing::info!("started nicegui event consumer");
+        while let Some(event) = event_rx.recv().await {
+            tracing::info!(?event, "nicegui event received");
+        }
+        tracing::info!("stopped nicegui event consumer");
+    });
+
+    tokio::spawn({
+        let cmd_tx = cmd_tx.clone();
+        async move {
+            let _ = cmd_tx.send(cmd).await;
+        }
+    });
+
+    let result = pipeline.execute(cmd_rx, event_tx).await?;
+
+    if result.is_none() {
+        eyre::bail!("empty state from nicegui pipeline execution");
+    }
+
+    let root = result.unwrap();
+    tracing::info!("NiceGUI demo finished with {} nodes", root.num_nodes());
+
+    // Extract generated files from the agent
+    let generated_files = extract_generated_files(&root).await?;
+    tracing::info!("Extracted {} generated files", generated_files.len());
+
+    // Save files to nicegui_output directory
+    save_application_files(&generated_files).await?;
+
+    // Also save trajectory for debugging
+    let trajectory_json = serde_json::to_string_pretty(&root)?;
+    std::fs::write("nicegui_trajectory.json", &trajectory_json)?;
+
+    tracing::info!("NiceGUI application saved to nicegui_output/");
+    Ok(())
+}
+
+/// Extract all generated files from the final agent workspace
+async fn extract_generated_files(
+    root: &Tree<Node>,
+) -> Result<std::collections::HashMap<String, String>> {
+    let mut all_files = std::collections::HashMap::new();
+
+    // Get all solution nodes (should be just one)
+    let solution_nodes: Vec<_> = root
+        .get_leafs_idx()
+        .into_iter()
+        .filter(|&idx| matches!(root.get_node(idx).kind, NodeKind::Done))
+        .collect();
+
+    if solution_nodes.is_empty() {
+        tracing::warn!("No solution node found, extracting from all leaf nodes");
+        // Fallback: collect from all nodes
+        for idx in 0..root.num_nodes() {
+            let node = root.get_node(idx);
+            all_files.extend(node.files.clone());
+        }
+    } else {
+        // Get the solution node and its trajectory
+        let solution_idx = solution_nodes[0];
+        let trajectory = root.get_trajectory(solution_idx);
+
+        // Collect files from all nodes in the solution trajectory
+        for &node_idx in &trajectory {
+            let node = root.get_node(node_idx);
+            all_files.extend(node.files.clone());
+        }
+
+        // Note: We collect files from the nodes which should include all files
+        // modified by the agent. Template files can be copied separately if needed.
+    }
+
+    Ok(all_files)
+}
+
+/// Save application files to nicegui_output directory
+async fn save_application_files(
+    generated_files: &std::collections::HashMap<String, String>,
+) -> Result<()> {
+    let output_dir = std::path::Path::new("nicegui_output");
+
+    // Create output directory
+    if output_dir.exists() {
+        std::fs::remove_dir_all(output_dir)?;
+    }
+    std::fs::create_dir_all(output_dir)?;
+
+    // First, copy the template files to provide a complete base
+    let template_path = std::env::current_dir()?
+        .parent()
+        .ok_or_eyre("Could not get parent directory")?
+        .join("agent/nicegui_agent/template");
+
+    if template_path.exists() {
+        copy_directory_recursive(&template_path, output_dir)?;
+        tracing::info!("Copied template files to nicegui_output/");
+    }
+
+    // Then overwrite with generated files
+    for (file_path, content) in generated_files {
+        let output_path = output_dir.join(file_path);
+
+        // Create parent directories if needed
+        if let Some(parent) = output_path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+
+        std::fs::write(&output_path, content)?;
+        tracing::info!("Generated file: {}", file_path);
+    }
+
+    tracing::info!(
+        "Saved {} generated files to nicegui_output/",
+        generated_files.len()
+    );
+    Ok(())
+}
+
+/// Recursively copy a directory
+fn copy_directory_recursive(src: &std::path::Path, dst: &std::path::Path) -> Result<()> {
+    if !dst.exists() {
+        std::fs::create_dir_all(dst)?;
+    }
+
+    for entry in std::fs::read_dir(src)? {
+        let entry = entry?;
+        let file_type = entry.file_type()?;
+        let src_path = entry.path();
+        let dst_path = dst.join(entry.file_name());
+
+        if file_type.is_dir() {
+            copy_directory_recursive(&src_path, &dst_path)?;
+        } else {
+            std::fs::copy(&src_path, &dst_path)?;
+        }
+    }
+
     Ok(())
 }
 

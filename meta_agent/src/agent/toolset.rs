@@ -1,5 +1,5 @@
 use crate::{
-    agent::{Checker, CheckerDyn, Tool},
+    agent::{Checker, CheckerDyn, Tool, NodeTool, AgentNode},
     workspace::WorkspaceDyn,
 };
 use serde::Deserialize;
@@ -98,6 +98,23 @@ impl Tool for WriteFileTool {
     ) -> eyre::Result<Result<Self::Output, Self::Error>> {
         let WriteFileArgs { path, contents } = args;
         workspace.write_file(&path, &contents).await?;
+        Ok(Ok("success".to_string()))
+    }
+}
+
+// NodeTool implementation for WriteFileTool to track files
+impl<N: AgentNode + Send + Sync> NodeTool<N> for WriteFileTool {
+    async fn call_node(
+        &self,
+        args: Self::Args,
+        node: &mut N,
+    ) -> eyre::Result<Result<Self::Output, Self::Error>> {
+        let WriteFileArgs { path, contents } = args;
+        node.workspace_mut().write_file(&path, &contents).await?;
+        
+        // Track the file in the node
+        node.files_mut().insert(path, contents);
+        
         Ok(Ok("success".to_string()))
     }
 }
@@ -293,6 +310,34 @@ impl Tool for EditFileTool {
             1 => {
                 let contents = contents.replace(&find, &replace);
                 workspace.write_file(&path, &contents).await?;
+                Ok(Ok("success".to_string()))
+            }
+            num => Ok(Err(format!("Error: found {num} matches, expected 1"))),
+        }
+    }
+}
+
+// NodeTool implementation for EditFileTool to track files
+impl<N: AgentNode + Send + Sync> NodeTool<N> for EditFileTool {
+    async fn call_node(
+        &self,
+        args: Self::Args,
+        node: &mut N,
+    ) -> eyre::Result<Result<Self::Output, Self::Error>> {
+        let EditFileArgs {
+            path,
+            find,
+            replace,
+        } = args;
+        let contents = node.workspace_mut().read_file(&path).await?;
+        match contents.matches(&find).count() {
+            1 => {
+                let new_contents = contents.replace(&find, &replace);
+                node.workspace_mut().write_file(&path, &new_contents).await?;
+                
+                // Track the modified file in the node
+                node.files_mut().insert(path, new_contents);
+                
                 Ok(Ok("success".to_string()))
             }
             num => Ok(Err(format!("Error: found {num} matches, expected 1"))),

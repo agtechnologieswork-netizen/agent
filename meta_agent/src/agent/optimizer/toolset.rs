@@ -49,7 +49,7 @@ impl Tool for Traverse {
         }
     }
 
-    async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
+    async fn call(&self, _args: Self::Args) -> Result<Self::Output, Self::Error> {
         Ok(format!("placeholder"))
     }
 }
@@ -91,7 +91,7 @@ impl Tool for Complete {
         }
     }
 
-    async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
+    async fn call(&self, _args: Self::Args) -> Result<Self::Output, Self::Error> {
         Ok(vec![format!("placeholder")])
     }
 }

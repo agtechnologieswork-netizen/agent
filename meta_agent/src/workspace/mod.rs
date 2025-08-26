@@ -56,7 +56,7 @@ pub trait Workspace: Send + Sync {
         Self: Sized + 'static;
     fn boxed(self) -> Box<dyn WorkspaceDyn>
     where
-        Self: Sized + 'static,
+        Self: Sized + 'static + WorkspaceDyn,
     {
         Box::new(self)
     }
@@ -64,6 +64,10 @@ pub trait Workspace: Send + Sync {
 
 pub trait WorkspaceDyn: Send + Sync {
     fn bash(
+        &mut self,
+        cmd: &str,
+    ) -> Pin<Box<dyn Future<Output = eyre::Result<ExecResult>> + Send + Sync + '_>>;
+    fn bash_with_pg(
         &mut self,
         cmd: &str,
     ) -> Pin<Box<dyn Future<Output = eyre::Result<ExecResult>> + Send + Sync + '_>>;
@@ -89,13 +93,23 @@ pub trait WorkspaceDyn: Send + Sync {
     ) -> Pin<Box<dyn Future<Output = eyre::Result<Box<dyn WorkspaceDyn>>> + Send + Sync + '_>>;
 }
 
-impl<T: Workspace + 'static> WorkspaceDyn for T {
+// Manual implementation for MockWorkspace - removed generic impl to avoid conflicts
+impl WorkspaceDyn for mock::MockWorkspace {
     fn bash(
         &mut self,
         cmd: &str,
     ) -> Pin<Box<dyn Future<Output = eyre::Result<ExecResult>> + Send + Sync + '_>> {
         let cmd = Bash(cmd.split_whitespace().map(String::from).collect());
-        Box::pin(self.bash(cmd))
+        Box::pin(async move { Workspace::bash(self, cmd).await })
+    }
+    
+    fn bash_with_pg(
+        &mut self,
+        cmd: &str,
+    ) -> Pin<Box<dyn Future<Output = eyre::Result<ExecResult>> + Send + Sync + '_>> {
+        // For MockWorkspace, fallback to regular bash
+        let cmd = Bash(cmd.split_whitespace().map(String::from).collect());
+        Box::pin(async move { Workspace::bash(self, cmd).await })
     }
 
     fn write_file(
@@ -107,7 +121,7 @@ impl<T: Workspace + 'static> WorkspaceDyn for T {
             path: path.to_string(),
             contents: contents.to_string(),
         };
-        Box::pin(self.write_file(cmd))
+        Box::pin(async move { Workspace::write_file(self, cmd).await })
     }
 
     fn read_file(
@@ -115,7 +129,7 @@ impl<T: Workspace + 'static> WorkspaceDyn for T {
         path: &str,
     ) -> Pin<Box<dyn Future<Output = eyre::Result<String>> + Send + Sync + '_>> {
         let cmd = ReadFile(path.to_string());
-        Box::pin(self.read_file(cmd))
+        Box::pin(async move { Workspace::read_file(self, cmd).await })
     }
 
     fn ls(
@@ -123,7 +137,7 @@ impl<T: Workspace + 'static> WorkspaceDyn for T {
         path: &str,
     ) -> Pin<Box<dyn Future<Output = eyre::Result<Vec<String>>> + Send + Sync + '_>> {
         let cmd = LsDir(path.to_string());
-        Box::pin(self.ls(cmd))
+        Box::pin(async move { Workspace::ls(self, cmd).await })
     }
 
     fn rm(
@@ -131,13 +145,16 @@ impl<T: Workspace + 'static> WorkspaceDyn for T {
         path: &str,
     ) -> Pin<Box<dyn Future<Output = eyre::Result<()>> + Send + Sync + '_>> {
         let cmd = RmFile(path.to_string());
-        Box::pin(self.rm(cmd))
+        Box::pin(async move { Workspace::rm(self, cmd).await })
     }
 
     fn fork(
         &self,
     ) -> Pin<Box<dyn Future<Output = eyre::Result<Box<dyn WorkspaceDyn>>> + Send + Sync + '_>> {
-        Box::pin(async { self.fork().await.map(|x| x.boxed()) })
+        Box::pin(async move { 
+            let forked = Workspace::fork(self).await?;
+            Ok(Box::new(forked) as Box<dyn WorkspaceDyn>)
+        })
     }
 }
 
