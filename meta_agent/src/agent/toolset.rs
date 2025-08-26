@@ -1,5 +1,5 @@
 use crate::{
-    agent::{Checker, CheckerDyn, Tool, NodeTool, AgentNode},
+    agent::{AgentNode, Checker, CheckerDyn, NodeTool, Tool},
     workspace::WorkspaceDyn,
 };
 use serde::Deserialize;
@@ -111,10 +111,10 @@ impl<N: AgentNode + Send + Sync> NodeTool<N> for WriteFileTool {
     ) -> eyre::Result<Result<Self::Output, Self::Error>> {
         let WriteFileArgs { path, contents } = args;
         node.workspace_mut().write_file(&path, &contents).await?;
-        
+
         // Track the file in the node
         node.files_mut().insert(path, contents);
-        
+
         Ok(Ok("success".to_string()))
     }
 }
@@ -333,11 +333,13 @@ impl<N: AgentNode + Send + Sync> NodeTool<N> for EditFileTool {
         match contents.matches(&find).count() {
             1 => {
                 let new_contents = contents.replace(&find, &replace);
-                node.workspace_mut().write_file(&path, &new_contents).await?;
-                
+                node.workspace_mut()
+                    .write_file(&path, &new_contents)
+                    .await?;
+
                 // Track the modified file in the node
                 node.files_mut().insert(path, new_contents);
-                
+
                 Ok(Ok("success".to_string()))
             }
             num => Ok(Err(format!("Error: found {num} matches, expected 1"))),
@@ -370,7 +372,7 @@ impl Tool for FinishTool {
     async fn definition(&self, _prompt: String) -> rig::completion::ToolDefinition {
         rig::completion::ToolDefinition {
             name: self.name(),
-            description: "Mark task as finished and run checks".to_string(),
+            description: "Run checks, if successful mark task as finished".to_string(),
             parameters: serde_json::json!({
                 "type": "object",
                 "properties": {},

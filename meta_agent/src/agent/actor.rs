@@ -443,7 +443,6 @@ Always follow Python best practices and type safety.
     .to_string();
     let model = "claude-sonnet-4-20250514".to_string();
     let tools = tools_vec![
-        toolset::BashTool,
         node: toolset::WriteFileTool,
         toolset::ReadFileTool,
         toolset::LsDirTool,
