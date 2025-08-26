@@ -8,6 +8,7 @@ use crate::{
 use eyre::{OptionExt, Result};
 use rig::{
     OneOrMany,
+    client::ProviderClient,
     message::{Message, UserContent},
 };
 use serde::{Deserialize, Serialize};
@@ -358,41 +359,13 @@ impl Checker for PythonChecker {
 
 pub async fn eval_demo_agent() -> Result<()> {
     use crate::agent::optimizer::{self};
-    use crate::{agent::toolset, tools_vec};
-    use rig::client::ProviderClient;
 
-    let client = rig::providers::anthropic::Client::from_env();
-    let preamble = "
-You are a python software engineer.
-Workspace is already set up using uv init.
-Use uv package manager if you need to add extra libraries.
-Program will be run using uv run main.py command.
-"
-    .to_string();
-    let model = "claude-sonnet-4-20250514".to_string();
-    let tools = tools_vec![
-        toolset::BashTool,
-        toolset::WriteFileTool,
-        toolset::ReadFileTool,
-        toolset::LsDirTool,
-        toolset::RmFileTool,
-        toolset::EditFileTool,
-        node: toolset::FinishTool::new(PythonChecker),
-    ];
-    let search = SearchActor::new().with_limit(10);
-    let rollout = AgentActor {
-        llm: Arc::new(client),
-        tools: Arc::new(tools),
-        model,
-        preamble: preamble.clone(),
-    };
     let dagger_ref = crate::workspace::dagger::DaggerRef::new();
     let workspace = dagger_ref
         .workspace("Dockerfile.appbuild".into(), "./src/stacks/python".into())
         .await?;
-    let pipeline = AgentPipeline { rollout, search };
     let evaluator = optimizer::Evaluator {
-        pipeline,
+        pipeline: claude_python_pipeline().await?,
         workspace: Box::new(workspace),
         dataset: vec![
             "Create a simple python script that fetches my public ip using one of the common services.".to_string(),
@@ -402,20 +375,16 @@ Program will be run using uv run main.py command.
     };
     let evaluation = evaluator
         .evaluate(&optimizer::AgentConfig {
-            preamble: preamble.clone(),
+            preamble: evaluator.pipeline.rollout.preamble.clone(),
         })
         .await?;
-
     let result = serde_json::to_string_pretty(&evaluation)?;
     std::fs::write("evaluation.json", &result)?;
     Ok(())
 }
 
-pub async fn run_demo_agent() -> Result<()> {
-    use super::Pipeline;
+pub async fn claude_python_pipeline() -> Result<AgentPipeline> {
     use crate::{agent::toolset, tools_vec};
-    use rig::client::ProviderClient;
-    use tokio::sync::mpsc;
 
     let client = rig::providers::anthropic::Client::from_env();
     let preamble = "
@@ -435,54 +404,12 @@ Program will be run using uv run main.py command.
         toolset::EditFileTool,
         node: toolset::FinishTool::new(PythonChecker),
     ];
-    let search = SearchActor::new().with_limit(10);
+    let search = SearchActor::new().with_limit(30);
     let rollout = AgentActor {
         llm: Arc::new(client),
         tools: Arc::new(tools),
         model,
         preamble,
     };
-    let dagger_ref = crate::workspace::dagger::DaggerRef::new();
-    let workspace = dagger_ref
-        .workspace("Dockerfile.appbuild".into(), "./src/stacks/python".into())
-        .await?;
-    let prompt =
-        "Create a simple python script that fetches my public ip using one of the common services.";
-    let (cmd_tx, cmd_rx) = mpsc::channel(1);
-    let (event_tx, mut event_rx) = mpsc::channel(1);
-    let mut pipeline = AgentPipeline { rollout, search };
-    let cmd = Command::new(
-        None,
-        PipelineCmd::Start {
-            prompt: prompt.to_string(),
-            workspace: Box::new(workspace),
-        },
-    );
-
-    tokio::spawn(async move {
-        tracing::info!("started event consumer");
-        while let Some(event) = event_rx.recv().await {
-            tracing::info!(?event, "event received");
-        }
-        tracing::info!("stopped event consumer");
-    });
-
-    tokio::spawn({
-        let cmd_tx = cmd_tx.clone();
-        async move {
-            let _ = cmd_tx.send(cmd).await;
-        }
-    });
-
-    let result = pipeline.execute(cmd_rx, event_tx).await?;
-
-    if result.is_none() {
-        eyre::bail!("empty state from pipeline execution");
-    }
-
-    let root = result.unwrap();
-    tracing::info!("Finished with {} nodes", root.num_nodes());
-    let result = serde_json::to_string_pretty(&root)?;
-    std::fs::write("trajectory.json", &result)?;
-    Ok(())
+    Ok(AgentPipeline { rollout, search })
 }
