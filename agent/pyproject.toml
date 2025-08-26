@@ -25,6 +25,9 @@ dependencies = [
     "openai>=1.68.2",
     "ollama>=0.5.1",
     "gspread>=6.1.2",
+    "postgrest>=0.16.0",
+    "requests>=2.31.0",
+    "pyjwt>=2.8.0",
 ]
 
 [build-system]
