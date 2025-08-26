@@ -1,0 +1,8 @@
+{{ project_context }}
+
+{% if use_databricks %}
+DATABRICKS INTEGRATION: This project uses Databricks for data processing and analytics. Models are defined in app/models.py, use them.
+{% endif %}
+
+Implement user request:
+{{ user_prompt }}

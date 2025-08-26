@@ -1,6 +1,7 @@
 use crate::{
     agent::{
         AgentNode, AgentTool, Checker, Command, Event, NodeTool, Rollout, Search, ToolCallExt, Tree,
+        optimizer,
     },
     llm::{Completion, CompletionResponse, LLMClientDyn},
     workspace::WorkspaceDyn,
@@ -432,15 +433,7 @@ pub async fn run_nicegui_demo_agent() -> Result<()> {
     use tokio::sync::mpsc;
 
     let client = rig::providers::anthropic::Client::from_env();
-    let preamble = "
-You are a NiceGUI application developer.
-Workspace is already set up with a NiceGUI project template.
-Use uv package manager if you need to add extra libraries.
-Create modern, user-friendly web applications using NiceGUI framework.
-Focus on clean code, proper data models, and comprehensive testing.
-Always follow Python best practices and type safety.
-"
-    .to_string();
+    let preamble = optimizer::get_application_system_prompt(false);
     let model = "claude-sonnet-4-20250514".to_string();
     let tools = tools_vec![
         node: toolset::WriteFileTool,
