@@ -219,6 +219,7 @@ impl<T: Send + Sync, U: Tool + NodeTool<T>> NodeToolDyn<T> for U {
 
 pub trait AgentNode {
     fn workspace_mut(&mut self) -> &mut Box<dyn WorkspaceDyn>;
+    fn files_mut(&mut self) -> &mut std::collections::HashMap<String, String>;
 }
 
 pub enum AgentTool<N> {

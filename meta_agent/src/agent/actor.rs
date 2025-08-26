@@ -1,6 +1,7 @@
 use crate::{
     agent::{
         AgentNode, AgentTool, Checker, Command, Event, NodeTool, Rollout, Search, ToolCallExt, Tree,
+        optimizer,
     },
     llm::{Completion, CompletionResponse, LLMClientDyn},
     workspace::WorkspaceDyn,
@@ -39,11 +40,17 @@ pub struct Node {
     #[serde(skip, default = "crate::workspace::mock::default_mock")]
     pub workspace: Box<dyn WorkspaceDyn>,
     pub metrics: Metrics,
+    /// Files modified by this node - accumulated from tools
+    pub files: std::collections::HashMap<String, String>,
 }
 
 impl AgentNode for Node {
     fn workspace_mut(&mut self) -> &mut Box<dyn WorkspaceDyn> {
         &mut self.workspace
+    }
+
+    fn files_mut(&mut self) -> &mut std::collections::HashMap<String, String> {
+        &mut self.files
     }
 }
 
@@ -92,7 +99,13 @@ impl AgentActor {
                 let result = match tool {
                     Some(tool) => {
                         let args = call.function.arguments.clone();
-                        tool.call(args, node).await?
+                        match tool.call(args, node).await {
+                            Ok(result) => result,
+                            Err(e) => {
+                                tracing::warn!("Tool {} failed: {}", call.function.name, e);
+                                Err(serde_json::json!(e.to_string()))
+                            }
+                        }
                     }
                     None => {
                         let error = format!("Tool {} not found", call.function.name);
@@ -149,6 +162,7 @@ impl Rollout<Node> for AgentActor {
             history: vec![response.message()],
             workspace: trajectory.workspace,
             metrics: Metrics::default().output_tokens(response.output_tokens),
+            files: std::collections::HashMap::new(),
         };
         let tools = self.run_tools(&response, &mut node).await?;
         let message = match tools {
@@ -253,6 +267,7 @@ impl AgentPipeline {
                     history: vec![prompt.into()],
                     workspace: workspace.fork().await?,
                     metrics: Default::default(),
+                    files: std::collections::HashMap::new(),
                 };
                 *state = Some(Tree::new(node));
                 self.search_solution(state.as_mut().unwrap(), event_tx)

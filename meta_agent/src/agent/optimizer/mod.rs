@@ -6,9 +6,13 @@ use std::sync::Arc;
 use tera::{Context, Tera};
 use tokio::sync::mpsc;
 pub mod toolset;
+pub mod prompts;
 
 const STEP_TEMPLATE: &str = include_str!("./templates/formatter/step.jinja2");
 const INSPIRATIONS_PROMPT: &str = include_str!("./prompts/inspirations.md");
+const DATA_MODEL_SYSTEM_TEMPLATE: &str = include_str!("./templates/prompts/data_model_system.tera");
+const APPLICATION_SYSTEM_TEMPLATE: &str = include_str!("./templates/prompts/application_system.tera");
+const USER_PROMPT_TEMPLATE: &str = include_str!("./templates/prompts/user_prompt.tera");
 
 #[derive(Deserialize, Serialize, Clone, Copy, Debug)]
 pub enum Role {
@@ -290,12 +294,12 @@ pub struct PromptSampler {
 }
 
 impl PromptSampler {
-    pub async fn suggest(&self, config: &AgentConfig, evaluation: &Evaluation) {}
+    pub async fn suggest(&self, _config: &AgentConfig, _evaluation: &Evaluation) {}
 
     pub async fn get_inspirations(
         &self,
-        config: &AgentConfig,
-        evaluation: &Evaluation,
+        _config: &AgentConfig,
+        _evaluation: &Evaluation,
     ) -> eyre::Result<Vec<String>> {
         // render evaluations
         // run tools for exploration until getting inspirations
@@ -419,4 +423,127 @@ pub fn test_traj_formatter() {
 
     tracing::info!(formatted, "tree_structure");
     std::fs::write("tree_trajectory.txt", &formatted).unwrap();
+}
+
+/// Prompt rendering functionality
+pub struct PromptRenderer {
+    tera: Tera,
+}
+
+impl Default for PromptRenderer {
+    fn default() -> Self {
+        let mut tera = Tera::default();
+        tera.add_raw_template("data_model_system", DATA_MODEL_SYSTEM_TEMPLATE)
+            .unwrap();
+        tera.add_raw_template("application_system", APPLICATION_SYSTEM_TEMPLATE)
+            .unwrap();
+        tera.add_raw_template("user_prompt", USER_PROMPT_TEMPLATE)
+            .unwrap();
+        Self { tera }
+    }
+}
+
+impl PromptRenderer {
+    pub fn render_data_model_prompt(&self, use_databricks: bool) -> eyre::Result<String> {
+        let mut context = Context::new();
+        context.insert("python_rules", prompts::PYTHON_RULES);
+        context.insert("data_model_rules", &prompts::build_data_model_rules(use_databricks));
+        context.insert("tool_usage_rules", &prompts::build_tool_usage_rules(use_databricks));
+        
+        Ok(self.tera.render("data_model_system", &context)?)
+    }
+
+    pub fn render_application_prompt(&self, use_databricks: bool) -> eyre::Result<String> {
+        let mut context = Context::new();
+        context.insert("python_rules", prompts::PYTHON_RULES);
+        context.insert("application_rules", &prompts::build_application_rules(use_databricks));
+        context.insert("tool_usage_rules", &prompts::build_tool_usage_rules(use_databricks));
+        context.insert("nicegui_ui_guidelines", prompts::NICEGUI_UI_GUIDELINES);
+        
+        Ok(self.tera.render("application_system", &context)?)
+    }
+
+    pub fn render_user_prompt(
+        &self, 
+        project_context: &str, 
+        user_prompt: &str, 
+        use_databricks: bool
+    ) -> eyre::Result<String> {
+        let mut context = Context::new();
+        context.insert("project_context", project_context);
+        context.insert("user_prompt", user_prompt);
+        context.insert("use_databricks", &use_databricks);
+        
+        Ok(self.tera.render("user_prompt", &context)?)
+    }
+}
+
+/// Convenience functions for common prompt generation
+pub fn get_data_model_system_prompt(use_databricks: bool) -> String {
+    PromptRenderer::default()
+        .render_data_model_prompt(use_databricks)
+        .unwrap_or_else(|e| {
+            tracing::error!("Failed to render data model prompt: {}", e);
+            "Error rendering prompt".to_string()
+        })
+}
+
+pub fn get_application_system_prompt(use_databricks: bool) -> String {
+    PromptRenderer::default()
+        .render_application_prompt(use_databricks)
+        .unwrap_or_else(|e| {
+            tracing::error!("Failed to render application prompt: {}", e);
+            "Error rendering prompt".to_string()
+        })
+}
+
+pub fn get_user_prompt(project_context: &str, user_prompt: &str, use_databricks: bool) -> String {
+    PromptRenderer::default()
+        .render_user_prompt(project_context, user_prompt, use_databricks)
+        .unwrap_or_else(|e| {
+            tracing::error!("Failed to render user prompt: {}", e);
+            "Error rendering prompt".to_string()
+        })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_prompt_rendering() {
+        // Test that the prompt rendering functions work without errors
+        let data_model_prompt = get_data_model_system_prompt(false);
+        let application_prompt = get_application_system_prompt(false);
+        let user_prompt = get_user_prompt("Test context", "Test request", false);
+
+        // Basic sanity checks
+        assert!(data_model_prompt.contains("data model"));
+        assert!(application_prompt.contains("NiceGUI"));
+        assert!(user_prompt.contains("Test context"));
+        assert!(user_prompt.contains("Test request"));
+        
+        // Test Databricks variants
+        let data_model_with_databricks = get_data_model_system_prompt(true);
+        let application_with_databricks = get_application_system_prompt(true);
+        let user_prompt_with_databricks = get_user_prompt("Test context", "Test request", true);
+
+        assert!(data_model_with_databricks.contains("Databricks"));
+        assert!(application_with_databricks.contains("Databricks"));
+        assert!(user_prompt_with_databricks.contains("DATABRICKS INTEGRATION"));
+    }
+
+    #[test]
+    fn test_prompt_renderer() {
+        let renderer = PromptRenderer::default();
+        
+        // Test that templates can be rendered
+        let data_prompt = renderer.render_data_model_prompt(false).unwrap();
+        let app_prompt = renderer.render_application_prompt(false).unwrap();
+        let user_prompt = renderer.render_user_prompt("Context", "Request", false).unwrap();
+        
+        assert!(!data_prompt.is_empty());
+        assert!(!app_prompt.is_empty());
+        assert!(!user_prompt.is_empty());
+    }
 }
