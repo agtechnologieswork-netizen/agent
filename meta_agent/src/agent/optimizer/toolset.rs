@@ -50,7 +50,23 @@ impl Tool for Traverse {
     }
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
-        Ok(format!("placeholder"))
+        let trajectory = match self.evaluation.trajectories.get(args.evaluation_id) {
+            Some(trajectory) => trajectory,
+            None => return Err(TraverseError::MissingEvaluation(args.evaluation_id)),
+        };
+        let node_ids = trajectory.get_trajectory(args.node_id);
+        let mut output = Vec::new();
+        for idx in node_ids {
+            for message in trajectory.get_node(idx).history.iter() {
+                let message = super::Message::<String>::from(message);
+                output.push(format!(
+                    "<{:?}>: {}",
+                    message.role,
+                    message.content.join("\n")
+                ));
+            }
+        }
+        Ok(output.join("\n"))
     }
 }
 
@@ -92,6 +108,6 @@ impl Tool for Complete {
     }
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
-        Ok(vec![format!("placeholder")])
+        Ok(args.inspirations)
     }
 }

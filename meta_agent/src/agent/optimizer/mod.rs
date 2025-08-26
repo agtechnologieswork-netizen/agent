@@ -8,8 +8,9 @@ use tokio::sync::mpsc;
 pub mod toolset;
 
 const STEP_TEMPLATE: &str = include_str!("./templates/formatter/step.jinja2");
+const INSPIRATIONS_PROMPT: &str = include_str!("./prompts/inspirations.md");
 
-#[derive(Deserialize, Serialize, Clone, Copy)]
+#[derive(Deserialize, Serialize, Clone, Copy, Debug)]
 pub enum Role {
     User,
     Assistant,
@@ -111,6 +112,13 @@ impl From<&Message<Content>> for Message<String> {
             role: value.role,
             content: value.content.iter().map(|x| x.to_string()).collect(),
         }
+    }
+}
+
+impl From<&rig::message::Message> for Message<String> {
+    fn from(value: &rig::message::Message) -> Self {
+        let result = Message::<Content>::from(value);
+        Self::from(&result)
     }
 }
 

@@ -55,14 +55,12 @@ async fn generate(prompt: String) -> eyre::Result<()> {
     );
 
     tokio::spawn(async move { while event_rx.recv().await.is_some() {} });
-
     tokio::spawn({
         let cmd_tx = cmd_tx.clone();
         async move {
             let _ = cmd_tx.send(cmd).await;
         }
     });
-
     let _ = pipeline
         .execute(cmd_rx, event_tx)
         .await?
