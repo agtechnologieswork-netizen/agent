@@ -784,6 +784,111 @@ CRITICAL POINTS:
 - Document all class properties with proper PHPDoc
 - Architecture tests WILL FAIL without proper documentation
 
+# Laravel Factory Guidelines
+
+When creating Laravel factories, ALWAYS follow these critical rules:
+
+1. **USE fake() HELPER, NOT $this->faker**:
+   - ❌ WRONG: `'name' => $this->faker->name()`
+   - ✅ CORRECT: `'name' => fake()->name()`
+   - This prevents "Using $this when not in object context" errors in static methods
+
+2. **Factory State Methods Must Be Static**:
+   ```php
+   public function suspended(): static
+   {
+       return $this->state(fn (array $attributes) => [
+           'suspended' => true,
+       ]);
+   }
+   ```
+
+3. **Use Closures for Dynamic Values**:
+   ```php
+   return $this->state(fn (array $attributes) => [
+       'email' => fake()->unique()->safeEmail(),
+       'created_at' => now()->subDays(rand(1, 30)),
+   ]);
+   ```
+
+4. **Complete Factory Example**:
+   ```php
+   <?php
+   
+   namespace Database\Factories;
+   
+   use Illuminate\Database\Eloquent\Factories\Factory;
+   
+   /**
+    * @extends \Illuminate\Database\Eloquent\Factories\Factory<\App\Models\Product>
+    */
+   class ProductFactory extends Factory
+   {
+       /**
+        * Define the model's default state.
+        *
+        * @return array<string, mixed>
+        */
+       public function definition(): array
+       {
+           return [
+               'name' => fake()->productName(),
+               'price' => fake()->randomFloat(2, 10, 1000),
+               'description' => fake()->paragraph(),
+               'stock' => fake()->numberBetween(0, 100),
+               'active' => fake()->boolean(80), // 80% chance of being active
+           ];
+       }
+       
+       /**
+        * Indicate that the product is out of stock.
+        */
+       public function outOfStock(): static
+       {
+           return $this->state(fn (array $attributes) => [
+               'stock' => 0,
+           ]);
+       }
+       
+       /**
+        * Indicate that the product is premium.
+        */
+       public function premium(): static
+       {
+           return $this->state(fn (array $attributes) => [
+               'price' => fake()->randomFloat(2, 1000, 5000),
+               'name' => 'Premium ' . fake()->productName(),
+           ]);
+       }
+   }
+   ```
+
+5. **Factory Usage in Tests**:
+   ```php
+   // Create single instance
+   $product = Product::factory()->create();
+   
+   // Create with specific attributes
+   $product = Product::factory()->create([
+       'name' => 'Custom Product',
+       'price' => 99.99,
+   ]);
+   
+   // Use states
+   $premiumProduct = Product::factory()->premium()->create();
+   $outOfStockProduct = Product::factory()->outOfStock()->create();
+   
+   // Create multiple
+   $products = Product::factory()->count(5)->create();
+   ```
+
+6. **Common Pitfalls to Avoid**:
+   - Never use $this->faker in factory definitions
+   - Always use fake() helper for all faker methods
+   - Ensure factory class name matches model name + "Factory"
+   - Place factories in database/factories/ directory
+   - Include proper PHPDoc with @extends annotation
+
 COMPLETE Customer Model Example for CRM:
 ```php
 <?php
