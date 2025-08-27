@@ -150,8 +150,8 @@ class LaravelActor(FileOperationsActor):
         logger.info(
             f"Start {self.__class__.__name__} execution with files: {files.keys()}"
         )
-        for file_path, content in files.items():
-            workspace.write_file(file_path, content)
+        # Use bulk write to avoid multiple with_new_file mounts
+        workspace = await workspace.write_files_bulk(files)
         workspace.permissions(
             protected=self.files_protected, allowed=self.files_allowed
         )

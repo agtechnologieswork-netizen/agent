@@ -33,3 +33,5 @@ async def write_files_bulk(ctr: dagger.Container, files: dict[str, str], client:
         directory = client.host().directory(temp_dir)
         ctr = ctr.with_directory(".", directory)
         return await ctr.sync()
+
+

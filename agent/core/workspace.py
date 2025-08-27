@@ -9,6 +9,7 @@ from core.dagger_utils import ExecResult
 import uuid
 import logging
 from tenacity import retry, stop_after_attempt, wait_exponential_jitter, retry_if_exception_type, before_sleep_log
+from core.dagger_utils import write_files_bulk as _write_files_bulk
 
 logger = get_logger(name)
 
@@ -123,6 +124,13 @@ class Workspace:
             .with_exec(["sed", "-n", f"{start},{end}p", path])
             .stdout()
         )
+
+    @function
+    @retry_transport_errors
+    async def write_files_bulk(self, files: dict[str, str]) -> Self:
+        new_ctr = await _write_files_bulk(self.ctr, files, self.client)
+        self.ctr = new_ctr
+        return self
 
     @function
     @retry_transport_errors
