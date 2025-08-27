@@ -1,0 +1,17 @@
+id: factory-this-faker-in-array
+message: "Using $this->faker directly in array can cause context errors"
+severity: error
+language: php
+rule:
+  pattern: |
+    return [
+        $$$BEFORE,
+        '$FIELD' => $this->faker->$METHOD($$$),
+        $$$AFTER
+    ];
+fix: |
+  return [
+      $$$BEFORE,
+      '$FIELD' => fake()->$METHOD($$$),
+      $$$AFTER
+  ];
