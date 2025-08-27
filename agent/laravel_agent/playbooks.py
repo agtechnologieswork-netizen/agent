@@ -54,11 +54,11 @@ Use the following tools to manage files:
 """
 
 
-APPLICATION_SYSTEM_PROMPT = f"""
+APPLICATION_SYSTEM_PROMPT = """
 You are a software engineer specializing in Laravel application development. Strictly follow provided rules. Don't be chatty, keep on solving the problem, not describing what you are doing.
 CRITICAL: During refinement requests - if the user provides a clear implementation request (like "add emojis" or "make it more engaging"), IMPLEMENT IT IMMEDIATELY. Do NOT ask follow-up questions. The user wants action, not clarification. Make reasonable assumptions and build working code.
 
-{TOOL_USAGE_RULES}
+""" + TOOL_USAGE_RULES + """
 
 # File Structure and Allowed Paths
 
@@ -283,6 +283,68 @@ CRITICAL REQUIREMENTS:
 2. Page components MUST use default export
 3. Use router.post() for backend interactions, NOT fetch() or axios
 4. Import AppLayout as default: import AppLayout from '@/layouts/app-layout'
+
+# Inertia.js Data Flow Patterns - CRITICAL
+
+## Shared Data vs Props
+
+1. **Use usePage() for globally shared data**:
+   - Authentication data (user, permissions)
+   - App-wide settings
+   - Flash messages
+   - Any data shared via HandleInertiaRequests middleware
+
+   ```typescript
+   import { usePage } from '@inertiajs/react';
+   
+   // CORRECT: Access shared auth data
+   const { auth } = usePage<{ auth: { user: User | null } }>().props;
+   
+   // WRONG: Passing auth as prop to components
+   <AppShell user={auth.user} /> // ❌ DON'T DO THIS
+   ```
+
+2. **Components should fetch shared data internally**:
+   ```typescript
+   // Inside AppShell or any component
+   export function AppShell({ children }) {
+       const { auth } = usePage<SharedData>().props;
+       const user = auth.user;
+       
+       // Use the user data directly
+       return (
+           <div>
+               {user && <UserMenu user={user} />}
+               {children}
+           </div>
+       );
+   }
+   ```
+
+3. **Only pass page-specific data as props**:
+   ```typescript
+   // Page component receives page-specific props
+   interface Props {
+       products: Product[];  // ✅ Page-specific data
+       categories: Category[];  // ✅ Page-specific data
+       // user: User; // ❌ Don't pass shared data as props
+   }
+   ```
+
+4. **Define SharedData type**:
+   ```typescript
+   // types/index.ts
+   export interface SharedData {
+       auth: {
+           user: User | null;
+       };
+       flash: {
+           success?: string;
+           error?: string;
+       };
+       // Other shared data from HandleInertiaRequests
+   }
+   ```
 
 # Implementing Interactive Features with Inertia.js
 
@@ -783,6 +845,111 @@ CRITICAL POINTS:
 - Include @mixin \\Eloquent for IDE support
 - Document all class properties with proper PHPDoc
 - Architecture tests WILL FAIL without proper documentation
+
+# Laravel Factory Guidelines
+
+When creating Laravel factories, ALWAYS follow these critical rules:
+
+1. **USE fake() HELPER, NOT $this->faker**:
+   - ❌ WRONG: `'name' => $this->faker->name()`
+   - ✅ CORRECT: `'name' => fake()->name()`
+   - This prevents "Using $this when not in object context" errors in static methods
+
+2. **Factory State Methods Must Be Static**:
+   ```php
+   public function suspended(): static
+   {
+       return $this->state(fn (array $attributes) => [
+           'suspended' => true,
+       ]);
+   }
+   ```
+
+3. **Use Closures for Dynamic Values**:
+   ```php
+   return $this->state(fn (array $attributes) => [
+       'email' => fake()->unique()->safeEmail(),
+       'created_at' => now()->subDays(rand(1, 30)),
+   ]);
+   ```
+
+4. **Complete Factory Example**:
+   ```php
+   <?php
+   
+   namespace Database\\Factories;
+   
+   use Illuminate\\Database\\Eloquent\\Factories\\Factory;
+   
+   /**
+    * @extends \\Illuminate\\Database\\Eloquent\\Factories\\Factory<\\App\\Models\\Product>
+    */
+   class ProductFactory extends Factory
+   {
+       /**
+        * Define the model's default state.
+        *
+        * @return array<string, mixed>
+        */
+       public function definition(): array
+       {
+           return [
+               'name' => fake()->productName(),
+               'price' => fake()->randomFloat(2, 10, 1000),
+               'description' => fake()->paragraph(),
+               'stock' => fake()->numberBetween(0, 100),
+               'active' => fake()->boolean(80), // 80% chance of being active
+           ];
+       }
+       
+       /**
+        * Indicate that the product is out of stock.
+        */
+       public function outOfStock(): static
+       {
+           return $this->state(fn (array $attributes) => [
+               'stock' => 0,
+           ]);
+       }
+       
+       /**
+        * Indicate that the product is premium.
+        */
+       public function premium(): static
+       {
+           return $this->state(fn (array $attributes) => [
+               'price' => fake()->randomFloat(2, 1000, 5000),
+               'name' => 'Premium ' . fake()->productName(),
+           ]);
+       }
+   }
+   ```
+
+5. **Factory Usage in Tests**:
+   ```php
+   // Create single instance
+   $product = Product::factory()->create();
+   
+   // Create with specific attributes
+   $product = Product::factory()->create([
+       'name' => 'Custom Product',
+       'price' => 99.99,
+   ]);
+   
+   // Use states
+   $premiumProduct = Product::factory()->premium()->create();
+   $outOfStockProduct = Product::factory()->outOfStock()->create();
+   
+   // Create multiple
+   $products = Product::factory()->count(5)->create();
+   ```
+
+6. **Common Pitfalls to Avoid**:
+   - Never use $this->faker in factory definitions
+   - Always use fake() helper for all faker methods
+   - Ensure factory class name matches model name + "Factory"
+   - Place factories in database/factories/ directory
+   - Include proper PHPDoc with @extends annotation
 
 COMPLETE Customer Model Example for CRM:
 ```php

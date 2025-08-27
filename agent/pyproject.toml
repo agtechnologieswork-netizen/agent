@@ -68,6 +68,7 @@ addopts = ["--ignore=nicegui_agent/template"]
 markers = [
     "nicegui: marks tests for NiceGUI template",
     "trpc: marks tests for tRPC template",
+    "laravel: marks tests for Laravel template",
 ]
 
 [dependency-groups]
