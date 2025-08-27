@@ -6,7 +6,7 @@ from typing import Dict, Self, Optional, Literal, Any
 from dataclasses import dataclass
 from core.statemachine import StateMachine, State, Context
 from core.application import BaseApplicationContext
-from core.dagger_utils import write_files_bulk
+from core.dagger_utils import write_files_bulk, write_directory_bulk
 from llm.utils import get_best_coding_llm_client, get_universal_llm_client
 from llm.alloy import AlloyLLM
 from core.actors import BaseData
@@ -510,10 +510,12 @@ class FSMApplication:
         logger.error(f"[ctr tree] [snapshot]\n{tree_snapshot}")
 
         # Add template files (they will appear in diff if not in snapshot)
-        template_dir = self.client.host().directory("./nicegui_agent/template")
-        start = start.with_directory(".", template_dir)
-        # Bake template mount to avoid long mount options on macOS/docker (ref: PR #393)
-        start = await start.sync()
+        start = await write_directory_bulk(
+            start,
+            os.path.join(os.path.dirname(os.path.abspath(__file__)), "./template"),
+            self.client,
+            target=".",
+        )
         logger.info("SERVER get_diff_with: Added template directory to workspace")
 
         tree_snapshot = await start.with_exec(["tree"]).stdout()
