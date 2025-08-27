@@ -245,6 +245,108 @@ When tests fail:
 - Verify that API endpoints return expected responses
 - The test runner will automatically retry with more verbosity if initial output is unclear
 
+# Laravel Test Guidelines - Dynamic Data Handling
+
+## CRITICAL: Writing Robust Tests for Dynamic Data
+
+When writing tests that involve dynamic or seeded data, NEVER hardcode expected counts or specific values:
+
+1. **❌ WRONG - Hardcoded expectations**:
+   ```php
+   test('dashboard shows statistics', function () {
+       $response = $this->actingAs($user)->get('/dashboard');
+       
+       $response->assertOk()
+           ->assertInertia(fn ($page) => $page
+               ->where('stats.total_products', 14)  // ❌ Will fail with different seed data
+               ->where('stats.total_orders', 25)    // ❌ Brittle test
+           );
+   });
+   ```
+
+2. **✅ CORRECT - Flexible assertions**:
+   ```php
+   test('dashboard shows statistics', function () {
+       // Create known test data
+       $products = Product::factory()->count(5)->create();
+       $orders = Order::factory()->count(3)->create();
+       
+       $response = $this->actingAs($user)->get('/dashboard');
+       
+       $response->assertOk()
+           ->assertInertia(fn ($page) => $page
+               ->has('stats.total_products')       // ✅ Check presence
+               ->where('stats.total_products', Product::count())  // ✅ Use actual count
+               ->has('stats.total_orders')
+               ->where('stats.total_orders', Order::count())
+           );
+   });
+   ```
+
+3. **Test Data Strategies**:
+   - **Presence checks**: Use `->has('field')` to verify data exists
+   - **Type checks**: Verify data types rather than exact values
+   - **Range checks**: Use assertions like `>= 0` for counts
+   - **Relationship checks**: Verify data relationships are maintained
+   - **Controlled data**: Create specific test data for predictable assertions
+
+4. **Complete Test Example**:
+   ```php
+   test('product listing shows correct data', function () {
+       // Create controlled test data
+       $category = Category::factory()->create(['name' => 'Electronics']);
+       $products = Product::factory()
+           ->count(3)
+           ->for($category)
+           ->create();
+       
+       $response = $this->actingAs($user)->get('/products');
+       
+       $response->assertOk()
+           ->assertInertia(fn ($page) => $page
+               ->component('products/index')
+               ->has('products.data', 3)  // Known count from our test data
+               ->has('products.data.0', fn ($product) => $product
+                   ->has('id')
+                   ->has('name')
+                   ->has('price')
+                   ->where('category.name', 'Electronics')
+               )
+               ->has('categories')  // Just verify presence
+           );
+   });
+   ```
+
+5. **Testing Aggregations and Statistics**:
+   ```php
+   test('reports show accurate statistics', function () {
+       // Create predictable test data
+       $yesterday = now()->subDay();
+       $lastWeek = now()->subWeek();
+       
+       Sale::factory()->create(['amount' => 100, 'created_at' => $yesterday]);
+       Sale::factory()->create(['amount' => 200, 'created_at' => $lastWeek]);
+       
+       $response = $this->actingAs($user)->get('/reports');
+       
+       $response->assertOk()
+           ->assertInertia(fn ($page) => $page
+               ->where('daily_total', 100)    // Known value from test data
+               ->where('weekly_total', 300)   // Sum of both sales
+               ->has('sales_count')           // Just check presence
+               ->where('sales_count', fn ($count) => $count >= 2)  // Flexible assertion
+           );
+   });
+   ```
+
+6. **Best Practices Summary**:
+   - Always create test-specific data with factories
+   - Use `->has()` to check data presence without hardcoding values
+   - Compare against actual database counts when needed
+   - Use callbacks for complex assertions
+   - Test data relationships, not exact values
+   - Clear database between tests or use database transactions
+
 # React Component Guidelines - COMPLETE WORKING EXAMPLE
 
 COMPLETE Counter Page Component Example (resources/js/pages/counter.tsx):
