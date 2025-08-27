@@ -1,6 +1,5 @@
 import os
 import tempfile
-import shutil
 import dagger
 from pathlib import Path
 from typing import Self
@@ -36,19 +35,3 @@ async def write_files_bulk(ctr: dagger.Container, files: dict[str, str], client:
         return await ctr.sync()
 
 
-async def write_directory_bulk(
-    ctr: dagger.Container,
-    src_root: str,
-    client: dagger.Client,
-    target: str = ".",
-) -> dagger.Container:
-    """Copy a host directory into a temp dir, mount it, and bake with sync().
-
-    This mirrors the tempdir approach used for large snapshots to avoid overly
-    long mount option strings on some hosts/runtimes.
-    """
-    with tempfile.TemporaryDirectory() as temp_dir:
-        shutil.copytree(src_root, temp_dir, dirs_exist_ok=True)
-        directory = client.host().directory(temp_dir)
-        ctr = ctr.with_directory(target, directory)
-        return await ctr.sync()

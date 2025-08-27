@@ -346,10 +346,11 @@ class FSMApplication:
             )
 
         # Add template files (they will appear in diff if not in snapshot)
-        # Use tempdir-based bulk copy and bake into container to avoid long mount options
-        from core.dagger_utils import write_directory_bulk  # local import to avoid circulars
-        start = await write_directory_bulk(start, self.template_path(), self.client, target=".")
-        logger.info("SERVER get_diff_with: Added template directory to workspace (baked)")
+        template_dir = self.client.host().directory(self.template_path())
+        start = start.with_directory(".", template_dir)
+        # Bake template mount so the files persist independently of host
+        start = await start.sync()
+        logger.info("SERVER get_diff_with: Added template directory to workspace")
 
         # Exclude .png and .ico files from being tracked by git
         # Using || true to prevent failures if no files are found
