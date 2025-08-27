@@ -1,17 +1,16 @@
-use super::{Pipeline, Tree};
-use crate::{agent::Command, llm::LLMClientDyn, workspace::WorkspaceDyn};
-use eyre::OptionExt;
+use super::Tree;
+use crate::{llm::LLMClientDyn, workspace::WorkspaceDyn};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tera::{Context, Tera};
-use tokio::sync::mpsc;
-pub mod toolset;
 pub mod prompts;
+pub mod toolset;
 
 const STEP_TEMPLATE: &str = include_str!("./templates/formatter/step.jinja2");
 const INSPIRATIONS_PROMPT: &str = include_str!("./prompts/inspirations.md");
 const DATA_MODEL_SYSTEM_TEMPLATE: &str = include_str!("./templates/prompts/data_model_system.tera");
-const APPLICATION_SYSTEM_TEMPLATE: &str = include_str!("./templates/prompts/application_system.tera");
+const APPLICATION_SYSTEM_TEMPLATE: &str =
+    include_str!("./templates/prompts/application_system.tera");
 const USER_PROMPT_TEMPLATE: &str = include_str!("./templates/prompts/user_prompt.tera");
 
 #[derive(Deserialize, Serialize, Clone, Copy, Debug)]
@@ -234,53 +233,52 @@ pub struct Evaluator {
     pub concurrency: usize,
 }
 
-impl Evaluator {
-    pub async fn evaluate(&self, config: &AgentConfig) -> eyre::Result<Evaluation> {
-        let semaphore = Arc::new(tokio::sync::Semaphore::new(self.concurrency));
-        let mut set = tokio::task::JoinSet::new();
-        for prompt in self.dataset.iter() {
-            let semaphore = semaphore.clone();
-            let mut pipeline = self.pipeline.clone();
-            pipeline.rollout.preamble = config.preamble.clone();
-            let command = Command::new(
-                None,
-                super::actor::PipelineCmd::Start {
-                    prompt: prompt.to_string(),
-                    workspace: self.workspace.fork().await?,
-                },
-            );
-            set.spawn(async move {
-                let _permit = semaphore.acquire().await?;
-                let (cmd_tx, cmd_rx) = mpsc::channel(1);
-                let (event_tx, mut event_rx) = mpsc::channel(1);
-                tokio::spawn(async move { while (event_rx.recv().await).is_some() {} });
-                tokio::spawn({
-                    let cmd_tx = cmd_tx.clone();
-                    async move {
-                        let _ = cmd_tx.send(command).await;
-                    }
-                });
-                let result = pipeline.execute(cmd_rx, event_tx).await?;
-                result.ok_or_eyre("no solutions")
-            });
-        }
-        let mut trajectories = Vec::new();
-        while let Some(result) = set.join_next().await {
-            trajectories.push(result??);
-        }
-        let mut score = 0f32;
-        for t in trajectories.iter() {
-            for idx in 0..t.num_nodes() {
-                score += t.get_node(idx).metrics.output_tokens as f32;
-            }
-        }
-        let score = trajectories.len() as f32 / score;
-        Ok(Evaluation {
-            trajectories,
-            score,
-        })
-    }
-}
+// impl Evaluator {
+//     pub async fn evaluate(&self, config: &AgentConfig) -> eyre::Result<Evaluation> {
+//         let semaphore = Arc::new(tokio::sync::Semaphore::new(self.concurrency));
+//         let mut set = tokio::task::JoinSet::new();
+//         for prompt in self.dataset.iter() {
+//             let semaphore = semaphore.clone();
+//             let mut pipeline = self.pipeline.clone();
+//             pipeline.rollout.preamble = config.preamble.clone();
+//             let command = Command::new(
+//                 None,
+//                 super::actor::PipelineCmd::Start {
+//                     prompt: prompt.to_string(),
+//                 },
+//             );
+//             set.spawn(async move {
+//                 let _permit = semaphore.acquire().await?;
+//                 let (cmd_tx, cmd_rx) = mpsc::channel(1);
+//                 let (event_tx, mut event_rx) = mpsc::channel(1);
+//                 tokio::spawn(async move { while (event_rx.recv().await).is_some() {} });
+//                 tokio::spawn({
+//                     let cmd_tx = cmd_tx.clone();
+//                     async move {
+//                         let _ = cmd_tx.send(command).await;
+//                     }
+//                 });
+//                 let result = pipeline.execute(cmd_rx, event_tx).await?;
+//                 result.ok_or_eyre("no solutions")
+//             });
+//         }
+//         let mut trajectories = Vec::new();
+//         while let Some(result) = set.join_next().await {
+//             trajectories.push(result??);
+//         }
+//         let mut score = 0f32;
+//         for t in trajectories.iter() {
+//             for idx in 0..t.num_nodes() {
+//                 score += t.get_node(idx).metrics.output_tokens as f32;
+//             }
+//         }
+//         let score = trajectories.len() as f32 / score;
+//         Ok(Evaluation {
+//             trajectories,
+//             score,
+//         })
+//     }
+// }
 
 /*
  * parent prompt + inspirations + [sampled_prompts] -> new prompt
@@ -447,33 +445,45 @@ impl PromptRenderer {
     pub fn render_data_model_prompt(&self, use_databricks: bool) -> eyre::Result<String> {
         let mut context = Context::new();
         context.insert("python_rules", prompts::PYTHON_RULES);
-        context.insert("data_model_rules", &prompts::build_data_model_rules(use_databricks));
-        context.insert("tool_usage_rules", &prompts::build_tool_usage_rules(use_databricks));
-        
+        context.insert(
+            "data_model_rules",
+            &prompts::build_data_model_rules(use_databricks),
+        );
+        context.insert(
+            "tool_usage_rules",
+            &prompts::build_tool_usage_rules(use_databricks),
+        );
+
         Ok(self.tera.render("data_model_system", &context)?)
     }
 
     pub fn render_application_prompt(&self, use_databricks: bool) -> eyre::Result<String> {
         let mut context = Context::new();
         context.insert("python_rules", prompts::PYTHON_RULES);
-        context.insert("application_rules", &prompts::build_application_rules(use_databricks));
-        context.insert("tool_usage_rules", &prompts::build_tool_usage_rules(use_databricks));
+        context.insert(
+            "application_rules",
+            &prompts::build_application_rules(use_databricks),
+        );
+        context.insert(
+            "tool_usage_rules",
+            &prompts::build_tool_usage_rules(use_databricks),
+        );
         context.insert("nicegui_ui_guidelines", prompts::NICEGUI_UI_GUIDELINES);
-        
+
         Ok(self.tera.render("application_system", &context)?)
     }
 
     pub fn render_user_prompt(
-        &self, 
-        project_context: &str, 
-        user_prompt: &str, 
-        use_databricks: bool
+        &self,
+        project_context: &str,
+        user_prompt: &str,
+        use_databricks: bool,
     ) -> eyre::Result<String> {
         let mut context = Context::new();
         context.insert("project_context", project_context);
         context.insert("user_prompt", user_prompt);
         context.insert("use_databricks", &use_databricks);
-        
+
         Ok(self.tera.render("user_prompt", &context)?)
     }
 }
@@ -522,7 +532,7 @@ mod tests {
         assert!(application_prompt.contains("NiceGUI"));
         assert!(user_prompt.contains("Test context"));
         assert!(user_prompt.contains("Test request"));
-        
+
         // Test Databricks variants
         let data_model_with_databricks = get_data_model_system_prompt(true);
         let application_with_databricks = get_application_system_prompt(true);
@@ -536,12 +546,14 @@ mod tests {
     #[test]
     fn test_prompt_renderer() {
         let renderer = PromptRenderer::default();
-        
+
         // Test that templates can be rendered
         let data_prompt = renderer.render_data_model_prompt(false).unwrap();
         let app_prompt = renderer.render_application_prompt(false).unwrap();
-        let user_prompt = renderer.render_user_prompt("Context", "Request", false).unwrap();
-        
+        let user_prompt = renderer
+            .render_user_prompt("Context", "Request", false)
+            .unwrap();
+
         assert!(!data_prompt.is_empty());
         assert!(!app_prompt.is_empty());
         assert!(!user_prompt.is_empty());
