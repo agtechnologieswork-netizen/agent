@@ -6,7 +6,7 @@ from typing import Dict, Self, Optional, Literal, Any
 from dataclasses import dataclass
 from core.statemachine import StateMachine, State, Context
 from core.application import BaseApplicationContext
-from core.dagger_utils import write_files_bulk, write_directory_bulk
+from core.dagger_utils import write_files_bulk
 from llm.utils import get_vision_llm_client, get_best_coding_llm_client
 from core.actors import BaseData
 from core.base_node import Node
@@ -394,12 +394,8 @@ class FSMApplication:
             )
 
         # Add template files (they will appear in diff if not in snapshot)
-        start = await write_directory_bulk(
-            start,
-            os.path.join(os.path.dirname(os.path.abspath(__file__)), "./template"),
-            self.client,
-            target=".",
-        )
+        template_dir = self.client.host().directory("./trpc_agent/template")
+        start = start.with_directory(".", template_dir)
 
         # Add FSM context files on top
         start = await write_files_bulk(start, self.fsm.context.files, self.client)
