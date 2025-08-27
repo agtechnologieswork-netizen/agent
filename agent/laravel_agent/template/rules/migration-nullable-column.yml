@@ -1,0 +1,16 @@
+id: migration-nullable-column
+message: "Extract nullable column definitions from migrations"
+severity: info
+language: php
+rule:
+  pattern: |
+    $table->$TYPE('$COLUMN')->nullable()
+transform:
+  COLUMN:
+    replace:
+      string: $COLUMN
+  TYPE:
+    replace:
+      string: $TYPE
+note: |
+  This rule extracts nullable column definitions for cross-layer validation

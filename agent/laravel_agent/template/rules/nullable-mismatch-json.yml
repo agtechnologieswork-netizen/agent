@@ -1,0 +1,18 @@
+id: nullable-mismatch-json
+message: "JSON column nullable in migration but validation doesn't allow null"
+severity: error
+language: php
+rule:
+  all:
+    - inside:
+        kind: method_declaration
+        has:
+          field: name
+          regex: "up"
+    - has:
+        pattern: |
+          $table->json('$COLUMN')->nullable()
+note: |
+  This detects potential issues where a nullable JSON column might receive
+  empty arrays that violate database constraints. Ensure corresponding 
+  validation rules include 'nullable' for this field.
