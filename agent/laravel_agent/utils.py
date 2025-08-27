@@ -52,10 +52,11 @@ async def create_workspace(client: dagger.Client, context: dagger.Directory, pro
         .with_exec(["docker-php-ext-install", *_DOCKER_EXT_PACKAGES])
         .with_file("/usr/bin/composer", client.container().from_("composer:2").file("/usr/bin/composer"))
     )
+    ctr = ctr.with_workdir("/var/www/html").with_directory("/var/www/html", context)
+    # Bake mounted context into the container to avoid long mount options on some hosts
+    ctr = await ctr.sync()
     ctr = (
         ctr
-        .with_workdir("/var/www/html")
-        .with_directory("/var/www/html", context)
         .with_exec(["composer", "install", "--optimize-autoloader", "--no-interaction"])
         .with_exec(["npm", "install"])
     )
@@ -68,13 +69,15 @@ async def create_workspace(client: dagger.Client, context: dagger.Directory, pro
     app_key = f"base64:{base64.b64encode(random_bytes).decode('utf-8')}"
     ctr = ctr.with_env_variable("APP_KEY", app_key)
     
-    return Workspace(
-        client=client,
+    workspace = Workspace(
         ctr=ctr,
         start=context,
         protected=set(protected),
         allowed=set(allowed),
     )
+    # Attach client to workspace instance
+    workspace._client = client
+    return workspace
 
 async def run_tests(ctr: dagger.Container) -> ExecResult:
     """Run the project test-suite inside the given container.

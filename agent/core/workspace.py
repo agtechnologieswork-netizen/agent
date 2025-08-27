@@ -59,6 +59,9 @@ class Workspace:
             .with_workdir("/app")
             .with_directory("/app", my_context)
         )
+        # Bake the mounted host directory into the container snapshot to avoid
+        # extremely long mount option strings on some hosts/runtimes
+        ctr = await ctr.sync()
         for cmd in setup_cmd:
             ctr = ctr.with_exec(cmd)
 
