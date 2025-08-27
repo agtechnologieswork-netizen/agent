@@ -1,0 +1,15 @@
+id: test-phpunit-style
+message: "PHPUnit-style test detected. Use Pest syntax instead."
+severity: error
+language: php
+rule:
+  pattern: |
+    class $TEST extends $BASE
+  where:
+    BASE:
+      regex: "(Tests\\\\)?TestCase"
+note: |
+  This project requires Pest tests only. Convert to Pest syntax:
+  - Use test() or it() functions instead of class methods
+  - Use expect() assertions instead of $this->assert*()
+  - Remove the class wrapper entirely

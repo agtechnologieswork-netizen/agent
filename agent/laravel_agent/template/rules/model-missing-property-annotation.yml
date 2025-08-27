@@ -1,0 +1,21 @@
+id: model-missing-property-annotation
+message: "Model PHPDoc missing @property annotations"
+severity: warning
+language: php
+rule:
+  all:
+    - inside:
+        kind: class_declaration
+        has:
+          pattern: |
+            class $MODEL extends Model
+    - precedes:
+        kind: comment
+        regex: "/\\*\\*"
+        not:
+          regex: "@property"
+note: |
+  Model PHPDoc should include @property annotations for all database columns.
+  Example: @property int $id
+          @property string $name
+          @property \DateTime $created_at

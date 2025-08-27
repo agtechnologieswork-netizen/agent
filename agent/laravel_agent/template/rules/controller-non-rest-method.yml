@@ -1,0 +1,26 @@
+id: controller-non-rest-method
+message: "Non-standard public method in controller. Controllers should only have REST methods."
+severity: error
+language: php
+rule:
+  all:
+    - inside:
+        kind: class_declaration
+        has:
+          field: name
+          regex: "\\w+Controller$"
+    - kind: method_declaration
+    - has:
+        field: modifiers
+        has:
+          text: "public"
+    - has:
+        field: name
+        not:
+          regex: "^(index|create|store|show|edit|update|destroy|__construct|__invoke)$"
+note: |
+  Controllers should only have standard REST methods:
+  - index, create, store, show, edit, update, destroy
+  - __construct for dependency injection
+  - __invoke for single action controllers
+  Move custom logic to private methods or service classes.
