@@ -242,9 +242,10 @@ async def test_e2e_generation_nicegui(template_id):
 async def test_e2e_generation_trpc(template_id):
     await run_e2e(standalone=False, prompt=DEFAULT_APP_REQUEST, template_id=template_id)
 
-
-@pytest.mark.skip(reason="too long to run")
 @pytest.mark.skipif(requires_llm_provider(), reason=requires_llm_provider_reason)
+@pytest.mark.parametrize(
+    "template_id", [pytest.param("laravel_agent", marks=pytest.mark.laravel)]
+)
 @pytest.mark.parametrize(
     "template_id", [pytest.param("laravel_agent", marks=pytest.mark.laravel)]
 )
