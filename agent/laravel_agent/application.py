@@ -348,6 +348,8 @@ class FSMApplication:
         # Add template files (they will appear in diff if not in snapshot)
         template_dir = self.client.host().directory(self.template_path())
         start = start.with_directory(".", template_dir)
+        # Bake template mount to avoid long mount options (ref: PR #393)
+        start = await start.sync()
         logger.info("SERVER get_diff_with: Added template directory to workspace")
 
         # Exclude .png and .ico files from being tracked by git

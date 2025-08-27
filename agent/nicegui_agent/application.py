@@ -512,6 +512,8 @@ class FSMApplication:
         # Add template files (they will appear in diff if not in snapshot)
         template_dir = self.client.host().directory("./nicegui_agent/template")
         start = start.with_directory(".", template_dir)
+        # Bake template mount to avoid long mount options on macOS/docker (ref: PR #393)
+        start = await start.sync()
         logger.info("SERVER get_diff_with: Added template directory to workspace")
 
         tree_snapshot = await start.with_exec(["tree"]).stdout()

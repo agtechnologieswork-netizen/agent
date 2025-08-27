@@ -396,6 +396,8 @@ class FSMApplication:
         # Add template files (they will appear in diff if not in snapshot)
         template_dir = self.client.host().directory("./trpc_agent/template")
         start = start.with_directory(".", template_dir)
+        # Bake template mount to avoid long mount options (ref: PR #393)
+        start = await start.sync()
 
         # Add FSM context files on top
         start = await write_files_bulk(start, self.fsm.context.files, self.client)

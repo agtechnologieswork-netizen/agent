@@ -131,6 +131,8 @@ class Workspace:
     @retry_transport_errors
     async def diff(self) -> str:
         start = self.client.container().from_("alpine/git").with_workdir("/app").with_directory("/app", self.start)
+        # Bake mounted start directory to avoid long mount options (see PR #393)
+        start = await start.sync()
         if ".git" not in await self.start.entries():
             start = (
                 start.with_exec(["git", "init"])
