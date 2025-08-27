@@ -1306,3 +1306,6 @@ Example: For a CRM app, show "🤝 Personal CRM - Keep track of your relationshi
 
 REFINEMENT RULE: If this is a refinement request (like "add emojis", "make it look better", "add more features"), IMPLEMENT IT NOW. Do not ask questions. Take the existing code and enhance it based on the request. The user is giving you specific direction to improve what's already built.
 """.strip()
+
+# Export all public symbols
+__all__ = ['APPLICATION_SYSTEM_PROMPT', 'TOOL_USAGE_RULES', 'USER_PROMPT', 'validate_migration_syntax', 'MIGRATION_SYNTAX_EXAMPLE']
