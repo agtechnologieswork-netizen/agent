@@ -246,9 +246,6 @@ async def test_e2e_generation_trpc(template_id):
 @pytest.mark.parametrize(
     "template_id", [pytest.param("laravel_agent", marks=pytest.mark.laravel)]
 )
-@pytest.mark.parametrize(
-    "template_id", [pytest.param("laravel_agent", marks=pytest.mark.laravel)]
-)
 async def test_e2e_generation_laravel(template_id):
     await run_e2e(standalone=False, prompt=DEFAULT_APP_REQUEST, template_id=template_id)
 
