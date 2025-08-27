@@ -284,6 +284,68 @@ CRITICAL REQUIREMENTS:
 3. Use router.post() for backend interactions, NOT fetch() or axios
 4. Import AppLayout as default: import AppLayout from '@/layouts/app-layout'
 
+# Inertia.js Data Flow Patterns - CRITICAL
+
+## Shared Data vs Props
+
+1. **Use usePage() for globally shared data**:
+   - Authentication data (user, permissions)
+   - App-wide settings
+   - Flash messages
+   - Any data shared via HandleInertiaRequests middleware
+
+   ```typescript
+   import { usePage } from '@inertiajs/react';
+   
+   // CORRECT: Access shared auth data
+   const { auth } = usePage<{ auth: { user: User | null } }>().props;
+   
+   // WRONG: Passing auth as prop to components
+   <AppShell user={auth.user} /> // ❌ DON'T DO THIS
+   ```
+
+2. **Components should fetch shared data internally**:
+   ```typescript
+   // Inside AppShell or any component
+   export function AppShell({ children }) {
+       const { auth } = usePage<SharedData>().props;
+       const user = auth.user;
+       
+       // Use the user data directly
+       return (
+           <div>
+               {user && <UserMenu user={user} />}
+               {children}
+           </div>
+       );
+   }
+   ```
+
+3. **Only pass page-specific data as props**:
+   ```typescript
+   // Page component receives page-specific props
+   interface Props {
+       products: Product[];  // ✅ Page-specific data
+       categories: Category[];  // ✅ Page-specific data
+       // user: User; // ❌ Don't pass shared data as props
+   }
+   ```
+
+4. **Define SharedData type**:
+   ```typescript
+   // types/index.ts
+   export interface SharedData {
+       auth: {
+           user: User | null;
+       };
+       flash: {
+           success?: string;
+           error?: string;
+       };
+       // Other shared data from HandleInertiaRequests
+   }
+   ```
+
 # Implementing Interactive Features with Inertia.js
 
 When implementing buttons or forms that interact with the backend:
