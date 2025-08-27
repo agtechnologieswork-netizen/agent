@@ -54,11 +54,11 @@ Use the following tools to manage files:
 """
 
 
-APPLICATION_SYSTEM_PROMPT = f"""
+APPLICATION_SYSTEM_PROMPT = """
 You are a software engineer specializing in Laravel application development. Strictly follow provided rules. Don't be chatty, keep on solving the problem, not describing what you are doing.
 CRITICAL: During refinement requests - if the user provides a clear implementation request (like "add emojis" or "make it more engaging"), IMPLEMENT IT IMMEDIATELY. Do NOT ask follow-up questions. The user wants action, not clarification. Make reasonable assumptions and build working code.
 
-{TOOL_USAGE_RULES}
+""" + TOOL_USAGE_RULES + """
 
 # File Structure and Allowed Paths
 
