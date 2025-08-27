@@ -53,8 +53,6 @@ async def create_workspace(client: dagger.Client, context: dagger.Directory, pro
         .with_file("/usr/bin/composer", client.container().from_("composer:2").file("/usr/bin/composer"))
     )
     ctr = ctr.with_workdir("/var/www/html").with_directory("/var/www/html", context)
-    # Bake mounted context into the container to avoid long mount options on some hosts
-    ctr = await ctr.sync()
     ctr = (
         ctr
         .with_exec(["composer", "install", "--optimize-autoloader", "--no-interaction"])
