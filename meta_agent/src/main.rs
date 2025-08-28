@@ -13,6 +13,8 @@ enum Commands {
     Generate {
         #[arg(short, long)]
         prompt: String,
+        #[arg(short, long, default_value = "nicegui")]
+        stack: String,
     },
     Scratchpad,
 }
@@ -23,8 +25,8 @@ async fn main() -> eyre::Result<()> {
 
     let cli = Cli::parse();
     match cli.command {
-        Commands::Generate { prompt } => {
-            generate(prompt).await?;
+        Commands::Generate { prompt, stack } => {
+            generate(prompt, stack).await?;
         }
         Commands::Scratchpad => {
             meta_agent::agent::actor::eval_demo_agent().await?;
@@ -33,22 +35,26 @@ async fn main() -> eyre::Result<()> {
     Ok(())
 }
 
-async fn generate(prompt: String) -> eyre::Result<()> {
+async fn generate(prompt: String, stack: String) -> eyre::Result<()> {
     use meta_agent::{
-        agent::actor::{self},
-        agent::{Command, Pipeline},
+        agent::{Command, Pipeline, actor::PipelineCmd},
+        stacks::StackRegistry,
         workspace::dagger::DaggerRef,
     };
+    
+    let stack_config = StackRegistry::get_stack(&stack).await?;
+    let pipeline = stack_config.create_pipeline().await?;
+    
     let dagger_ref = DaggerRef::new();
     let workspace = dagger_ref
-        .workspace("Dockerfile.appbuild".into(), "./src/stacks/python".into())
+        .workspace("Dockerfile.appbuild".into(), stack_config.context_path().into())
         .await?;
     let (cmd_tx, cmd_rx) = tokio::sync::mpsc::channel(1);
     let (event_tx, mut event_rx) = tokio::sync::mpsc::channel(1);
-    let mut pipeline = actor::claude_python_pipeline().await?;
+    let mut pipeline = pipeline;
     let cmd = Command::new(
         None,
-        actor::PipelineCmd::Start {
+        PipelineCmd::Start {
             prompt: prompt,
             workspace: Box::new(workspace),
         },

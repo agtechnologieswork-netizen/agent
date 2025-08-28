@@ -1,7 +1,6 @@
 use crate::{
     agent::{
         AgentNode, AgentTool, Checker, Command, Event, NodeTool, Rollout, Search, ToolCallExt, Tree,
-        optimizer,
     },
     llm::{Completion, CompletionResponse, LLMClientDyn},
     workspace::WorkspaceDyn,
@@ -373,7 +372,7 @@ impl Checker for PythonChecker {
 }
 
 pub async fn eval_demo_agent() -> Result<()> {
-    use crate::agent::optimizer::{self};
+    use crate::agent::optimizer;
 
     let dagger_ref = crate::workspace::dagger::DaggerRef::new();
     let workspace = dagger_ref
@@ -402,13 +401,8 @@ pub async fn claude_python_pipeline() -> Result<AgentPipeline> {
     use crate::{agent::toolset, tools_vec};
 
     let client = rig::providers::anthropic::Client::from_env();
-    let preamble = "
-You are a python software engineer.
-Workspace is already set up using uv init.
-Use uv package manager if you need to add extra libraries.
-Program will be run using uv run main.py command.
-"
-    .to_string();
+    // Use advanced Python prompts instead of simple preamble
+    let preamble = crate::agent::optimizer::get_python_system_prompt();
     let model = "claude-sonnet-4-20250514".to_string();
     let tools = tools_vec![
         toolset::BashTool,
@@ -422,6 +416,35 @@ Program will be run using uv run main.py command.
     let search = SearchActor::new().with_limit(30);
     let rollout = AgentActor {
         llm: Arc::new(client),
+        tools: Arc::new(tools),
+        model,
+        preamble,
+    };
+    Ok(AgentPipeline { rollout, search })
+}
+
+pub async fn claude_nicegui_pipeline() -> Result<AgentPipeline> {
+    use crate::{agent::toolset, stacks::nicegui::NiceguiChecker, tools_vec};
+
+    let client = rig::providers::anthropic::Client::from_env();
+    // Use advanced NiceGUI prompts instead of simple preamble
+    let preamble = crate::agent::optimizer::get_application_system_prompt(false);
+    let model = "claude-sonnet-4-20250514".to_string();
+    let llm = Arc::new(client);
+    let nicegui_checker = NiceguiChecker::new(llm.clone(), model.clone());
+    
+    let tools = tools_vec![
+        toolset::BashTool,
+        toolset::WriteFileTool,
+        toolset::ReadFileTool,
+        toolset::LsDirTool,
+        toolset::RmFileTool,
+        toolset::EditFileTool,
+        node: toolset::FinishTool::new(nicegui_checker),
+    ];
+    let search = SearchActor::new().with_limit(30);
+    let rollout = AgentActor {
+        llm,
         tools: Arc::new(tools),
         model,
         preamble,
