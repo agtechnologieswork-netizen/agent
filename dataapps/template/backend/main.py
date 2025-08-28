@@ -1,17 +1,17 @@
 """
 FastAPI backend with React Admin SimpleRestProvider compatibility.
-Uses the ReactAdminWrapper for flexible resource management.
+Uses helper types and sub-routers for flexible resource management.
 """
 
 import polars as pl
-from typing import Optional
-from fastapi import FastAPI, Request
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pathlib import Path
-from pydantic import BaseModel, Field
 
-from react_admin_wrapper import ReactAdminWrapper, ResourceConfig
+from react_admin_helpers import ResourceConfig
+from routes.customers.routes import router as customers_router, set_resource_config
+from routes.customers.schema import Customer
 
 app = FastAPI(title="React Admin Compatible API")
 
@@ -24,27 +24,9 @@ app.add_middleware(
     expose_headers=["X-Total-Count", "Content-Range"],
 )
 
-# Initialize the wrapper
-wrapper = ReactAdminWrapper()
 
 # Data storage
 customers_df: pl.DataFrame = pl.DataFrame()
-
-# Pydantic models
-class Customer(BaseModel):
-    id: Optional[int] = Field(description="Internal ID")
-    customer_id: str = Field(description="Customer's ID")
-    first_name: str = Field(description="Customer's first name")
-    last_name: str = Field(description="Customer's last name")
-    company: str = Field(description="Company name")
-    city: str = Field(description="City")
-    country: str = Field(description="Country")
-    phone_1: str = Field(description="Primary phone number")
-    phone_2: str = Field(description="Secondary phone number")
-    email: str = Field(description="Email address")
-    subscription_date: str = Field(description="Subscription date")
-    website: str = Field(description="Website URL")
-
 
 def load_csv_data():
     """Load customer data from CSV file using Polars"""
@@ -83,132 +65,23 @@ def set_customers_df(df: pl.DataFrame):
     customers_df = df
 
 
-# Load data and register resources
+# Load data and configure customers resource
 load_csv_data()
 
-# Register customers resource with the wrapper
-wrapper.register_resource(
-    ResourceConfig(
-        name="customers",
-        dataframe_getter=get_customers_df,
-        dataframe_setter=set_customers_df,
-        model_class=Customer,
-        searchable_fields=['first_name', 'last_name', 'company', 'email']
-    )
+# Configure customers resource
+customers_config = ResourceConfig(
+    name="customers",
+    dataframe_getter=get_customers_df,
+    dataframe_setter=set_customers_df,
+    model_class=Customer,
+    searchable_fields=['first_name', 'last_name', 'company', 'email']
 )
 
+# Set the configuration for the customers router
+set_resource_config(customers_config)
 
-# React Admin compatible endpoints
-@app.get("/api/{resource}")
-async def get_list(resource: str, request: Request):
-    """
-    Handle getList and getMany operations.
-    Supports React Admin query formats:
-    - sort=["field","ASC/DESC"]
-    - range=[start,end]
-    - filter={"field":"value"}
-    """
-    params = wrapper.parse_react_admin_params(request)
-    data, total = await wrapper.handle_get_list(resource, params)
-    return wrapper.create_list_response(data, total)
-
-
-@app.get("/api/{resource}/{item_id}")
-async def get_one(resource: str, item_id: int):
-    """Handle getOne operation"""
-    data = await wrapper.handle_get_one(resource, item_id)
-    return wrapper.create_item_response(data)
-
-
-@app.post("/api/{resource}")
-async def create(resource: str, request: Request):
-    """Handle create operation"""
-    body = await request.json()
-    data = await wrapper.handle_create(resource, body)
-    return wrapper.create_item_response(data)
-
-
-@app.put("/api/{resource}/{item_id}")
-async def update(resource: str, item_id: int, request: Request):
-    """Handle update operation"""
-    body = await request.json()
-    data = await wrapper.handle_update(resource, item_id, body)
-    return wrapper.create_item_response(data)
-
-
-@app.delete("/api/{resource}/{item_id}")
-async def delete(resource: str, item_id: int):
-    """Handle delete operation"""
-    data = await wrapper.handle_delete(resource, item_id)
-    return wrapper.create_item_response(data)
-
-
-# Legacy endpoints for backwards compatibility
-@app.get("/api/customers")
-async def get_customers_legacy(
-    _sort: Optional[str] = None,
-    _order: Optional[str] = None,
-    _start: Optional[int] = 0,
-    _end: Optional[int] = None,
-    q: Optional[str] = None,
-    id: Optional[str] = None
-):
-    """Legacy endpoint - redirects to new format"""
-    from fastapi import Query
-    from react_admin_wrapper import ReactAdminParams
-
-    params = ReactAdminParams(
-        sort_field=_sort,
-        sort_order=_order,
-        start=_start,
-        end=_end,
-        filters={}
-    )
-
-    if id:
-        params.filters['ids'] = [int(i) for i in id.split(',')]
-    if q:
-        params.filters['q'] = q
-
-    data, total = await wrapper.handle_get_list('customers', params)
-    return wrapper.create_list_response(data, total)
-
-
-# Example of how to add a new resource (e.g., products)
-# This demonstrates the flexibility of the wrapper
-def create_products_resource():
-    """Example function showing how to add a products resource"""
-
-    class Product(BaseModel):
-        id: Optional[int] = None
-        name: str
-        description: str
-        price: float
-        category: str
-        stock: int
-
-    # This would be your products dataframe
-    products_df = pl.DataFrame()
-
-    def get_products_df() -> pl.DataFrame:
-        return products_df
-
-    def set_products_df(df: pl.DataFrame):
-        nonlocal products_df
-        products_df = df
-
-    # Register the resource
-    wrapper.register_resource(
-        ResourceConfig(
-            name="products",
-            dataframe_getter=get_products_df,
-            dataframe_setter=set_products_df,
-            model_class=Product,
-            searchable_fields=['name', 'description', 'category']
-        )
-    )
-
-
+# Include the customers router
+app.include_router(customers_router, prefix="/api/customers")
 # Serve frontend
 frontend_dist = Path("frontend/dist")
 if frontend_dist.exists():
