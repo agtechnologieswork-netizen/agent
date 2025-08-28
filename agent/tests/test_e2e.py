@@ -154,6 +154,24 @@ async def run_e2e(
                         template_id=template_id,
                         settings=settings,
                     )
+                    
+                    # Handle potential refinement requests after edit
+                    refinement_count = 0
+                    while (
+                        new_events
+                        and new_events[-1].message.kind == MessageKind.REFINEMENT_REQUEST
+                        and refinement_count < max_refinements
+                    ):
+                        new_events, new_request = await client.continue_conversation(
+                            previous_events=new_events,
+                            previous_request=new_request,
+                            message="just do it! no more questions, please",
+                            template_id=template_id,
+                            settings=settings,
+                        )
+                        refinement_count += 1
+                        logger.info(f"Edit refinement attempt {refinement_count}/{max_refinements}")
+                    
                     updated_diff = latest_unified_diff(new_events)
                     assert updated_diff, (
                         "No diff was generated in the agent response after edit"
