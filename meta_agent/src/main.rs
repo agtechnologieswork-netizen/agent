@@ -55,7 +55,7 @@ async fn generate(prompt: String, stack: String) -> eyre::Result<()> {
     let cmd = Command::new(
         None,
         PipelineCmd::Start {
-            prompt: prompt,
+            prompt,
             workspace: Box::new(workspace),
         },
     );

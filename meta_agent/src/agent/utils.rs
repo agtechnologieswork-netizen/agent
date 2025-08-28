@@ -132,12 +132,11 @@ pub async fn compact_error_message(
     
     match llm.completion(completion).await {
         Ok(response) => {
-            if let Some(AssistantContent::Text(text)) = response.choice.iter().next() {
-                if let Some(compacted) = extract_tag(&text.text, "error") {
+            if let Some(AssistantContent::Text(text)) = response.choice.iter().next()
+                && let Some(compacted) = extract_tag(&text.text, "error") {
                     tracing::info!("Compacted error message size: {}, original size: {}", compacted.len(), original_length);
                     return Ok(compacted);
                 }
-            }
         }
         Err(e) => {
             tracing::warn!("Failed to compact error message using LLM: {}", e);

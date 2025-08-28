@@ -10,7 +10,7 @@ fn create_postgres_service(client: &dagger_sdk::DaggerConn) -> dagger_sdk::Servi
         .with_env_variable("POSTGRES_USER", "postgres")
         .with_env_variable("POSTGRES_PASSWORD", "postgres")
         .with_env_variable("POSTGRES_DB", "postgres")
-        .with_env_variable("INSTANCE_ID", &Uuid::new_v4().to_string())
+        .with_env_variable("INSTANCE_ID", Uuid::new_v4().to_string())
         .as_service()
 }
 
@@ -112,7 +112,10 @@ impl DaggerWorkspace {
             let res = DaggerWorkspace::exec_res(&ctr).await;
             (res, ctr)
         })
-        .await?;
+        .await.map_err(|e| {
+            tracing::error!("PostgreSQL service binding failed - DNS resolution issue likely: {}", e);
+            eyre::eyre!("PostgreSQL execution failed (DNS resolution issue): {}", e)
+        })?;
         
         self.ctr = ctr;
         res

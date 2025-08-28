@@ -1,3 +1,4 @@
+use crate::{agent::optimizer, agent::toolset, stacks::nicegui::NiceguiChecker, tools_vec};
 use crate::{
     agent::{
         AgentNode, AgentTool, Checker, Command, Event, NodeTool, Rollout, Search, ToolCallExt, Tree,
@@ -372,8 +373,6 @@ impl Checker for PythonChecker {
 }
 
 pub async fn eval_demo_agent() -> Result<()> {
-    use crate::agent::optimizer;
-
     let dagger_ref = crate::workspace::dagger::DaggerRef::new();
     let workspace = dagger_ref
         .workspace("Dockerfile.appbuild".into(), "./src/stacks/python".into())
@@ -424,17 +423,14 @@ pub async fn claude_python_pipeline() -> Result<AgentPipeline> {
 }
 
 pub async fn claude_nicegui_pipeline() -> Result<AgentPipeline> {
-    use crate::{agent::toolset, stacks::nicegui::NiceguiChecker, tools_vec};
-
     let client = rig::providers::anthropic::Client::from_env();
     // Use advanced NiceGUI prompts instead of simple preamble
     let preamble = crate::agent::optimizer::get_application_system_prompt(false);
     let model = "claude-sonnet-4-20250514".to_string();
     let llm = Arc::new(client);
     let nicegui_checker = NiceguiChecker::new(llm.clone(), model.clone());
-    
+
     let tools = tools_vec![
-        toolset::BashTool,
         toolset::WriteFileTool,
         toolset::ReadFileTool,
         toolset::LsDirTool,
