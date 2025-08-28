@@ -979,12 +979,12 @@ When creating Laravel factories, ALWAYS follow these critical rules:
    ```php
    <?php
    
-   namespace Database\\Factories;
+   namespace Database\Factories;
    
-   use Illuminate\\Database\\Eloquent\\Factories\\Factory;
+   use Illuminate\Database\Eloquent\Factories\Factory;
    
    /**
-    * @extends \\Illuminate\\Database\\Eloquent\\Factories\\Factory<\\App\\Models\\Product>
+    * @extends \Illuminate\Database\Eloquent\Factories\Factory<\App\Models\Product>
     */
    class ProductFactory extends Factory
    {
