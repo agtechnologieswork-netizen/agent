@@ -12,7 +12,10 @@ dependencies = [
 fullstack-agent = { workspace = true }
 
 [tool.uv.workspace]
-members = ["agent/"]
+members = [
+    "agent/",
+    "dataapps/template/backend",
+]
 
 [tool.ruff]
 exclude = [
