@@ -261,11 +261,10 @@ impl DatabricksRestClient {
         let url = format!("{}{}", self.host, SQL_STATEMENTS_ENDPOINT);
         let mut sql_response: SqlStatementResponse = self.api_request(reqwest::Method::POST, &url, Some(&request)).await?;
         
-        if let Some(status) = &sql_response.status {
-            if status.state == "PENDING" || status.state == "RUNNING" {
+        if let Some(status) = &sql_response.status
+            && (status.state == "PENDING" || status.state == "RUNNING") {
                 sql_response = self.poll_statement(&sql_response.statement_id).await?;
             }
-        }
 
         self.validate_sql_response(&sql_response)?;
 
