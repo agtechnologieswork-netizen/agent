@@ -96,12 +96,29 @@ impl DaggerWorkspace {
             return Ok(());
         }
 
-        let mut ctr = self.ctr.clone();
-        for (path, contents) in files {
-            ctr = ctr.with_new_file(path, contents);
+        // Create a temporary directory to stage all files
+        let temp_dir = tempfile::tempdir()?;
+        let temp_path = temp_dir.path();
+        
+        // Write all files to the temporary directory
+        for (file_path, contents) in &files {
+            let full_path = temp_path.join(file_path);
+            
+            // Create parent directories if needed
+            if let Some(parent) = full_path.parent() {
+                std::fs::create_dir_all(parent)?;
+            }
+            
+            std::fs::write(&full_path, contents)?;
         }
         
-        self.ctr = ctr;
+        // Use with_directory to add all files at once - this prevents deep query chains
+        let host_dir = self.client.host().directory(temp_path.to_string_lossy().to_string());
+        self.ctr = self.ctr.with_directory("/", host_dir);
+        
+        // Force evaluation to ensure the directory is copied before temp_dir is dropped
+        self.ctr.sync().await?;
+        
         Ok(())
     }
 
@@ -249,7 +266,7 @@ impl crate::workspace::WorkspaceDyn for DaggerWorkspace {
     fn write_files_bulk(
         &mut self,
         files: Vec<(String, String)>,
-    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = eyre::Result<()>> + Send + Sync + '_>> {
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = eyre::Result<()>> + Send + '_>> {
         Box::pin(async move { 
             DaggerWorkspace::write_files_bulk(self, files).await 
         })

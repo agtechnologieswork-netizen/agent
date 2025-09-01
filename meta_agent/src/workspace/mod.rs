@@ -94,7 +94,7 @@ pub trait WorkspaceDyn: Send + Sync {
     fn write_files_bulk(
         &mut self,
         files: Vec<(String, String)>,
-    ) -> Pin<Box<dyn Future<Output = eyre::Result<()>> + Send + Sync + '_>>;
+    ) -> Pin<Box<dyn Future<Output = eyre::Result<()>> + Send + '_>>;
 }
 
 // Manual implementation for MockWorkspace - removed generic impl to avoid conflicts
@@ -164,7 +164,7 @@ impl WorkspaceDyn for mock::MockWorkspace {
     fn write_files_bulk(
         &mut self,
         files: Vec<(String, String)>,
-    ) -> Pin<Box<dyn Future<Output = eyre::Result<()>> + Send + Sync + '_>> {
+    ) -> Pin<Box<dyn Future<Output = eyre::Result<()>> + Send + '_>> {
         Box::pin(async move {
             for (path, contents) in files {
                 let cmd = WriteFile { path, contents };

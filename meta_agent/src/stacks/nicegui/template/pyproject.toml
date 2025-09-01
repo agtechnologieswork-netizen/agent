@@ -11,14 +11,11 @@ dependencies = [
     "pytest-asyncio>=1.0.0",
     "pytest-selenium>=4.1.0",
     "sqlmodel>=0.0.24",
+    "databricks-sdk>=0.57.0",
 ]
 
 [dependency-groups]
-dev = [
-    "ruff>=0.11.5",
- "pyright>=1.1.403",
- "ast-grep-cli>=0.39.1",
-]
+dev = ["ruff>=0.11.5", "pyright>=1.1.404", "ast-grep-cli>=0.39.1"]
 
 [tool.ruff]
 exclude = [".git", ".git-rewrite", ".pytest_cache", ".ruff_cache", ".venv"]
