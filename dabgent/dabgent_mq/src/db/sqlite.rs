@@ -2,6 +2,11 @@ use crate::db::*;
 use chrono::Utc;
 use serde_json;
 use sqlx::SqlitePool;
+use std::{
+    collections::HashMap,
+    sync::{Arc, Mutex},
+};
+use tokio::sync::{broadcast, mpsc};
 
 static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("./migrations/sqlite");
 
@@ -51,7 +56,7 @@ impl EventStore for SqliteStore {
         let mut tx = self.pool.begin().await.map_err(Error::Database)?;
 
         let next_sequence: i64 = sqlx::query_scalar(
-            "SELECT COALESCE(MAX(sequence), 0) + 1 FROM events WHERE stream_id = ? AND aggregate_id = ?",
+            "SELECT COALESCE(MAX(sequence), 0) + 1 FROM events WHERE stream_id = ?",
         )
         .bind(stream_id)
         .bind(aggregate_id)
@@ -103,5 +108,9 @@ impl EventStore for SqliteStore {
         rows.into_iter()
             .map(|row| serde_json::from_value::<T>(row.data).map_err(Error::Serialization))
             .collect::<Result<Vec<T>, Error>>()
+    }
+
+    fn subscribe<T: models::Event>(&self, query: &Query) -> Result<mpsc::Receiver<T>, Error> {
+        todo!()
     }
 }

@@ -5,6 +5,7 @@ use chrono::{DateTime, Utc};
 use eyre::Result;
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
+use tokio::sync::mpsc;
 
 #[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
 pub struct Event {
@@ -64,6 +65,7 @@ impl Default for Metadata {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct Query {
     pub stream_id: String,
     pub event_type: Option<String>,
@@ -82,6 +84,10 @@ pub trait EventStore {
         &self,
         query: &Query,
     ) -> impl Future<Output = Result<Vec<T>, Error>> + Send;
+    fn subscribe<T: models::Event + 'static>(
+        &self,
+        query: &Query,
+    ) -> Result<mpsc::Receiver<T>, Error>;
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -90,4 +96,6 @@ pub enum Error {
     Database(sqlx::Error),
     #[error("Serialization error: {0}")]
     Serialization(serde_json::Error),
+    #[error("Subscription error: {0}")]
+    Subscription(Box<dyn std::error::Error + Send + Sync>),
 }
