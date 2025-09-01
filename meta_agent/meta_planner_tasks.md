@@ -16,11 +16,13 @@
   - [ ] `PlannerState { tasks, cursor, waiting_for_clarification, pending_clarification_for, next_id, context_summary }`
   - [ ] `PlannerConfig { system_prompt }`
   - [ ] `Planner<L, C> { state, llm, compactor, config }`
+  - [ ] `NodeKind { Clarification, ToolCall, Processing }`
 
 ## Milestone B — Planning & Dispatch (v1 scope)
 - [ ] Implement `PlannerState::plan_tasks(input: &str, atts: &[Attachment])`
   - [ ] Parse steps (heuristic)
   - [ ] Extract URLs only for attachments (defer files/images)
+  - [ ] Classify steps into `NodeKind::{Clarification, ToolCall, Processing}`
 - [ ] Implement `PlannerState::step(ctx, incoming: Option<ExecutorEvent>)`
   - [ ] Route incoming events, then pick next Planned task -> emit `PlannerCmd::ExecuteTask` -> mark Running
 - [ ] Wire initial call on new user input:
@@ -67,7 +69,7 @@
 - Add tests (unit + integration).
 
 ## Not Now (v1)
-- [ ] Add advanced `NodeKind` variants (`Refactor`, `Clarification`, `ToolCall`)
+- [ ] Add advanced `NodeKind` variants (`UnitTest`, `Retrieval`, `Analysis`, `Refactor`, `CodeImplementation`)
 - [ ] Add non-URL attachments (`AttachmentKind`, `Attachment` for images/files)
 - [ ] Add retries/backoff beyond simple advance-on-fail
 - [ ] Add checkpointing/cancellation/persistence of planner state

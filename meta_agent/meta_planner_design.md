@@ -35,10 +35,9 @@ pub enum ExecutorEvent {
 /// Classification for routing & tooling (v1 minimal set)
 #[derive(Debug, Clone, Copy)]
 pub enum NodeKind {
-    CodeImplementation,
-    UnitTest,
-    Retrieval,       // fetch URLs, parse
-    Analysis,        // analyze inputs, summarize
+    Clarification,   // explicit user Q/A
+    ToolCall,        // external tool execution
+    Processing,      // generic planning/analysis/implementation
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -194,11 +193,10 @@ impl PlannerState {
 - Normalize input (trim, collapse whitespace), split into candidate steps by:
   - list bullets/numbered lines
   - sentence boundaries followed by connectors: "then", "next", "and then"
-- Classify `NodeKind` with simple keyword rules:
-  - contains "test"/"verify" → `UnitTest`
-  - contains URL or verbs "fetch/read/scrape" → `Retrieval`
-  - contains "analyze/summarize" → `Analysis`
-  - otherwise → `CodeImplementation`
+- Classify `NodeKind` with simple rules:
+  - command/code/backtick patterns or tool verbs → `ToolCall`
+  - explicit questions/ambiguity markers → `Clarification` (or use event flow)
+  - otherwise → `Processing`
 - Attachments: extract URLs via regex and associate as links; defer images/files.
 
 **Context compaction (v1, no naive truncation):**
@@ -231,10 +229,10 @@ impl PlannerState {
 **Input**: “Add login with session cookies. Use basic auth. Read API spec at https://example.com/spec.pdf. Then write unit tests.”
 
 **Planned tasks** (example):
-1. Retrieval (spec) — parse key constraints.  
-2. CodeImplementation — backend login.  
-3. CodeImplementation — frontend form & wiring.  
-4. UnitTest — cover happy/edge cases.
+1. Processing — read spec and extract key constraints.  
+2. Processing — backend login.  
+3. Processing — frontend form & wiring.  
+4. Processing — write and run tests.
 
 If ambiguity (e.g., *cookie expiry?*), emit `RequestClarification` and wait.
 
@@ -265,7 +263,7 @@ See section 11 (Future Work) for planned extensions beyond v1.
 
 ## 10) Scope: Not Now (v1)
 
-- Advanced `NodeKind` variants (e.g., `Refactor`, `ToolCall`, `Clarification`).
+- Advanced `NodeKind` variants (e.g., `UnitTest`, `Retrieval`, `Analysis`, `Refactor`, `CodeImplementation`).
 - Non-URL attachments (image refs, file refs) and parsing of local files.
 - Checkpointing, cancellation/abort flows, or persistence of planner state.
 - Retries/backoff policies beyond simple log-and-advance on failure.
@@ -278,7 +276,7 @@ See section 11 (Future Work) for planned extensions beyond v1.
 
 ## 11) Future Work
 
-- Expand `NodeKind` as new tools/agents ship (e.g., `Refactor`, `ToolCall`).
+- Expand `NodeKind` as new tools/agents ship (e.g., `UnitTest`, `Retrieval`, `Analysis`, `Refactor`, `CodeImplementation`).
 - Introduce `AttachmentKind` and `Attachment` handling for images and files.
 - Add retry policies with caps/backoff and failure classification.
 - Checkpoint/save/restore planner state and cancellation support.
