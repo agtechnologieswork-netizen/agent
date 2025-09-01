@@ -3,6 +3,8 @@ use chrono::Utc;
 use serde_json;
 use sqlx::SqlitePool;
 
+static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("./migrations/sqlite");
+
 pub struct SqliteStore {
     pool: SqlitePool,
 }
@@ -10,6 +12,10 @@ pub struct SqliteStore {
 impl SqliteStore {
     pub fn new(pool: SqlitePool) -> Self {
         Self { pool }
+    }
+
+    pub async fn migrate(&self) {
+        MIGRATOR.run(&self.pool).await.expect("Migration failed")
     }
 
     fn build_where(query: &Query) -> (String, Vec<String>) {

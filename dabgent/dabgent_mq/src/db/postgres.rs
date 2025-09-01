@@ -3,6 +3,8 @@ use chrono::Utc;
 use serde_json;
 use sqlx::PgPool;
 
+static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("./migrations/postgres");
+
 pub struct PostgresStore {
     pool: PgPool,
 }
@@ -10,6 +12,10 @@ pub struct PostgresStore {
 impl PostgresStore {
     pub fn new(pool: PgPool) -> Self {
         Self { pool }
+    }
+
+    pub async fn migrate(&self) {
+        MIGRATOR.run(&self.pool).await.expect("Migration failed")
     }
 
     fn build_where(query: &Query) -> (String, Vec<String>) {
