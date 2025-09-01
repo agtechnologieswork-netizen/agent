@@ -1,0 +1,3 @@
+[workspace]
+resolver = "3"
+members = [ "dabgent_agent","dabgent_mq"]
