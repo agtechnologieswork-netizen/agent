@@ -32,17 +32,13 @@ pub enum PipelineEvent {
     // (Optional) CheckpointSaved, ToolOutput, etc.
 }
 
-/// Classification for routing & tooling (For Future, Now Simplify)
+/// Classification for routing & tooling (v1 minimal set)
 #[derive(Debug, Clone, Copy)]
 pub enum NodeKind {
     CodeImplementation,
     UnitTest,
-    Refactor,
-    Retrieval,       // fetch URLs, parse files
+    Retrieval,       // fetch URLs, parse
     Analysis,        // analyze inputs, summarize
-    Clarification,   // explicit user Q/A
-    ToolCall,        // shell/script/runner
-    // add more as needed
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -119,7 +115,7 @@ impl PlannerState {
     pub fn plan_tasks(&mut self, input: &str, atts: &[Attachment]) {
         // 1) parse input → steps
         // 2) map steps → NodeKind
-        // 3) attach parsed links/files/images
+        // 3) v1: extract URLs only (files/images deferred)
         // 4) push Task { id: self.alloc_id(), ... }
     }
 
@@ -227,9 +223,7 @@ If ambiguity (e.g., *cookie expiry?*), emit `RequestClarification` and wait.
 
 ## 7) Extensibility
 
-- Add `NodeKind` variants as new tools/agents appear.
-- Swap `plan_tasks` with LLM-backed planner later (keep same `Task` API).
-- Replace `context_summary` with vector-store or long‑term memory when available.
+See section 11 (Future Work) for planned extensions beyond v1.
 
 ---
 
@@ -247,3 +241,29 @@ If ambiguity (e.g., *cookie expiry?*), emit `RequestClarification` and wait.
 - Sequential loop executes tasks; clarification pause/resume works.
 - Context compaction active; final summary emitted.
 - Basic tests passing (unit + one integration path).
+
+---
+
+## 10) Scope: Not Now (v1)
+
+- Advanced `NodeKind` variants (e.g., `Refactor`, `ToolCall`, `Clarification`).
+- Non-URL attachments (image refs, file refs) and parsing of local files.
+- Checkpointing, cancellation/abort flows, or persistence of planner state.
+- Retries/backoff policies beyond simple log-and-advance on failure.
+- Parallel or graph/DAG execution; v1 is strictly sequential.
+- LLM-backed planning; v1 uses deterministic parsing heuristics.
+- Long-term memory/vector store; v1 uses a rolling compact string summary.
+- Rich metrics/telemetry; v1 may include minimal logging only.
+
+---
+
+## 11) Future Work
+
+- Expand `NodeKind` as new tools/agents ship (e.g., `Refactor`, `ToolCall`).
+- Introduce `AttachmentKind` and `Attachment` handling for images and files.
+- Add retry policies with caps/backoff and failure classification.
+- Checkpoint/save/restore planner state and cancellation support.
+- Optional parallelization or partial ordering once executors support it.
+- Replace heuristic `plan_tasks` with an LLM-backed planner (same `Task` API).
+- Upgrade `context_summary` to a vector store or structured memory.
+- Add richer metrics, tracing, and UI affordances for clarifications.
