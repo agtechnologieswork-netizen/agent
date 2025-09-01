@@ -1,9 +1,19 @@
 use std::path::Path;
+use std::sync::OnceLock;
 use anyhow::{Result, anyhow};
 use log::{info, debug};
 use google_sheets4::{Sheets, hyper_rustls};
 use yup_oauth2::{ServiceAccountAuthenticator, ServiceAccountKey};
 use hyper_util::client::legacy::{connect::HttpConnector, Client};
+use regex::Regex;
+
+static SPREADSHEET_ID_REGEX: OnceLock<Regex> = OnceLock::new();
+
+fn get_spreadsheet_id_regex() -> &'static Regex {
+    SPREADSHEET_ID_REGEX.get_or_init(|| {
+        Regex::new(r"/spreadsheets/d/([a-zA-Z0-9-_]+)").unwrap()
+    })
+}
 
 #[derive(Debug)]
 pub struct SpreadsheetData {
@@ -119,8 +129,7 @@ impl GoogleSheetsClient {
     fn extract_spreadsheet_id(&self, url_or_id: &str) -> Result<String> {
         // If it's a URL, extract the ID
         if url_or_id.contains("/spreadsheets/d/") {
-            use regex::Regex;
-            let re = Regex::new(r"/spreadsheets/d/([a-zA-Z0-9-_]+)").unwrap();
+            let re = get_spreadsheet_id_regex();
             if let Some(caps) = re.captures(url_or_id) {
                 return Ok(caps[1].to_string());
             }
