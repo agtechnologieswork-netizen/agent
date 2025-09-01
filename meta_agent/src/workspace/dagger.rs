@@ -90,6 +90,21 @@ impl DaggerWorkspace {
         })
     }
 
+    /// Write multiple files to the container in a single operation to prevent deep query chains
+    async fn write_files_bulk(&mut self, files: Vec<(String, String)>) -> eyre::Result<()> {
+        if files.is_empty() {
+            return Ok(());
+        }
+
+        let mut ctr = self.ctr.clone();
+        for (path, contents) in files {
+            ctr = ctr.with_new_file(path, contents);
+        }
+        
+        self.ctr = ctr;
+        Ok(())
+    }
+
     async fn bash_with_pg_impl(&mut self, cmd: &str) -> eyre::Result<ExecResult> {
         let cmd_args: Vec<String> = cmd.split_whitespace().map(String::from).collect();
         let postgres_service = create_postgres_service(&self.client);
@@ -230,6 +245,15 @@ impl crate::workspace::WorkspaceDyn for DaggerWorkspace {
             Ok(Box::new(forked) as Box<dyn crate::workspace::WorkspaceDyn>)
         })
     }
+    
+    fn write_files_bulk(
+        &mut self,
+        files: Vec<(String, String)>,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = eyre::Result<()>> + Send + Sync + '_>> {
+        Box::pin(async move { 
+            DaggerWorkspace::write_files_bulk(self, files).await 
+        })
+    }
 }
 
 #[cfg(test)]
@@ -283,5 +307,33 @@ mod tests {
             assert_eq!(result.stdout.trim(), i.to_string());
             assert!(result.stderr.is_empty());
         }
+    }
+
+    #[tokio::test]
+    async fn test_bulk_write() {
+        let dagger_ref = DaggerRef::new();
+        let mut workspace = setup_workspace(&dagger_ref).await;
+        
+        // Prepare bulk files (simulate template files scenario)
+        let files = vec![
+            ("file1.txt".to_string(), "content1".to_string()),
+            ("file2.txt".to_string(), "content2".to_string()),
+            ("dir/file3.txt".to_string(), "content3".to_string()),
+            ("dir/file4.txt".to_string(), "content4".to_string()),
+            ("another/deep/file5.txt".to_string(), "content5".to_string()),
+        ];
+        
+        // Write files in bulk
+        workspace.write_files_bulk(files).await.unwrap();
+        
+        // Verify files were written correctly by reading them back
+        let content1 = Workspace::read_file(&mut workspace, ReadFile("file1.txt".to_string())).await.unwrap();
+        assert_eq!(content1, "content1");
+        
+        let content2 = Workspace::read_file(&mut workspace, ReadFile("file2.txt".to_string())).await.unwrap();
+        assert_eq!(content2, "content2");
+        
+        let content5 = Workspace::read_file(&mut workspace, ReadFile("another/deep/file5.txt".to_string())).await.unwrap();
+        assert_eq!(content5, "content5");
     }
 }

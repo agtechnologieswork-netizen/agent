@@ -24,11 +24,40 @@ impl StackConfig for NiceguiStack {
     async fn create_pipeline(&self) -> Result<AgentPipeline> {
         actor::claude_nicegui_pipeline().await
     }
+    
+    fn template_files(&self) -> Result<std::collections::HashMap<String, String>> {
+        Self::read_template_files()
+    }
 }
 
 impl NiceguiStack {
     /// Get the advanced application system prompt for NiceGUI
     pub fn get_advanced_preamble(&self, use_databricks: bool) -> String {
         crate::agent::optimizer::get_application_system_prompt(use_databricks)
+    }
+    
+    /// Get template files from the template directory
+    fn read_template_files() -> eyre::Result<std::collections::HashMap<String, String>> {
+        use std::path::Path;
+        use walkdir::WalkDir;
+        
+        let template_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("src/stacks/nicegui/template");
+        let mut files = std::collections::HashMap::new();
+        
+        for entry in WalkDir::new(&template_dir).into_iter().filter_map(|e| e.ok()) {
+            let path = entry.path();
+            if path.is_file() {
+                let relative_path = path.strip_prefix(&template_dir)
+                    .map_err(|e| eyre::eyre!("Failed to get relative path: {}", e))?;
+                let relative_path_str = relative_path.to_string_lossy().to_string();
+                
+                let content = std::fs::read_to_string(path)
+                    .map_err(|e| eyre::eyre!("Failed to read file {}: {}", path.display(), e))?;
+                
+                files.insert(relative_path_str, content);
+            }
+        }
+        
+        Ok(files)
     }
 }

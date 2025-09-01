@@ -99,16 +99,29 @@ impl AgentActor {
                 let result = match tool {
                     Some(tool) => {
                         let args = call.function.arguments.clone();
+                        tracing::debug!(
+                            "Executing tool: {} with args: {}",
+                            call.function.name,
+                            args
+                        );
                         match tool.call(args, node).await {
-                            Ok(result) => result,
+                            Ok(result) => {
+                                tracing::debug!("Tool {} completed", call.function.name);
+                                result
+                            }
                             Err(e) => {
-                                tracing::warn!("Tool {} failed: {}", call.function.name, e);
+                                tracing::info!(
+                                    "Tool {} call error (will be handled by agent): {}",
+                                    call.function.name,
+                                    e
+                                );
                                 Err(serde_json::json!(e.to_string()))
                             }
                         }
                     }
                     None => {
                         let error = format!("Tool {} not found", call.function.name);
+                        tracing::warn!("{}", error);
                         Err(serde_json::json!(error))
                     }
                 };
@@ -438,7 +451,7 @@ pub async fn claude_nicegui_pipeline() -> Result<AgentPipeline> {
         toolset::EditFileTool,
         node: toolset::FinishTool::new(nicegui_checker),
     ];
-    let search = SearchActor::new().with_limit(30);
+    let search = SearchActor::new().with_limit(60);
     let rollout = AgentActor {
         llm,
         tools: Arc::new(tools),

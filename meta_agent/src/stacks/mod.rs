@@ -56,6 +56,14 @@ impl Stack {
             Stack::Nicegui(s) => s.get_advanced_preamble(use_databricks),
         }
     }
+    
+    /// Get template files that should be included in the initial workspace
+    pub fn template_files(&self) -> Result<std::collections::HashMap<String, String>> {
+        match self {
+            Stack::Python(s) => s.template_files(),
+            Stack::Nicegui(s) => s.template_files(),
+        }
+    }
 }
 
 /// Configuration trait for individual stack types
@@ -64,6 +72,11 @@ pub trait StackConfig {
     fn context_path(&self) -> &'static str;
     fn preamble(&self) -> &'static str;
     fn create_pipeline(&self) -> impl std::future::Future<Output = Result<AgentPipeline>> + Send;
+    
+    /// Get template files that should be included in the initial workspace
+    fn template_files(&self) -> Result<std::collections::HashMap<String, String>> {
+        Ok(std::collections::HashMap::new())
+    }
 }
 
 /// Registry of all available stack configurations

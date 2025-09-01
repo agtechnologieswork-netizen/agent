@@ -44,10 +44,18 @@ impl Tool for BashTool {
         args: Self::Args,
         workspace: &mut Box<dyn WorkspaceDyn>,
     ) -> eyre::Result<Result<Self::Output, Self::Error>> {
+        tracing::debug!("Executing bash command: {}", args.command);
         let result = workspace.bash(&args.command).await?;
         match result.exit_code {
-            0 => Ok(Ok(result.stdout)),
-            _ => Ok(Err(format!("Error:\n{}\n{}", result.stderr, result.stdout))),
+            0 => {
+                tracing::debug!("Bash command succeeded: {}", args.command);
+                Ok(Ok(result.stdout))
+            },
+            _ => {
+                tracing::info!("Bash command returned non-zero exit code {}: {}\nstderr: {}", 
+                    result.exit_code, args.command, result.stderr);
+                Ok(Err(format!("Error:\n{}\n{}", result.stderr, result.stdout)))
+            },
         }
     }
 }
@@ -385,9 +393,16 @@ impl Tool for FinishTool {
         _args: Self::Args,
         workspace: &mut Box<dyn WorkspaceDyn>,
     ) -> eyre::Result<eyre::Result<Self::Output, Self::Error>> {
+        tracing::debug!("Running finish tool checker");
         self.checker.run(workspace).await.map(|value| match value {
-            Some(error) => Err(error),
-            None => Ok("success".to_string()),
+            Some(error) => {
+                tracing::info!("Finish tool validation failed: {:?}", error);
+                Err(error)
+            },
+            None => {
+                tracing::info!("Finish tool validation passed successfully");
+                Ok("success".to_string())
+            },
         })
     }
 }

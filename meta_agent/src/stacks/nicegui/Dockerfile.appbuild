@@ -6,7 +6,9 @@ RUN apt-get update && apt-get install -y \
     postgresql-client \
     curl \
     git \
+    nodejs \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
-RUN uv init
+COPY template/ .
+RUN uv sync
