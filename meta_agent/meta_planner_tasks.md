@@ -50,6 +50,14 @@
 - [ ] Large input test: compaction keeps prompts under limit
   - [ ] Compactor budget respected, no naive truncation
 
+## Milestone F — Context Squeezing Integration
+- [ ] Import shared context squeezing/compactor module
+- [ ] Configure `PlannerConfig` with squeezing profile and budgets
+- [ ] Implement slot weights and preservation rules in compactor setup
+- [ ] Produce `Chunk { text, tags, recency }` on each task completion
+- [ ] Score/de-duplicate chunks and update `context_summary`
+- [ ] Add tests for slotting, preservation, and budget adherence
+
 ## Acceptance Criteria
 - [ ] End-to-end: given input + attachments -> tasks execute sequentially
 - [ ] Clarification pauses and resumes correctly

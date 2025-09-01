@@ -284,3 +284,32 @@ See section 11 (Future Work) for planned extensions beyond v1.
 - Replace heuristic `plan_tasks` with an LLM-backed planner (same `Task` API).
 - Upgrade `context_summary` to a vector store or structured memory.
 - Add richer metrics, tracing, and UI affordances for clarifications.
+
+---
+
+## 12) Context Squeezing Integration (from PR #409)
+
+This planner integrates with the shared context squeezing/compaction pipeline to keep prompts within budget while preserving salient information.
+
+Definitions:
+- Budget: total token/char limit per prompt section.
+- Slots: structured segments that the compactor fills by priority.
+- Preservation rules: always-keep items tagged with high priority.
+- Metadata tags: per-chunk hints (source, recency, type) to aid scoring.
+
+Planner usage:
+- The planner uses a `Compactor` trait to merge `result` into `context_summary` using:
+  - `budget_total`: max size for `context_summary`.
+  - `slot_weights`: map of slots (e.g., summary, decisions, actions, citations) to weights.
+  - `preserve`: list of regexes/ids to always retain (e.g., acceptance criteria, constraints).
+- Each task completion produces a `Chunk { text, tags, recency }` that is scored and inserted.
+- The compactor de-duplicates, scores, and yields a trimmed `context_summary` without naive truncation.
+
+Prompt assembly:
+- Requests constructed as: system_prompt + context_summary + current_task + attachments.
+- For `Clarification` tasks, `context_summary` is squeezed to favor open questions and constraints.
+- For `ToolCall` tasks, the compactor prioritizes recent tool outputs and parameters.
+
+Extensibility:
+- Align slot names and weights with the shared definitions from the squeezing module to ensure consistent behavior across agents.
+- If the squeezing module exposes a global profile (e.g., "coding", "analysis"), `PlannerConfig` can select the profile.
