@@ -87,12 +87,21 @@ pub trait EventStore: Clone + Send + Sync + 'static {
     fn load_events<T: models::Event>(
         &self,
         query: &Query,
-    ) -> impl Future<Output = Result<Vec<T>, Error>> + Send;
+        sequence: Option<i64>,
+    ) -> impl Future<Output = Result<Vec<T>, Error>> + Send {
+        async move {
+            let events = self.load_events_raw(query, sequence).await?;
+            events
+                .into_iter()
+                .map(|row| serde_json::from_value::<T>(row.data).map_err(Error::Serialization))
+                .collect::<Result<Vec<T>, Error>>()
+        }
+    }
 
-    fn poll_new_events(
+    fn load_events_raw(
         &self,
         query: &Query,
-        last_sequence: i64,
+        sequence: Option<i64>,
     ) -> impl Future<Output = Result<Vec<Event>, Error>> + Send;
 
     fn get_watchers(&self) -> &Arc<Mutex<HashMap<Query, Vec<mpsc::UnboundedSender<Event>>>>>;
@@ -106,43 +115,36 @@ pub trait EventStore: Clone + Send + Sync + 'static {
 
         let senders = watchers.entry(query.clone()).or_insert_with(|| {
             let store = self.clone();
-            let query_clone = query.clone();
+            let query = query.clone();
             let watchers_arc = self.get_watchers().clone();
 
             tokio::spawn(async move {
-                tracing::info!(?query_clone, "watcher started");
-                let mut last_seen = 0i64;
+                let mut offset = 0i64;
                 const POLL_INTERVAL: Duration = Duration::from_millis(500);
 
-                'main: loop {
-                    match store.poll_new_events(&query_clone, last_seen).await {
-                        Ok(events) => {
-                            for event in events {
-                                let sequence = event.sequence;
-
-                                let mut watchers = watchers_arc.lock().unwrap();
-                                if let Some(senders) = watchers.get_mut(&query_clone) {
-                                    senders.retain(|sender| sender.send(event.clone()).is_ok());
-
-                                    if senders.is_empty() {
-                                        watchers.remove(&query_clone);
-                                        break 'main;
-                                    }
-                                } else {
-                                    break 'main;
-                                }
-
-                                last_seen = last_seen.max(sequence);
-                            }
-                        }
+                loop {
+                    let events = match store.load_events_raw(&query, Some(offset)).await {
+                        Ok(events) => events,
                         Err(err) => {
-                            tracing::error!(?err, "error polling events");
-                            break 'main;
+                            tracing::error!(?err, "error loading events");
+                            return;
                         }
+                    };
+                    for event in events {
+                        let mut watchers = watchers_arc.lock().unwrap();
+                        match watchers.get_mut(&query) {
+                            Some(senders) => {
+                                senders.retain(|tx| tx.send(event.clone()).is_ok());
+                                if senders.is_empty() {
+                                    watchers.remove(&query);
+                                }
+                            }
+                            None => return,
+                        }
+                        offset = offset.max(event.sequence);
                     }
                     tokio::time::sleep(POLL_INTERVAL).await;
                 }
-                tracing::info!(?query_clone, "watcher stopped");
             });
 
             Vec::new()

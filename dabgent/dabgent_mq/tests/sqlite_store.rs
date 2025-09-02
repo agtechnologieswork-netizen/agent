@@ -47,7 +47,7 @@ async fn test_push_and_load_events() {
     };
 
     let loaded_events: Vec<TestEvent> = store
-        .load_events(&query)
+        .load_events(&query, None)
         .await
         .expect("Failed to load events");
 
@@ -82,7 +82,7 @@ async fn test_load_events_by_aggregate_id() {
     };
 
     let loaded_events: Vec<TestEvent> = store
-        .load_events(&query)
+        .load_events(&query, None)
         .await
         .expect("Failed to load events");
 

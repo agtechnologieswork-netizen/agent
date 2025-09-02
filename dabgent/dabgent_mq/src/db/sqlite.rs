@@ -28,7 +28,7 @@ impl SqliteStore {
         MIGRATOR.run(&self.pool).await.expect("Migration failed")
     }
 
-    fn build_events_query(query: &Query, last_sequence: Option<i64>) -> (String, Vec<String>) {
+    fn build_query(query: &Query, last_sequence: Option<i64>) -> (String, Vec<String>) {
         let mut conditions = vec!["stream_id = ?".to_string()];
         let mut params = vec![query.stream_id.clone()];
 
@@ -54,7 +54,6 @@ impl SqliteStore {
         );
         (sql, params)
     }
-
 }
 
 impl EventStore for SqliteStore {
@@ -102,34 +101,20 @@ impl EventStore for SqliteStore {
         Ok(())
     }
 
-    async fn load_events<T: models::Event>(&self, query: &Query) -> Result<Vec<T>, Error> {
-        let (sql, params) = Self::build_events_query(query, None);
-        let mut sqlx_query = sqlx::query_as::<_, Event>(&sql);
-        for param in params {
-            sqlx_query = sqlx_query.bind(param);
-        }
-
-        let rows = sqlx_query
-            .fetch_all(&self.pool)
-            .await
-            .map_err(Error::Database)?;
-
-        rows.into_iter()
-            .map(|row| serde_json::from_value::<T>(row.data).map_err(Error::Serialization))
-            .collect::<Result<Vec<T>, Error>>()
-    }
-
-    async fn poll_new_events(
+    async fn load_events_raw(
         &self,
         query: &Query,
-        last_sequence: i64,
+        sequence: Option<i64>,
     ) -> Result<Vec<Event>, Error> {
-        let (sql, params) = Self::build_events_query(query, Some(last_sequence));
+        let (sql, params) = Self::build_query(query, sequence);
         let mut sqlx_query = sqlx::query_as::<_, Event>(&sql);
         for param in params.iter() {
             sqlx_query = sqlx_query.bind(param);
         }
-        let events = sqlx_query.fetch_all(&self.pool).await.map_err(Error::Database)?;
+        let events = sqlx_query
+            .fetch_all(&self.pool)
+            .await
+            .map_err(Error::Database)?;
         Ok(events)
     }
 
