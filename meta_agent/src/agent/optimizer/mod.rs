@@ -9,7 +9,6 @@ pub mod toolset;
 pub mod prompts;
 
 const STEP_TEMPLATE: &str = include_str!("./templates/formatter/step.jinja2");
-const INSPIRATIONS_PROMPT: &str = include_str!("./prompts/inspirations.md");
 const DATA_MODEL_SYSTEM_TEMPLATE: &str = include_str!("./templates/prompts/data_model_system.tera");
 const APPLICATION_SYSTEM_TEMPLATE: &str = include_str!("./templates/prompts/application_system.tera");
 const USER_PROMPT_TEMPLATE: &str = include_str!("./templates/prompts/user_prompt.tera");
@@ -504,6 +503,16 @@ pub fn get_user_prompt(project_context: &str, user_prompt: &str, use_databricks:
             tracing::error!("Failed to render user prompt: {}", e);
             "Error rendering prompt".to_string()
         })
+}
+
+/// Python-specific system prompt for general Python development
+pub fn get_python_system_prompt() -> String {
+    format!("{}\n\n# Python Development Guidelines\n\n{}\n\n{}\n\n{}",
+        prompts::CORE_PYTHON_RULES,
+        prompts::NONE_HANDLING_RULES,
+        prompts::BOOLEAN_COMPARISON_RULES,
+        "You are a Python software engineer.\nWorkspace is already set up using uv init.\nUse uv package manager for dependency management.\nProgram will be run using `uv run main.py` command.\nFocus on writing clean, type-safe, and well-tested Python code."
+    )
 }
 
 #[cfg(test)]

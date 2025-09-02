@@ -87,6 +87,9 @@ pub struct CompletionResponse {
     pub choice: rig::OneOrMany<rig::message::AssistantContent>,
     pub finish_reason: FinishReason,
     pub output_tokens: u64,
+    pub input_tokens: u64,
+    pub cache_read_input_tokens: Option<u64>,
+    pub cache_creation_input_tokens: Option<u64>,
 }
 
 impl CompletionResponse {
@@ -140,7 +143,42 @@ impl<T: LLMClient> LLMClientDyn for T {
 impl LLMClient for rig::providers::anthropic::Client {
     async fn completion(&self, completion: Completion) -> eyre::Result<CompletionResponse> {
         let model = self.completion_model(&completion.model);
-        let result = model.completion(completion.into()).await.map(|response| {
+        
+        // Enable caching for system prompt and tools
+        let mut completion_with_cache = completion;
+        let mut additional_params = completion_with_cache.additional_params.unwrap_or_default();
+        
+        // Always cache system prompt
+        if let Some(preamble) = &completion_with_cache.preamble {
+            additional_params["system"] = serde_json::json!([{
+                "type": "text",
+                "text": preamble,
+                "cache_control": {"type": "ephemeral"}
+            }]);
+            completion_with_cache.preamble = None; // Remove from preamble since we're setting it in additional_params
+        }
+        
+        // Always cache tools (add cache_control to last tool)
+        if !completion_with_cache.tools.is_empty() {
+            let mut tools_json: Vec<serde_json::Value> = completion_with_cache.tools.iter().map(|tool| {
+                serde_json::json!({
+                    "name": tool.name,
+                    "description": tool.description,
+                    "input_schema": tool.parameters
+                })
+            }).collect();
+            
+            if let Some(last_tool) = tools_json.last_mut() {
+                last_tool["cache_control"] = serde_json::json!({"type": "ephemeral"});
+            }
+            
+            additional_params["tools"] = serde_json::json!(tools_json);
+            completion_with_cache.tools = Vec::new(); // Remove from tools since we're setting it in additional_params
+        }
+        
+        completion_with_cache.additional_params = Some(additional_params);
+        
+        let result = model.completion(completion_with_cache.into()).await.map(|response| {
             let finish_reason = response.raw_response.stop_reason;
             let finish_reason =
                 finish_reason.map_or(FinishReason::None, |reason| match reason.as_ref() {
@@ -153,6 +191,9 @@ impl LLMClient for rig::providers::anthropic::Client {
                 choice: response.choice,
                 finish_reason,
                 output_tokens: response.raw_response.usage.output_tokens,
+                input_tokens: response.raw_response.usage.input_tokens,
+                cache_read_input_tokens: response.raw_response.usage.cache_read_input_tokens,
+                cache_creation_input_tokens: response.raw_response.usage.cache_creation_input_tokens,
             }
         });
         result.map_err(Into::into)
@@ -170,14 +211,71 @@ impl LLMClient for rig::providers::gemini::Client {
                 gemini_api_types::FinishReason::MaxTokens => FinishReason::MaxTokens,
                 _ => FinishReason::Other(format!("{reason:?}")),
             });
-            let output_tokens = response
-                .raw_response
-                .usage_metadata
+            let usage_metadata = &response.raw_response.usage_metadata;
+            let output_tokens = usage_metadata
+                .as_ref()
                 .map_or(0, |x| x.candidates_token_count as u64);
+            let input_tokens = usage_metadata
+                .as_ref()
+                .map_or(0, |x| x.prompt_token_count as u64);
             CompletionResponse {
                 choice: response.choice,
                 finish_reason,
                 output_tokens,
+                input_tokens,
+                cache_read_input_tokens: None,
+                cache_creation_input_tokens: None,
+            }
+        });
+        result.map_err(Into::into)
+    }
+}
+
+impl LLMClient for rig::providers::openai::Client {
+    async fn completion(&self, completion: Completion) -> eyre::Result<CompletionResponse> {
+        let model = self.completion_model(&completion.model);
+        let result = model.completion(completion.into()).await.map(|response| {
+            // OpenAI uses different structure - let's check what's available
+            let finish_reason = FinishReason::Stop; // TODO: map from actual response
+            let usage = &response.raw_response.usage;
+            let output_tokens = usage
+                .as_ref()
+                .map_or(0, |usage| usage.output_tokens);
+            let input_tokens = usage
+                .as_ref()
+                .map_or(0, |usage| usage.input_tokens);
+            CompletionResponse {
+                choice: response.choice,
+                finish_reason,
+                output_tokens,
+                input_tokens,
+                cache_read_input_tokens: None,
+                cache_creation_input_tokens: None,
+            }
+        });
+        result.map_err(Into::into)
+    }
+}
+
+impl LLMClient for rig::providers::openrouter::Client {
+    async fn completion(&self, completion: Completion) -> eyre::Result<CompletionResponse> {
+        let model = self.completion_model(&completion.model);
+        let result = model.completion(completion.into()).await.map(|response| {
+            let finish_reason = FinishReason::Stop; // TODO: map from actual response
+            let usage = &response.raw_response.usage;
+            let output_tokens = usage
+                .as_ref()
+                .map_or(0, |usage| usage.completion_tokens as u64);
+            let input_tokens = usage
+                .as_ref()
+                .map_or(0, |usage| usage.prompt_tokens as u64);
+            CompletionResponse {
+                choice: response.choice,
+                finish_reason,
+                output_tokens,
+                input_tokens,
+                cache_read_input_tokens: None,
+                cache_creation_input_tokens: None,
             }
         });
         result.map_err(Into::into)
@@ -191,6 +289,7 @@ mod tests {
 
     const ANTHROPIC_MODEL: &str = "claude-sonnet-4-20250514";
     const GEMINI_MODEL: &str = "gemini-2.5-flash";
+    const OPENAI_MODEL: &str = "gpt-4o-mini";
 
     #[tokio::test]
     async fn test_anthropic_text() {
@@ -209,6 +308,32 @@ mod tests {
         let client = rig::providers::gemini::Client::from_env();
         let completion = Completion::new(
             GEMINI_MODEL.to_string(),
+            rig::message::Message::user("say hi"),
+        )
+        .max_tokens(256);
+        let response = LLMClient::completion(&client, completion).await;
+        assert!(response.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_openai_text() {
+        let api_key = std::env::var("OPENAI_API_KEY").expect("OPENAI_API_KEY not set");
+        let client = rig::providers::openai::Client::new(&api_key);
+        let completion = Completion::new(
+            OPENAI_MODEL.to_string(),
+            rig::message::Message::user("say hi"),
+        )
+        .max_tokens(256);
+        let response = LLMClient::completion(&client, completion).await;
+        assert!(response.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_openrouter_text() {
+        let api_key = std::env::var("OPENROUTER_API_KEY").expect("OPENROUTER_API_KEY not set");
+        let client = rig::providers::openrouter::Client::new(&api_key);
+        let completion = Completion::new(
+            "qwen/qwen3-coder".to_string(),
             rig::message::Message::user("say hi"),
         )
         .max_tokens(256);

@@ -1,9 +1,11 @@
 use crate::{
-    agent::{Tool, Checker},
+    agent::{Tool, Checker, utils::compact_error_message},
+    llm::LLMClientDyn,
     workspace::WorkspaceDyn,
 };
 use eyre::Result;
 use serde::Deserialize;
+use std::sync::Arc;
 
 /// Install packages using uv package manager
 #[derive(Clone)]
@@ -254,7 +256,54 @@ impl Tool for AstGrepTool {
 
 /// Composite checker that runs all NiceGUI validation checks
 /// Matches the validation pipeline from the Python version
-pub struct NiceguiChecker;
+pub struct NiceguiChecker {
+    pub llm: Arc<dyn LLMClientDyn>,
+    pub model: String,
+}
+
+impl NiceguiChecker {
+    pub fn new(llm: Arc<dyn LLMClientDyn>, model: String) -> Self {
+        Self { llm, model }
+    }
+
+    async fn compact_error_if_needed(&self, error: &str) -> String {
+        const MAX_ERROR_LENGTH: usize = 4096;
+        
+        if error.len() <= MAX_ERROR_LENGTH {
+            return error.to_string();
+        }
+
+        // Use tokio::task::spawn_blocking to make the async operation sync-compatible
+        let llm = self.llm.clone();
+        let model = self.model.clone();
+        let error_owned = error.to_string();
+        
+        let handle = tokio::task::spawn(async move {
+            compact_error_message(llm.as_ref(), &model, &error_owned, MAX_ERROR_LENGTH).await
+        });
+
+        match handle.await {
+            Ok(Ok(compacted)) => {
+                tracing::info!("Successfully compacted error message from {} to {} characters", error.len(), compacted.len());
+                compacted
+            },
+            Ok(Err(e)) => {
+                tracing::warn!("Failed to compact error message using LLM: {}", e);
+                // Fallback to truncation
+                format!("{}...\n[Error compaction failed, truncated from {} characters]", 
+                    &error[..MAX_ERROR_LENGTH.saturating_sub(100)], 
+                    error.len())
+            },
+            Err(e) => {
+                tracing::warn!("Task spawn failed for error compaction: {}", e);
+                // Fallback to truncation
+                format!("{}...\n[Error compaction task failed, truncated from {} characters]", 
+                    &error[..MAX_ERROR_LENGTH.saturating_sub(100)], 
+                    error.len())
+            }
+        }
+    }
+}
 
 impl Checker for NiceguiChecker {
     async fn run(
@@ -266,31 +315,36 @@ impl Checker for NiceguiChecker {
         // Run lint checks
         let lint_tool = LintTool;
         if let Ok(Err(error)) = lint_tool.call(serde_json::Value::Null, workspace).await {
-            all_errors.push_str(&format!("Lint errors:\n{}\n", error));
+            let compacted_error = self.compact_error_if_needed(&error).await;
+            all_errors.push_str(&format!("Lint errors:\n{}\n", compacted_error));
         }
 
         // Run type checks
         let type_tool = TypeCheckTool;
         if let Ok(Err(error)) = type_tool.call(serde_json::Value::Null, workspace).await {
-            all_errors.push_str(&format!("Type errors:\n{}\n", error));
+            let compacted_error = self.compact_error_if_needed(&error).await;
+            all_errors.push_str(&format!("Type errors:\n{}\n", compacted_error));
         }
 
         // Run tests (with PostgreSQL)
         let test_tool = TestTool;
         if let Ok(Err(error)) = test_tool.call(serde_json::Value::Null, workspace).await {
-            all_errors.push_str(&format!("Test errors:\n{}\n", error));
+            let compacted_error = self.compact_error_if_needed(&error).await;
+            all_errors.push_str(&format!("Test errors:\n{}\n", compacted_error));
         }
 
         // Run SQLModel checks if database.py exists (with PostgreSQL)
         let sqlmodel_tool = SqlModelTool;
         if let Ok(Err(error)) = sqlmodel_tool.call(serde_json::Value::Null, workspace).await {
-            all_errors.push_str(&format!("SQLModel errors:\n{}\n", error));
+            let compacted_error = self.compact_error_if_needed(&error).await;
+            all_errors.push_str(&format!("SQLModel errors:\n{}\n", compacted_error));
         }
 
         // Run ast-grep checks
         let astgrep_tool = AstGrepTool;
         if let Ok(Err(error)) = astgrep_tool.call(serde_json::Value::Null, workspace).await {
-            all_errors.push_str(&format!("Code pattern violations:\n{}\n", error));
+            let compacted_error = self.compact_error_if_needed(&error).await;
+            all_errors.push_str(&format!("Code pattern violations:\n{}\n", compacted_error));
         }
 
         if all_errors.is_empty() {
@@ -298,5 +352,71 @@ impl Checker for NiceguiChecker {
         } else {
             Ok(Some(serde_json::json!({"validation_errors": all_errors.trim()})))
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::llm::{CompletionResponse, FinishReason, LLMClient};
+    use rig::message::AssistantContent;
+    use rig::OneOrMany;
+
+    // Mock LLM client for testing
+    #[derive(Clone)]
+    struct MockLLM;
+
+    impl LLMClient for MockLLM {
+        async fn completion(&self, _completion: crate::llm::Completion) -> eyre::Result<CompletionResponse> {
+            // Return a mock compacted error message
+            let response_text = r#"<error>
+Lint errors:
+    src/main.py:15: F841 Local variable unused
+    src/models.py:23: E302 Expected 2 blank lines
+
+Type errors:
+    src/service.py:45: error: Missing return type annotation
+
+Test failures:
+    AssertionError: Expected 'success' got 'failure'
+    7 failed, 43 passed in 2.1s
+</error>"#;
+            
+            Ok(CompletionResponse {
+                choice: OneOrMany::one(AssistantContent::Text(rig::message::Text { 
+                    text: response_text.to_string() 
+                })),
+                finish_reason: FinishReason::Stop,
+                output_tokens: 150,
+            })
+        }
+    }
+
+    #[tokio::test]
+    async fn test_error_compaction() {
+        let mock_llm = Arc::new(MockLLM);
+        let checker = NiceguiChecker::new(mock_llm, "test-model".to_string());
+        
+        // Create a long error message that should trigger compaction
+        let long_error = "A".repeat(5000); // 5000 characters, longer than 4096 limit
+        
+        let compacted = checker.compact_error_if_needed(&long_error).await;
+        
+        // Should be compacted and contain the mock response
+        assert!(compacted.contains("Lint errors:"));
+        assert!(compacted.contains("Type errors:"));
+        assert!(compacted.len() < long_error.len());
+    }
+
+    #[tokio::test]
+    async fn test_short_error_not_compacted() {
+        let mock_llm = Arc::new(MockLLM);
+        let checker = NiceguiChecker::new(mock_llm, "test-model".to_string());
+        
+        let short_error = "Short error message";
+        let result = checker.compact_error_if_needed(short_error).await;
+        
+        // Should return the original message unchanged
+        assert_eq!(result, short_error);
     }
 }

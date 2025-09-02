@@ -7,6 +7,7 @@ pub mod actor;
 pub mod optimizer;
 pub mod toolset;
 pub mod tree;
+pub mod utils;
 pub use tree::Tree;
 
 pub trait Search<T>: Clone + Send {

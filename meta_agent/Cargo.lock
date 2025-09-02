@@ -1413,12 +1413,14 @@ dependencies = [
  "serde",
  "serde_json",
  "tempdir",
+ "tempfile",
  "tera",
  "thiserror 2.0.16",
  "tokio",
  "tracing",
  "tracing-subscriber",
  "uuid",
+ "walkdir",
 ]
 
 [[package]]

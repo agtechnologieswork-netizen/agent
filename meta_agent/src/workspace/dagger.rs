@@ -10,7 +10,7 @@ fn create_postgres_service(client: &dagger_sdk::DaggerConn) -> dagger_sdk::Servi
         .with_env_variable("POSTGRES_USER", "postgres")
         .with_env_variable("POSTGRES_PASSWORD", "postgres")
         .with_env_variable("POSTGRES_DB", "postgres")
-        .with_env_variable("INSTANCE_ID", &Uuid::new_v4().to_string())
+        .with_env_variable("INSTANCE_ID", Uuid::new_v4().to_string())
         .as_service()
 }
 
@@ -29,10 +29,10 @@ impl DaggerRef {
     pub fn with_verbose(verbose: bool) -> Self {
         let (sender, mut receiver) = mpsc::channel::<oneshot::Sender<dagger_sdk::DaggerConn>>(1);
         tokio::spawn(async move {
-            let logger = if verbose { 
-                dagger_sdk::core::config::Config::default().logger 
-            } else { 
-                None 
+            let logger = if verbose {
+                dagger_sdk::core::config::Config::default().logger
+            } else {
+                None
             };
             let config = dagger_sdk::core::config::Config::new(None, None, None, None, logger);
             let _ = dagger_sdk::connect_opts(config, |client| async move {
@@ -90,17 +90,49 @@ impl DaggerWorkspace {
         })
     }
 
+    /// Write multiple files to the container in a single operation to prevent deep query chains
+    async fn write_files_bulk(&mut self, files: Vec<(String, String)>) -> eyre::Result<()> {
+        if files.is_empty() {
+            return Ok(());
+        }
+
+        // Create a temporary directory to stage all files
+        let temp_dir = tempfile::tempdir()?;
+        let temp_path = temp_dir.path();
+
+        // Write all files to the temporary directory
+        for (file_path, contents) in &files {
+            let full_path = temp_path.join(file_path);
+
+            // Create parent directories if needed
+            if let Some(parent) = full_path.parent() {
+                std::fs::create_dir_all(parent)?;
+            }
+
+            std::fs::write(&full_path, contents)?;
+        }
+
+        // Use with_directory to add all files at once - this prevents deep query chains
+        let host_dir = self.client.host().directory(temp_path.to_string_lossy().to_string());
+        self.ctr = self.ctr.with_directory("/app/", host_dir);
+
+        // Force evaluation to ensure the directory is copied before temp_dir is dropped
+        self.ctr.sync().await?;
+
+        Ok(())
+    }
+
     async fn bash_with_pg_impl(&mut self, cmd: &str) -> eyre::Result<ExecResult> {
         let cmd_args: Vec<String> = cmd.split_whitespace().map(String::from).collect();
         let postgres_service = create_postgres_service(&self.client);
         let ctr = self.ctr.clone();
-        
+
         let (res, ctr) = tokio::spawn(async move {
             let opts = dagger_sdk::ContainerWithExecOptsBuilder::default()
                 .expect(dagger_sdk::ReturnType::Any)
                 .build()
                 .unwrap();
-                
+
             let ctr = ctr
                 .with_exec(vec!["apt-get".to_string(), "update".to_string()])
                 .with_exec(vec!["apt-get".to_string(), "install".to_string(), "-y".to_string(), "postgresql-client".to_string()])
@@ -108,12 +140,15 @@ impl DaggerWorkspace {
                 .with_env_variable("APP_DATABASE_URL", "postgresql://postgres:postgres@postgres:5432/postgres")
                 .with_exec(vec!["sh".to_string(), "-c".to_string(), "while ! pg_isready -h postgres -U postgres; do sleep 1; done".to_string()])
                 .with_exec_opts(cmd_args, opts);
-                
+
             let res = DaggerWorkspace::exec_res(&ctr).await;
             (res, ctr)
         })
-        .await?;
-        
+        .await.map_err(|e| {
+            tracing::error!("PostgreSQL service binding failed - DNS resolution issue likely: {}", e);
+            eyre::eyre!("PostgreSQL execution failed (DNS resolution issue): {}", e)
+        })?;
+
         self.ctr = ctr;
         res
     }
@@ -174,7 +209,7 @@ impl crate::workspace::WorkspaceDyn for DaggerWorkspace {
         let cmd = Bash(cmd.split_whitespace().map(String::from).collect());
         Box::pin(async move { Workspace::bash(self, cmd).await })
     }
-    
+
     fn bash_with_pg(
         &mut self,
         cmd: &str,
@@ -182,7 +217,7 @@ impl crate::workspace::WorkspaceDyn for DaggerWorkspace {
         let cmd = cmd.to_string();
         Box::pin(async move { self.bash_with_pg_impl(&cmd).await })
     }
-    
+
     fn write_file(
         &mut self,
         path: &str,
@@ -194,7 +229,7 @@ impl crate::workspace::WorkspaceDyn for DaggerWorkspace {
         };
         Box::pin(async move { Workspace::write_file(self, cmd).await })
     }
-    
+
     fn read_file(
         &mut self,
         path: &str,
@@ -202,7 +237,7 @@ impl crate::workspace::WorkspaceDyn for DaggerWorkspace {
         let cmd = ReadFile(path.to_string());
         Box::pin(async move { Workspace::read_file(self, cmd).await })
     }
-    
+
     fn ls(
         &mut self,
         path: &str,
@@ -210,7 +245,7 @@ impl crate::workspace::WorkspaceDyn for DaggerWorkspace {
         let cmd = LsDir(path.to_string());
         Box::pin(async move { Workspace::ls(self, cmd).await })
     }
-    
+
     fn rm(
         &mut self,
         path: &str,
@@ -218,13 +253,22 @@ impl crate::workspace::WorkspaceDyn for DaggerWorkspace {
         let cmd = RmFile(path.to_string());
         Box::pin(async move { Workspace::rm(self, cmd).await })
     }
-    
+
     fn fork(
         &self,
     ) -> std::pin::Pin<Box<dyn std::future::Future<Output = eyre::Result<Box<dyn crate::workspace::WorkspaceDyn>>> + Send + Sync + '_>> {
         Box::pin(async move {
             let forked = Workspace::fork(self).await?;
             Ok(Box::new(forked) as Box<dyn crate::workspace::WorkspaceDyn>)
+        })
+    }
+
+    fn write_files_bulk(
+        &mut self,
+        files: Vec<(String, String)>,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = eyre::Result<()>> + Send + '_>> {
+        Box::pin(async move {
+            DaggerWorkspace::write_files_bulk(self, files).await
         })
     }
 }
@@ -280,5 +324,33 @@ mod tests {
             assert_eq!(result.stdout.trim(), i.to_string());
             assert!(result.stderr.is_empty());
         }
+    }
+
+    #[tokio::test]
+    async fn test_bulk_write() {
+        let dagger_ref = DaggerRef::new();
+        let mut workspace = setup_workspace(&dagger_ref).await;
+
+        // Prepare bulk files (simulate template files scenario)
+        let files = vec![
+            ("file1.txt".to_string(), "content1".to_string()),
+            ("file2.txt".to_string(), "content2".to_string()),
+            ("dir/file3.txt".to_string(), "content3".to_string()),
+            ("dir/file4.txt".to_string(), "content4".to_string()),
+            ("another/deep/file5.txt".to_string(), "content5".to_string()),
+        ];
+
+        // Write files in bulk
+        workspace.write_files_bulk(files).await.unwrap();
+
+        // Verify files were written correctly by reading them back
+        let content1 = Workspace::read_file(&mut workspace, ReadFile("file1.txt".to_string())).await.unwrap();
+        assert_eq!(content1, "content1");
+
+        let content2 = Workspace::read_file(&mut workspace, ReadFile("file2.txt".to_string())).await.unwrap();
+        assert_eq!(content2, "content2");
+
+        let content5 = Workspace::read_file(&mut workspace, ReadFile("another/deep/file5.txt".to_string())).await.unwrap();
+        assert_eq!(content5, "content5");
     }
 }

@@ -1,7 +1,7 @@
+use crate::{agent::optimizer, agent::toolset, stacks::nicegui::NiceguiChecker, tools_vec};
 use crate::{
     agent::{
         AgentNode, AgentTool, Checker, Command, Event, NodeTool, Rollout, Search, ToolCallExt, Tree,
-        optimizer,
     },
     llm::{Completion, CompletionResponse, LLMClientDyn},
     workspace::WorkspaceDyn,
@@ -99,16 +99,29 @@ impl AgentActor {
                 let result = match tool {
                     Some(tool) => {
                         let args = call.function.arguments.clone();
+                        tracing::debug!(
+                            "Executing tool: {} with args: {}",
+                            call.function.name,
+                            args
+                        );
                         match tool.call(args, node).await {
-                            Ok(result) => result,
+                            Ok(result) => {
+                                tracing::debug!("Tool {} completed", call.function.name);
+                                result
+                            }
                             Err(e) => {
-                                tracing::warn!("Tool {} failed: {}", call.function.name, e);
+                                tracing::info!(
+                                    "Tool {} call error (will be handled by agent): {}",
+                                    call.function.name,
+                                    e
+                                );
                                 Err(serde_json::json!(e.to_string()))
                             }
                         }
                     }
                     None => {
                         let error = format!("Tool {} not found", call.function.name);
+                        tracing::warn!("{}", error);
                         Err(serde_json::json!(error))
                     }
                 };
@@ -127,6 +140,7 @@ pub struct Trajectory {
     pub message: rig::message::Message,
     pub history: Vec<rig::message::Message>,
     pub workspace: Box<dyn WorkspaceDyn>,
+    pub files: std::collections::HashMap<String, String>,
 }
 
 impl Rollout<Node> for AgentActor {
@@ -135,8 +149,15 @@ impl Rollout<Node> for AgentActor {
     async fn trajectory(&self, root: &Tree<Node>, idx: usize) -> Result<Trajectory> {
         let mut trajectory = root.get_trajectory(idx);
         let mut history = Vec::new();
+        let mut files = std::collections::HashMap::new();
+        
         for idx in trajectory.iter() {
-            history.extend_from_slice(&root.get_node(*idx).history);
+            let node = root.get_node(*idx);
+            history.extend_from_slice(&node.history);
+            // Collect files from all nodes in the trajectory
+            for (path, content) in &node.files {
+                files.insert(path.clone(), content.clone());
+            }
         }
         let message = history.pop().ok_or_eyre("Empty history")?;
         let last_idx = trajectory.pop().unwrap();
@@ -145,6 +166,7 @@ impl Rollout<Node> for AgentActor {
             message,
             history,
             workspace,
+            files,
         })
     }
 
@@ -162,7 +184,7 @@ impl Rollout<Node> for AgentActor {
             history: vec![response.message()],
             workspace: trajectory.workspace,
             metrics: Metrics::default().output_tokens(response.output_tokens),
-            files: std::collections::HashMap::new(),
+            files: trajectory.files,
         };
         let tools = self.run_tools(&response, &mut node).await?;
         let message = match tools {
@@ -373,8 +395,6 @@ impl Checker for PythonChecker {
 }
 
 pub async fn eval_demo_agent() -> Result<()> {
-    use crate::agent::optimizer::{self};
-
     let dagger_ref = crate::workspace::dagger::DaggerRef::new();
     let workspace = dagger_ref
         .workspace("Dockerfile.appbuild".into(), "./src/stacks/python".into())
@@ -402,26 +422,47 @@ pub async fn claude_python_pipeline() -> Result<AgentPipeline> {
     use crate::{agent::toolset, tools_vec};
 
     let client = rig::providers::anthropic::Client::from_env();
-    let preamble = "
-You are a python software engineer.
-Workspace is already set up using uv init.
-Use uv package manager if you need to add extra libraries.
-Program will be run using uv run main.py command.
-"
-    .to_string();
+    // Use advanced Python prompts instead of simple preamble
+    let preamble = crate::agent::optimizer::get_python_system_prompt();
     let model = "claude-sonnet-4-20250514".to_string();
     let tools = tools_vec![
         toolset::BashTool,
-        toolset::WriteFileTool,
+        node: toolset::WriteFileTool,
         toolset::ReadFileTool,
         toolset::LsDirTool,
         toolset::RmFileTool,
-        toolset::EditFileTool,
+        node: toolset::EditFileTool,
         node: toolset::FinishTool::new(PythonChecker),
     ];
     let search = SearchActor::new().with_limit(30);
     let rollout = AgentActor {
         llm: Arc::new(client),
+        tools: Arc::new(tools),
+        model,
+        preamble,
+    };
+    Ok(AgentPipeline { rollout, search })
+}
+
+pub async fn claude_nicegui_pipeline() -> Result<AgentPipeline> {
+    let client = rig::providers::anthropic::Client::from_env();
+    // Use advanced NiceGUI prompts instead of simple preamble
+    let preamble = crate::agent::optimizer::get_application_system_prompt(false);
+    let model = "claude-sonnet-4-20250514".to_string();
+    let llm = Arc::new(client);
+    let nicegui_checker = NiceguiChecker::new(llm.clone(), model.clone());
+
+    let tools = tools_vec![
+        node: toolset::WriteFileTool,
+        toolset::ReadFileTool,
+        toolset::LsDirTool,
+        toolset::RmFileTool,
+        node: toolset::EditFileTool,
+        node: toolset::FinishTool::new(nicegui_checker),
+    ];
+    let search = SearchActor::new().with_limit(60);
+    let rollout = AgentActor {
+        llm,
         tools: Arc::new(tools),
         model,
         preamble,
