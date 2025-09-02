@@ -416,32 +416,78 @@ See section 11 (Future Work) for planned extensions beyond v1.
 
 ---
 
-## 12) Context Squeezing Integration (from PR #409)
+## 12) Context Squeezing Integration
 
-This planner integrates with the shared context squeezing/compaction pipeline to keep prompts within budget while preserving salient information.
+The planner integrates with the LLM-based context compaction utilities from `agent/utils.rs`:
 
-Definitions:
-- Budget: total token/char limit per prompt section.
-- Slots: structured segments that the compactor fills by priority.
-- Preservation rules: always-keep items tagged with high priority.
-- Metadata tags: per-chunk hints (source, recency, type) to aid scoring.
+### Available Compaction Functions
 
-Planner usage:
-- The planner uses a `Compactor` trait to merge `result` into `context_summary` using:
-  - `budget_total`: max size for `context_summary`.
-  - `slot_weights`: map of slots (e.g., summary, decisions, actions, citations) to weights.
-  - `preserve`: list of regexes/ids to always retain (e.g., acceptance criteria, constraints).
-- Each task completion produces a `Chunk { text, tags, recency }` that is scored and inserted.
-- The compactor de-duplicates, scores, and yields a trimmed `context_summary` without naive truncation.
+```rust
+// From meta_agent/src/agent/utils.rs
+pub async fn compact_error_message(
+    llm: &dyn LLMClientDyn,
+    model: &str,
+    error_msg: &str,
+    max_length: usize,
+) -> Result<String>
 
-Prompt assembly:
-- Requests constructed as: system_prompt + context_summary + current_task + attachments.
-- For `Clarification` tasks, `context_summary` is squeezed to favor open questions and constraints.
-- For `ToolCall` tasks, the compactor prioritizes recent tool outputs and parameters.
+pub async fn compact_thread(
+    llm: &dyn LLMClientDyn,
+    model: &str,
+    thread: Vec<Message>,
+    target_tokens: usize,
+) -> Result<Vec<Message>>
+```
 
-Extensibility:
-- Align slot names and weights with the shared definitions from the squeezing module to ensure consistent behavior across agents.
-- If the squeezing module exposes a global profile (e.g., "coding", "analysis"), `PlannerConfig` can select the profile.
+### Integration in Planner
+
+The planner uses these utilities for:
+
+1. **Error Compaction**: When `TaskFailed` events contain verbose error messages
+   - Preserves key error types, file paths, line numbers
+   - Removes stack traces and repeated information
+   - Targets configurable character limit
+
+2. **Thread Compaction**: When conversation history exceeds token budget
+   - Keeps user intent and current generation status
+   - Summarizes or drops code snippets
+   - Preserves essential context for understanding
+
+3. **Context Summary Updates**: After each task completion
+   ```rust
+   async fn compact_context(&mut self, result: &str) -> Result<String> {
+       // Use compact_thread for conversation context
+       let compacted = compact_thread(
+           &self.llm,
+           &self.model,
+           self.state.get_thread(),
+           self.config.token_budget
+       ).await?;
+       
+       // Store reference to compacted context
+       let summary_ref = self.store_summary(compacted).await?;
+       Ok(summary_ref)
+   }
+   ```
+
+### Configuration
+
+```rust
+pub struct PlannerConfig {
+    pub system_prompt: String,
+    pub profile: String,           // "coding", "analysis", etc.
+    pub token_budget: usize,        // Max tokens for context
+    pub error_char_limit: usize,    // Max chars for error messages
+}
+```
+
+### Usage Pattern
+
+1. Each task result triggers compaction check
+2. If context exceeds budget, invoke `compact_thread`
+3. Store compacted version with reference
+4. Emit `ContextCompacted` event with reference
+5. Use compacted context for next task prompt
 
 ---
 

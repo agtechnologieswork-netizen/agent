@@ -98,18 +98,18 @@
   - [ ] Replay from snapshot + subsequent events
 
 ### Milestone 4.2 — Context Compaction
-- [ ] Define `Compactor` trait in `src/compaction/mod.rs`:
-  - [ ] compact() method with budget parameter
-  - [ ] Slot-based prioritization
-- [ ] Implement basic compactor:
-  - [ ] Chunk text into segments
-  - [ ] Score by recency and relevance
-  - [ ] Fit within token budget
-  - [ ] Preserve key information (constraints, decisions)
+- [ ] Import context utilities from `agent/utils.rs`:
+  - [ ] `compact_error_message()` for error reduction
+  - [ ] `compact_thread()` for conversation compaction
+- [ ] Configure compaction parameters:
+  - [ ] Set token_budget in PlannerConfig
+  - [ ] Set error_char_limit for error messages
+  - [ ] Choose compaction profile ("coding", "analysis")
 - [ ] Wire into planner:
-  - [ ] Call after each task completion
-  - [ ] Update context_summary
-  - [ ] Emit ContextCompacted event
+  - [ ] Call `compact_thread()` when context exceeds budget
+  - [ ] Call `compact_error_message()` for TaskFailed events
+  - [ ] Store compacted results with references
+  - [ ] Emit ContextCompacted event with summary_ref
 
 ## Phase 5: Integration & Testing (Week 3)
 
@@ -187,6 +187,7 @@
 - PostgreSQL or SQLite for event store
 - RabbitMQ/Kafka for production (optional for dev)
 - Existing meta_agent codebase
+- Context compaction utilities (already in `meta_agent/src/agent/utils.rs`)
 
 ## Implementation Order
 1. Start with Phase 1 (Foundation) - can be done in parallel
