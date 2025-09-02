@@ -95,7 +95,8 @@ async fn generate(prompt: String, stack: String) -> eyre::Result<()> {
     
     // Find the best solution node (for now, just get any completed node)
     let mut best_node: Option<&meta_agent::agent::actor::Node> = None;
-    for node in solution_tree.get_nodes() {
+    
+    for node in solution_tree.get_nodes().iter() {
         if node.kind == meta_agent::agent::actor::NodeKind::Done && !node.files.is_empty() {
             best_node = Some(node);
             break;
@@ -107,9 +108,22 @@ async fn generate(prompt: String, stack: String) -> eyre::Result<()> {
         
         // Create output directory
         fs::create_dir_all(&output_dir)?;
-        tracing::info!("Created output directory: {}", output_dir);
         
-        // Write all files from the solution
+        // Write template files first
+        let template_files = stack_config.template_files()?;
+        for (file_path, content) in &template_files {
+            let full_path = std::path::Path::new(&output_dir).join(file_path);
+            
+            // Create parent directories if needed
+            if let Some(parent) = full_path.parent() {
+                fs::create_dir_all(parent)?;
+            }
+            
+            fs::write(&full_path, content)?;
+            tracing::info!("Wrote template file: {}", full_path.display());
+        }
+        
+        // Write all files from the solution (may overwrite template files)
         for (file_path, content) in &node.files {
             let full_path = std::path::Path::new(&output_dir).join(file_path);
             
@@ -119,7 +133,7 @@ async fn generate(prompt: String, stack: String) -> eyre::Result<()> {
             }
             
             fs::write(&full_path, content)?;
-            tracing::info!("Wrote file: {}", full_path.display());
+            tracing::info!("Wrote solution file: {}", full_path.display());
         }
         
         tracing::info!("Successfully wrote {} files to {}", node.files.len(), output_dir);

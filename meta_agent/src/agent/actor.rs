@@ -140,6 +140,7 @@ pub struct Trajectory {
     pub message: rig::message::Message,
     pub history: Vec<rig::message::Message>,
     pub workspace: Box<dyn WorkspaceDyn>,
+    pub files: std::collections::HashMap<String, String>,
 }
 
 impl Rollout<Node> for AgentActor {
@@ -148,8 +149,15 @@ impl Rollout<Node> for AgentActor {
     async fn trajectory(&self, root: &Tree<Node>, idx: usize) -> Result<Trajectory> {
         let mut trajectory = root.get_trajectory(idx);
         let mut history = Vec::new();
+        let mut files = std::collections::HashMap::new();
+        
         for idx in trajectory.iter() {
-            history.extend_from_slice(&root.get_node(*idx).history);
+            let node = root.get_node(*idx);
+            history.extend_from_slice(&node.history);
+            // Collect files from all nodes in the trajectory
+            for (path, content) in &node.files {
+                files.insert(path.clone(), content.clone());
+            }
         }
         let message = history.pop().ok_or_eyre("Empty history")?;
         let last_idx = trajectory.pop().unwrap();
@@ -158,6 +166,7 @@ impl Rollout<Node> for AgentActor {
             message,
             history,
             workspace,
+            files,
         })
     }
 
@@ -175,7 +184,7 @@ impl Rollout<Node> for AgentActor {
             history: vec![response.message()],
             workspace: trajectory.workspace,
             metrics: Metrics::default().output_tokens(response.output_tokens),
-            files: std::collections::HashMap::new(),
+            files: trajectory.files,
         };
         let tools = self.run_tools(&response, &mut node).await?;
         let message = match tools {
@@ -418,11 +427,11 @@ pub async fn claude_python_pipeline() -> Result<AgentPipeline> {
     let model = "claude-sonnet-4-20250514".to_string();
     let tools = tools_vec![
         toolset::BashTool,
-        toolset::WriteFileTool,
+        node: toolset::WriteFileTool,
         toolset::ReadFileTool,
         toolset::LsDirTool,
         toolset::RmFileTool,
-        toolset::EditFileTool,
+        node: toolset::EditFileTool,
         node: toolset::FinishTool::new(PythonChecker),
     ];
     let search = SearchActor::new().with_limit(30);
@@ -444,11 +453,11 @@ pub async fn claude_nicegui_pipeline() -> Result<AgentPipeline> {
     let nicegui_checker = NiceguiChecker::new(llm.clone(), model.clone());
 
     let tools = tools_vec![
-        toolset::WriteFileTool,
+        node: toolset::WriteFileTool,
         toolset::ReadFileTool,
         toolset::LsDirTool,
         toolset::RmFileTool,
-        toolset::EditFileTool,
+        node: toolset::EditFileTool,
         node: toolset::FinishTool::new(nicegui_checker),
     ];
     let search = SearchActor::new().with_limit(60);
