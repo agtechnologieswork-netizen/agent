@@ -89,20 +89,27 @@ pub trait EventStore {
         &self,
         query: &Query,
     ) -> Result<mpsc::Receiver<T>, Error> {
-        let event_rx = self.get_or_create_watcher(query);
-        let (tx, rx) = tokio::sync::mpsc::channel(100);
+        let mut event_rx = self.get_or_create_watcher(query);
+        let (tx, rx) = tokio::sync::mpsc::channel(1);
         tokio::spawn(async move {
-            let mut event_rx = event_rx;
+            tracing::info!("subscription forwarding started");
             while let Ok(event) = event_rx.recv().await {
+                tracing::info!(?event.sequence, "subscribe_typed");
                 match serde_json::from_value::<T>(event.data) {
                     Ok(event) => {
-                        let _ = tx.send(event).await;
+                        //let _ = tx.send(event).await;
+                        tracing::info!("forwarding wait");
+                        if let Err(err) = tx.send(event).await {
+                            tracing::error!("Failed to forward event: {}", err);
+                        }
+                        tracing::info!("forwarding done");
                     }
                     Err(err) => {
                         tracing::error!("Failed to deserialize event: {}", err);
                     }
                 }
             }
+            tracing::info!("subscription forwarding stopped");
         });
         Ok(rx)
     }

@@ -13,6 +13,7 @@ static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("./migrations/sqlite")
 pub struct SqliteStore {
     pool: SqlitePool,
     watchers: Arc<Mutex<HashMap<Query, broadcast::WeakSender<Event>>>>,
+    write_lock: Arc<tokio::sync::Mutex<()>>,
 }
 
 impl SqliteStore {
@@ -20,6 +21,7 @@ impl SqliteStore {
         Self {
             pool,
             watchers: Arc::new(Mutex::new(HashMap::new())),
+            write_lock: Arc::new(tokio::sync::Mutex::new(())),
         }
     }
 
@@ -52,14 +54,6 @@ impl SqliteStore {
             where_clause
         );
         (sql, params)
-    }
-
-    fn try_get_watcher(&self, query: &Query) -> Option<broadcast::Receiver<Event>> {
-        self.watchers
-            .lock()
-            .unwrap()
-            .get(query)
-            .and_then(|tx| tx.upgrade().map(|tx| tx.subscribe()))
     }
 
     async fn poll_events(
@@ -95,6 +89,7 @@ impl EventStore for SqliteStore {
         let event_data = serde_json::to_value(event).map_err(Error::Serialization)?;
         let metadata_json = serde_json::to_value(metadata).map_err(Error::Serialization)?;
 
+        let _write_lock = self.write_lock.lock().await;
         let mut tx = self.pool.begin().await.map_err(Error::Database)?;
 
         let next_sequence: i64 = sqlx::query_scalar(
@@ -146,24 +141,27 @@ impl EventStore for SqliteStore {
     }
 
     fn get_or_create_watcher(&self, query: &Query) -> broadcast::Receiver<Event> {
-        if let Some(tx) = self.try_get_watcher(query) {
+        let mut watchers = self.watchers.lock().unwrap();
+        if let Some(tx) = watchers
+            .get(query)
+            .and_then(|tx| tx.upgrade().map(|tx| tx.subscribe()))
+        {
             return tx;
         }
         let pool = self.pool.clone();
         let query = query.clone();
         let (tx, rx) = broadcast::channel(1);
-
-        self.watchers
-            .lock()
-            .unwrap()
-            .insert(query.clone(), tx.downgrade());
+        watchers.insert(query.clone(), tx.downgrade());
 
         tokio::spawn(async move {
+            tracing::info!(?query, "watcher started");
             let mut last_seen = 0i64;
             'main: loop {
                 match Self::poll_events(&pool, &query, last_seen).await {
                     Ok(events) => {
+                        tracing::info!(num_events = events.len(), "fetched events");
                         for event in events {
+                            tracing::info!(?event.sequence, "sending event");
                             let sequence = event.sequence;
                             if let Err(err) = tx.send(event) {
                                 tracing::error!(?err, "error sending event");

@@ -57,14 +57,6 @@ impl PostgresStore {
         (sql, params)
     }
 
-    fn try_get_watcher(&self, query: &Query) -> Option<broadcast::Receiver<Event>> {
-        self.watchers
-            .lock()
-            .unwrap()
-            .get(query)
-            .and_then(|tx| tx.upgrade().map(|tx| tx.subscribe()))
-    }
-
     async fn poll_events(
         pool: &PgPool,
         query: &Query,
@@ -147,19 +139,20 @@ impl EventStore for PostgresStore {
     }
 
     fn get_or_create_watcher(&self, query: &Query) -> broadcast::Receiver<Event> {
-        if let Some(tx) = self.try_get_watcher(query) {
+        let mut watchers = self.watchers.lock().unwrap();
+        if let Some(tx) = watchers
+            .get(query)
+            .and_then(|tx| tx.upgrade().map(|tx| tx.subscribe()))
+        {
             return tx;
         }
         let pool = self.pool.clone();
         let query = query.clone();
         let (tx, rx) = broadcast::channel(1);
-
-        self.watchers
-            .lock()
-            .unwrap()
-            .insert(query.clone(), tx.downgrade());
+        watchers.insert(query.clone(), tx.downgrade());
 
         tokio::spawn(async move {
+            tracing::info!(?query, "watcher started");
             let mut last_seen = 0i64;
             'main: loop {
                 match Self::poll_events(&pool, &query, last_seen).await {
