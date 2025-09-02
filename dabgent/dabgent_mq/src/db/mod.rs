@@ -5,7 +5,7 @@ use chrono::{DateTime, Utc};
 use eyre::Result;
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
-use tokio::sync::mpsc;
+use tokio::sync::{broadcast, mpsc};
 
 #[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
 pub struct Event {
@@ -84,10 +84,28 @@ pub trait EventStore {
         &self,
         query: &Query,
     ) -> impl Future<Output = Result<Vec<T>, Error>> + Send;
+    fn get_or_create_watcher(&self, query: &Query) -> broadcast::Receiver<Event>;
     fn subscribe<T: models::Event + 'static>(
         &self,
         query: &Query,
-    ) -> Result<mpsc::Receiver<T>, Error>;
+    ) -> Result<mpsc::Receiver<T>, Error> {
+        let event_rx = self.get_or_create_watcher(query);
+        let (tx, rx) = tokio::sync::mpsc::channel(100);
+        tokio::spawn(async move {
+            let mut event_rx = event_rx;
+            while let Ok(event) = event_rx.recv().await {
+                match serde_json::from_value::<T>(event.data) {
+                    Ok(event) => {
+                        let _ = tx.send(event).await;
+                    }
+                    Err(err) => {
+                        tracing::error!("Failed to deserialize event: {}", err);
+                    }
+                }
+            }
+        });
+        Ok(rx)
+    }
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -96,6 +114,4 @@ pub enum Error {
     Database(sqlx::Error),
     #[error("Serialization error: {0}")]
     Serialization(serde_json::Error),
-    #[error("Subscription error: {0}")]
-    Subscription(Box<dyn std::error::Error + Send + Sync>),
 }
