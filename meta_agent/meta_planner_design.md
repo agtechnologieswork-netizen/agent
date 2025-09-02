@@ -1,29 +1,100 @@
-# Claude‑Style Planner — Design Doc (meta_agent / meta_draft)
+# Event-Sourced Planner — Implementation Design (meta_agent / meta_draft)
 
-**Goal**: A single-module, compile‑time integrated planner that:
-- Accepts plain text input.
-- (Future) Accepts links, image refs, and file attachments.
-- Produces an ordered list of **text tasks** with attachment metadata.
-- Drives execution via `PlannerCmd` → receives `ExecutorEvent`.
-- Pauses for **user clarification** when needed, then resumes.
-- **Compacts context** between steps to stay within token/memory limits.
-- Runs a simple **sequential loop** until all tasks are done.
+**Goal**: Build an event-sourcing‑first planner/executor system with MQ transport and context compaction.
+
+**Core Capabilities**:
+- Parse plain text input into executable task sequence
+- Execute tasks sequentially via event-driven communication
+- Handle clarification requests with pause/resume semantics
+- Compact context between steps to manage token limits
+- Rebuild state from event log for reliability
+
+**Key Principles**:
+- Event Store as single source of truth
+- All state changes via domain events
+- Idempotent message handling
+- Deterministic replay from events
 
 ---
 
-## 1) Public Interfaces & Data Types
+## 1) Architecture Overview
+
+### Event-Sourced Foundation
+The planner is built on event sourcing from the ground up, following `dabgent_agent` patterns:
+
+**Core Components**:
+1. **Event Store**: Append-only log of all domain events (source of truth)
+2. **Message Bus**: Async communication between planner and executor via MQ
+3. **Outbox Pattern**: Transactional event publishing with retry
+4. **Inbox Pattern**: Deduplication and idempotent message processing
+5. **Projections**: Rebuild read models (PlannerState) from event stream
+
+**Domain Events** (Core to the system):
+```rust
+pub enum PlannerDomainEvent {
+    // Planning events
+    TaskPlanned { task_id: u64, description: String, kind: NodeKind },
+    TasksOrdered { task_ids: Vec<u64> },
+    
+    // Execution events  
+    TaskDispatched { task_id: u64, at: Timestamp },
+    TaskCompleted { task_id: u64, result_ref: String },
+    TaskFailed { task_id: u64, error: String },
+    
+    // Clarification events
+    ClarificationRequested { task_id: u64, question: String },
+    ClarificationReceived { task_id: u64, answer: String },
+    
+    // Context events
+    ContextCompacted { summary_ref: String, budget: usize },
+}
+```
+
+**Message Flow**:
+```
+User Input → plan_tasks() → TaskPlanned events → Event Store
+                                                      ↓
+                                              Outbox → MQ Bus
+                                                      ↓
+Executor consumes → processes → ExecutorEvent → MQ Bus
+                                                      ↓
+                                   Inbox → step() → New Events
+```
+
+**Message Envelope** (All messages on the bus):
+```rust
+pub struct Envelope {
+    pub headers: MessageHeaders {
+        event_type: String,
+        aggregate_id: String,      // planner instance id
+        causation_id: String,       // what caused this event
+        correlation_id: String,     // trace across services
+        message_id: String,         // unique, for dedup
+        timestamp: u64,
+        version: u8,
+    },
+    pub payload: Vec<u8>,          // serialized event
+}
+```
+
+**Routing & Topics**:
+- `planner.cmd.*` - Commands from planner to executor
+- `executor.evt.*` - Events from executor to planner  
+- `ui.evt.*` - Events from UI (clarifications)
+
+## 2) Public Interfaces & Data Types
 
 > Integrate into `meta_draft/src/actors.rs` (or adjacent module). Enums below extend your existing pipeline types.
 
 ```rust
-/// Commands emitted by the planner to the executor.
+/// Commands emitted by the planner to the executor (published to bus).
 pub enum PlannerCmd {
     ExecuteTask { node_id: u64, kind: NodeKind, parameters: String },
     RequestClarification { node_id: u64, question: String },
     // (Optional) Cancel/Abort, SaveCheckpoint, etc.
 }
 
-/// Events received by the planner from the executor/UI.
+/// Events received by the planner from the executor/UI (consumed from bus).
 pub enum ExecutorEvent {
     TaskCompleted { node_id: u64, result: String },
     TaskFailed { node_id: u64, error: String },
@@ -78,18 +149,20 @@ pub struct PlannerState {
 }
 ```
 
-### Planner runtime composition (LLM & Compactor)
+### Planner runtime composition (LLM, Compactor, Event I/O)
 
 ```rust
 pub struct PlannerConfig {
     pub system_prompt: String,
+    pub profile: String, // squeezing profile
 }
 
-pub struct Planner<L: LlmClient, C: Compactor> {
+pub struct Planner<L: LlmClient, C: Compactor, E: EventBus> {
     pub state: PlannerState,
     pub llm: L,
     pub compactor: C,
     pub config: PlannerConfig,
+    pub bus: E,
 }
 ```
 
@@ -98,7 +171,7 @@ pub struct Planner<L: LlmClient, C: Compactor> {
 
 ---
 
-## 2) Control Flow
+## 3) Control Flow
 
 ### Activity (PlantUML)
 ```plantuml
@@ -107,8 +180,8 @@ start
 :Parse input -> Vec<Task>;
 repeat
   :Pick next Planned task;
-  :Emit PlannerCmd.ExecuteTask(node_id, kind, params);
-  -> Wait for ExecutorEvent;
+  :Emit PlannerCmd.ExecuteTask(node_id, kind, params) -> Bus;
+  -> Wait for ExecutorEvent from Bus;
   if (TaskCompleted?) then (yes)
     :Mark Completed;
     :Compact context;
@@ -127,67 +200,123 @@ stop
 @enduml
 ```
 
-### Minimal Pseudocode (single `step` entrypoint)
+### Event-Driven Implementation
 ```rust
-impl PlannerState {
-    pub fn plan_tasks(&mut self, input: &str, atts: &[Attachment]) {
-        // 1) parse input → steps
-        // 2) map steps → NodeKind
-        // 3) v1: extract URLs only (files/images deferred)
-        // 4) push Task { id: self.alloc_id(), ... }
+impl Planner {
+    /// Parse input and emit TaskPlanned events
+    pub async fn plan_tasks(&mut self, input: &str) -> Result<()> {
+        let tasks = parse_input_to_tasks(input)?;
+        
+        for task in tasks {
+            // Emit domain event (persisted to event store)
+            self.emit_event(PlannerDomainEvent::TaskPlanned {
+                task_id: task.id,
+                description: task.description,
+                kind: task.kind,
+            }).await?;
+        }
+        
+        // Emit ordering event
+        self.emit_event(PlannerDomainEvent::TasksOrdered {
+            task_ids: tasks.iter().map(|t| t.id).collect(),
+        }).await?;
+        
+        Ok(())
     }
 
-    /// Single entrypoint handling both incoming events and dispatching next work.
-    pub fn step(&mut self, ctx: &mut Ctx, incoming: Option<ExecutorEvent>) {
+    /// Process events from inbox and emit new events
+    pub async fn step(&mut self, incoming: Option<ExecutorEvent>) -> Result<()> {
+        // Process incoming event and emit domain events
         if let Some(evt) = incoming {
             match evt {
-              ExecutorEvent::TaskCompleted { node_id, result } => {
-                if let Some(t) = self.by_id_mut(node_id) {
-                   t.status = TaskStatus::Completed;
-                   self.compact_with(&result);
-                   self.cursor += 1;
+                ExecutorEvent::TaskCompleted { node_id, result } => {
+                    // Store result externally for large payloads
+                    let result_ref = self.store_result(&result).await?;
+                    
+                    self.emit_event(PlannerDomainEvent::TaskCompleted {
+                        task_id: node_id,
+                        result_ref,
+                    }).await?;
+                    
+                    // Trigger compaction
+                    let summary_ref = self.compact_context(&result).await?;
+                    self.emit_event(PlannerDomainEvent::ContextCompacted {
+                        summary_ref,
+                        budget: self.config.token_budget,
+                    }).await?;
                 }
-              }
-              ExecutorEvent::NeedsClarification { node_id, question } => {
-                if let Some(t) = self.by_id_mut(node_id) {
-                   t.status = TaskStatus::NeedsClarification;
-                   self.waiting_for_clarification = true;
-                   self.pending_clarification_for = Some(node_id);
-                   ctx.emit(PlannerCmd::RequestClarification { node_id, question });
+                
+                ExecutorEvent::NeedsClarification { node_id, question } => {
+                    self.emit_event(PlannerDomainEvent::ClarificationRequested {
+                        task_id: node_id,
+                        question: question.clone(),
+                    }).await?;
+                    
+                    // Publish to UI topic
+                    self.bus.publish("ui.clarification.request", 
+                        PlannerCmd::RequestClarification { node_id, question }
+                    ).await?;
                 }
-              }
-              ExecutorEvent::ClarificationProvided { node_id, answer } => {
-                if let Some(t) = self.by_id_mut(node_id) {
-                   t.status = TaskStatus::Planned;
-                   t.description.push_str(&format!("\nClarification: {}", answer));
-                   self.waiting_for_clarification = false;
-                   self.pending_clarification_for = None;
+                
+                ExecutorEvent::ClarificationProvided { node_id, answer } => {
+                    self.emit_event(PlannerDomainEvent::ClarificationReceived {
+                        task_id: node_id,
+                        answer,
+                    }).await?;
                 }
-              }
-              ExecutorEvent::TaskFailed { node_id: _, error: _ } => {
-                // v1 policy: advance to next
-                self.cursor += 1;
-              }
-              _ => {}
+                
+                ExecutorEvent::TaskFailed { node_id, error } => {
+                    self.emit_event(PlannerDomainEvent::TaskFailed {
+                        task_id: node_id,
+                        error,
+                    }).await?;
+                }
             }
         }
-
-        if self.waiting_for_clarification { return; }
-        if let Some(t) = self.tasks.get_mut(self.cursor) {
-            if t.status == TaskStatus::Planned {
-                t.status = TaskStatus::Running;
-                ctx.emit(PlannerCmd::ExecuteTask {
-                    node_id: t.id, kind: t.kind, parameters: t.description.clone()
-                });
+        
+        // Check if we should dispatch next task
+        if !self.state.waiting_for_clarification {
+            if let Some(next_task_id) = self.get_next_undispatched_task() {
+                // Check idempotency - don't dispatch twice
+                if !self.is_dispatched(next_task_id) {
+                    self.emit_event(PlannerDomainEvent::TaskDispatched {
+                        task_id: next_task_id,
+                        at: Timestamp::now(),
+                    }).await?;
+                    
+                    // Publish command to executor
+                    let task = self.state.get_task(next_task_id)?;
+                    self.bus.publish("executor.task.execute",
+                        PlannerCmd::ExecuteTask {
+                            node_id: task.id,
+                            kind: task.kind,
+                            parameters: task.description,
+                        }
+                    ).await?;
+                }
             }
         }
+        
+        Ok(())
+    }
+    
+    /// Emit event to store and outbox
+    async fn emit_event(&mut self, event: PlannerDomainEvent) -> Result<()> {
+        // Transaction: store event + add to outbox
+        self.event_store.append(event.clone()).await?;
+        self.outbox.add(event).await?;
+        
+        // Update local projection immediately
+        self.state.apply_event(&event);
+        
+        Ok(())
     }
 }
 ```
 
 ---
 
-## 3) Planning & Attachments
+## 4) Planning & Attachments
 
 **Parsing strategy (v1, deterministic):**
 - Normalize input (trim, collapse whitespace), split into candidate steps by:
@@ -206,16 +335,16 @@ impl PlannerState {
 
 ---
 
-## 4) Integration Points
+## 5) Integration Points
 
 - Create `Planner` (with `PlannerState`, LLM, Compactor) inside `actors.rs` (or `planner.rs` re-exported).
 - When new **user input** arrives: build `attachments`, call `plan_tasks`, then call `step(ctx, None)`.
-- Route all `ExecutorEvent` instances to `PlannerState::step(ctx, Some(evt))`.
+- Transport: MQ bus (see §13). `PlannerCmd` is published; `ExecutorEvent` is consumed from the bus and fed to `step(ctx, Some(evt))`.
 - Ensure executor maps `NodeKind` → suitable actor/tool (code agent, test runner, retriever, etc.).
 
 ---
 
-## 5) Error & Clarification Policy
+## 6) Error & Clarification Policy
 
 - **NeedsClarification** pauses the loop; only resume on `ClarificationProvided`.
 - Pause semantics: set `waiting_for_clarification = true` and `pending_clarification_for = Some(node_id)`; `step` returns early until an `ExecutorEvent::ClarificationProvided` is processed for that node.
@@ -224,7 +353,7 @@ impl PlannerState {
 
 ---
 
-## 6) Minimal Example
+## 7) Minimal Example
 
 **Input**: “Add login with session cookies. Use basic auth. Read API spec at https://example.com/spec.pdf. Then write unit tests.”
 
@@ -238,13 +367,13 @@ If ambiguity (e.g., *cookie expiry?*), emit `RequestClarification` and wait.
 
 ---
 
-## 7) Extensibility
+## 8) Extensibility
 
 See section 11 (Future Work) for planned extensions beyond v1.
 
 ---
 
-## 8) Testing
+## 9) Testing
 
 - Unit: parse → tasks mapping; event handling transitions.
 - Integration: scripted sequence (Completed → NeedsClarification → ClarificationProvided → Completed).
@@ -252,7 +381,7 @@ See section 11 (Future Work) for planned extensions beyond v1.
 
 ---
 
-## 9) Definition of Done
+## 10) Definition of Done
 
 - Enums extended; planner compiles and is called on new input.
 - Sequential loop executes tasks; clarification pause/resume works.
@@ -261,7 +390,7 @@ See section 11 (Future Work) for planned extensions beyond v1.
 
 ---
 
-## 10) Scope: Not Now (v1)
+## 11) Scope: Not Now (v1)
 
 - Advanced `NodeKind` variants (e.g., `UnitTest`, `Retrieval`, `Analysis`, `Refactor`, `CodeImplementation`).
 - Non-URL attachments (image refs, file refs) and parsing of local files.
@@ -274,7 +403,7 @@ See section 11 (Future Work) for planned extensions beyond v1.
 
 ---
 
-## 11) Future Work
+## 12) Future Work
 
 - Expand `NodeKind` as new tools/agents ship (e.g., `UnitTest`, `Retrieval`, `Analysis`, `Refactor`, `CodeImplementation`).
 - Introduce `AttachmentKind` and `Attachment` handling for images and files.
@@ -313,3 +442,7 @@ Prompt assembly:
 Extensibility:
 - Align slot names and weights with the shared definitions from the squeezing module to ensure consistent behavior across agents.
 - If the squeezing module exposes a global profile (e.g., "coding", "analysis"), `PlannerConfig` can select the profile.
+
+---
+
+
