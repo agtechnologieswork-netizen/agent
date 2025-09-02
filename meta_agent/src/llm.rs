@@ -184,6 +184,45 @@ impl LLMClient for rig::providers::gemini::Client {
     }
 }
 
+impl LLMClient for rig::providers::openai::Client {
+    async fn completion(&self, completion: Completion) -> eyre::Result<CompletionResponse> {
+        let model = self.completion_model(&completion.model);
+        let result = model.completion(completion.into()).await.map(|response| {
+            // OpenAI uses different structure - let's check what's available
+            let finish_reason = FinishReason::Stop; // TODO: map from actual response
+            let output_tokens = response
+                .raw_response
+                .usage
+                .map_or(0, |usage| usage.output_tokens);
+            CompletionResponse {
+                choice: response.choice,
+                finish_reason,
+                output_tokens,
+            }
+        });
+        result.map_err(Into::into)
+    }
+}
+
+impl LLMClient for rig::providers::openrouter::Client {
+    async fn completion(&self, completion: Completion) -> eyre::Result<CompletionResponse> {
+        let model = self.completion_model(&completion.model);
+        let result = model.completion(completion.into()).await.map(|response| {
+            let finish_reason = FinishReason::Stop; // TODO: map from actual response
+            let output_tokens = response
+                .raw_response
+                .usage
+                .map_or(0, |usage| usage.completion_tokens as u64);
+            CompletionResponse {
+                choice: response.choice,
+                finish_reason,
+                output_tokens,
+            }
+        });
+        result.map_err(Into::into)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -191,6 +230,7 @@ mod tests {
 
     const ANTHROPIC_MODEL: &str = "claude-sonnet-4-20250514";
     const GEMINI_MODEL: &str = "gemini-2.5-flash";
+    const OPENAI_MODEL: &str = "gpt-4o-mini";
 
     #[tokio::test]
     async fn test_anthropic_text() {
@@ -209,6 +249,32 @@ mod tests {
         let client = rig::providers::gemini::Client::from_env();
         let completion = Completion::new(
             GEMINI_MODEL.to_string(),
+            rig::message::Message::user("say hi"),
+        )
+        .max_tokens(256);
+        let response = LLMClient::completion(&client, completion).await;
+        assert!(response.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_openai_text() {
+        let api_key = std::env::var("OPENAI_API_KEY").expect("OPENAI_API_KEY not set");
+        let client = rig::providers::openai::Client::new(&api_key);
+        let completion = Completion::new(
+            OPENAI_MODEL.to_string(),
+            rig::message::Message::user("say hi"),
+        )
+        .max_tokens(256);
+        let response = LLMClient::completion(&client, completion).await;
+        assert!(response.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_openrouter_text() {
+        let api_key = std::env::var("OPENROUTER_API_KEY").expect("OPENROUTER_API_KEY not set");
+        let client = rig::providers::openrouter::Client::new(&api_key);
+        let completion = Completion::new(
+            "qwen/qwen3-coder".to_string(),
             rig::message::Message::user("say hi"),
         )
         .max_tokens(256);
