@@ -5,7 +5,10 @@ use chrono::{DateTime, Utc};
 use eyre::Result;
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
-use tokio::sync::{broadcast, mpsc};
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
+use tokio::sync::mpsc;
 
 #[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
 pub struct Event {
@@ -72,7 +75,7 @@ pub struct Query {
     pub aggregate_id: Option<String>,
 }
 
-pub trait EventStore {
+pub trait EventStore: Clone + Send + Sync + 'static {
     fn push_event<T: models::Event>(
         &self,
         stream_id: &str,
@@ -80,38 +83,98 @@ pub trait EventStore {
         event: &T,
         metadata: &Metadata,
     ) -> impl Future<Output = Result<(), Error>> + Send;
+
     fn load_events<T: models::Event>(
         &self,
         query: &Query,
     ) -> impl Future<Output = Result<Vec<T>, Error>> + Send;
-    fn get_or_create_watcher(&self, query: &Query) -> broadcast::Receiver<Event>;
+
+    fn poll_new_events(
+        &self,
+        query: &Query,
+        last_sequence: i64,
+    ) -> impl Future<Output = Result<Vec<Event>, Error>> + Send;
+
+    fn get_watchers(&self) -> &Arc<Mutex<HashMap<Query, Vec<mpsc::UnboundedSender<Event>>>>>;
+
     fn subscribe<T: models::Event + 'static>(
         &self,
         query: &Query,
-    ) -> Result<mpsc::Receiver<T>, Error> {
-        let mut event_rx = self.get_or_create_watcher(query);
-        let (tx, rx) = tokio::sync::mpsc::channel(1);
-        tokio::spawn(async move {
-            tracing::info!("subscription forwarding started");
-            while let Ok(event) = event_rx.recv().await {
-                tracing::info!(?event.sequence, "subscribe_typed");
-                match serde_json::from_value::<T>(event.data) {
-                    Ok(event) => {
-                        //let _ = tx.send(event).await;
-                        tracing::info!("forwarding wait");
-                        if let Err(err) = tx.send(event).await {
-                            tracing::error!("Failed to forward event: {}", err);
+    ) -> Result<EventStream<T>, Error> {
+        let mut watchers = self.get_watchers().lock().unwrap();
+        let (event_tx, event_rx) = mpsc::unbounded_channel();
+
+        let senders = watchers.entry(query.clone()).or_insert_with(|| {
+            let store = self.clone();
+            let query_clone = query.clone();
+            let watchers_arc = self.get_watchers().clone();
+
+            tokio::spawn(async move {
+                tracing::info!(?query_clone, "watcher started");
+                let mut last_seen = 0i64;
+                const POLL_INTERVAL: Duration = Duration::from_millis(500);
+
+                'main: loop {
+                    match store.poll_new_events(&query_clone, last_seen).await {
+                        Ok(events) => {
+                            for event in events {
+                                let sequence = event.sequence;
+
+                                let mut watchers = watchers_arc.lock().unwrap();
+                                if let Some(senders) = watchers.get_mut(&query_clone) {
+                                    senders.retain(|sender| sender.send(event.clone()).is_ok());
+
+                                    if senders.is_empty() {
+                                        watchers.remove(&query_clone);
+                                        break 'main;
+                                    }
+                                } else {
+                                    break 'main;
+                                }
+
+                                last_seen = last_seen.max(sequence);
+                            }
                         }
-                        tracing::info!("forwarding done");
+                        Err(err) => {
+                            tracing::error!(?err, "error polling events");
+                            break 'main;
+                        }
                     }
-                    Err(err) => {
-                        tracing::error!("Failed to deserialize event: {}", err);
-                    }
+                    tokio::time::sleep(POLL_INTERVAL).await;
                 }
-            }
-            tracing::info!("subscription forwarding stopped");
+                tracing::info!(?query_clone, "watcher stopped");
+            });
+
+            Vec::new()
         });
-        Ok(rx)
+
+        senders.push(event_tx);
+
+        Ok(EventStream::new(event_rx))
+    }
+}
+
+pub struct EventStream<T: models::Event> {
+    rx: mpsc::UnboundedReceiver<Event>,
+    _marker: std::marker::PhantomData<T>,
+}
+
+impl<T: models::Event> EventStream<T> {
+    pub fn new(rx: mpsc::UnboundedReceiver<Event>) -> Self {
+        Self {
+            rx,
+            _marker: std::marker::PhantomData,
+        }
+    }
+
+    pub async fn next(&mut self) -> Option<Result<T, Error>> {
+        match self.rx.recv().await {
+            Some(event) => match serde_json::from_value::<T>(event.data) {
+                Ok(typed_event) => Some(Ok(typed_event)),
+                Err(err) => Some(Err(Error::Serialization(err))),
+            },
+            None => None,
+        }
     }
 }
 

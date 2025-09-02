@@ -13,15 +13,6 @@ async fn main() -> eyre::Result<()> {
 }
 
 async fn store() -> SqliteStore {
-    // let opts = SqliteConnectOptions::from_str("sqlite:dummy.db")
-    //     .unwrap()
-    //     .journal_mode(SqliteJournalMode::Wal)
-    //     .synchronous(SqliteSynchronous::Normal)
-    //     .locking_mode(SqliteLockingMode::Normal)
-    //     .create_if_missing(true);
-    // let pool = SqlitePool::connect_with(opts)
-    //     .await
-    //     .expect("Failed to create in-memory SQLite pool");
     let pool = SqlitePool::connect("sqlite::memory:")
         .await
         .expect("Failed to create in-memory SQLite pool");
@@ -61,7 +52,7 @@ async fn test_pub_sub() {
     const AGGREGATE_ID: &str = "bench";
 
     let store = store().await;
-    let barrier = Arc::new(Barrier::new(NUM_PUBLISHERS + NUM_SUBSCRIBERS + 1));
+    let barrier = Arc::new(Barrier::new(NUM_PUBLISHERS + NUM_SUBSCRIBERS));
     for pub_id in 0..NUM_PUBLISHERS {
         let store = store.clone();
         let barrier = barrier.clone();
@@ -92,9 +83,14 @@ async fn test_pub_sub() {
             let mut stream = store.subscribe::<BenchEvent>(&query).unwrap();
             tracing::info!("Subscriber {} started", sub_id);
             let mut count = 0;
-            while let Some(event) = stream.recv().await {
+            while let Some(event) = stream.next().await {
                 count += 1;
-                tracing::info!("Subscriber {} received event #{}: {:?}", sub_id, count, event);
+                tracing::info!(
+                    "Subscriber {} received event #{}: {:?}",
+                    sub_id,
+                    count,
+                    event
+                );
             }
             tracing::info!("Subscriber {} finished", sub_id);
             barrier.wait().await;

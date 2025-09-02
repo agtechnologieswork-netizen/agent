@@ -113,10 +113,11 @@ async fn test_subscription() {
         .await
         .expect("Failed to push event");
 
-    let received = tokio::time::timeout(tokio::time::Duration::from_secs(2), receiver.recv())
+    let received = tokio::time::timeout(tokio::time::Duration::from_secs(2), receiver.next())
         .await
         .expect("Timeout waiting for event")
-        .expect("Failed to receive event");
+        .expect("Failed to receive event")
+        .expect("Failed to deserialize event");
 
     assert_eq!(received, event1);
 }
@@ -150,15 +151,17 @@ async fn test_multiple_subscribers() {
         .expect("Failed to push event");
 
     // Both receivers should get the event
-    let received1 = tokio::time::timeout(tokio::time::Duration::from_secs(2), receiver1.recv())
+    let received1 = tokio::time::timeout(tokio::time::Duration::from_secs(2), receiver1.next())
         .await
         .expect("Timeout waiting for event on receiver1")
-        .expect("Failed to receive event on receiver1");
+        .expect("Failed to receive event on receiver1")
+        .expect("Failed to deserialize event on receiver1");
 
-    let received2 = tokio::time::timeout(tokio::time::Duration::from_secs(2), receiver2.recv())
+    let received2 = tokio::time::timeout(tokio::time::Duration::from_secs(2), receiver2.next())
         .await
         .expect("Timeout waiting for event on receiver2")
-        .expect("Failed to receive event on receiver2");
+        .expect("Failed to receive event on receiver2")
+        .expect("Failed to deserialize event on receiver2");
 
     assert_eq!(received1, event);
     assert_eq!(received2, event);

@@ -4,15 +4,14 @@ use serde_json;
 use sqlx::SqlitePool;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
-use tokio::sync::broadcast;
+use tokio::sync::mpsc;
 
 static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("./migrations/sqlite");
 
 #[derive(Clone)]
 pub struct SqliteStore {
     pool: SqlitePool,
-    watchers: Arc<Mutex<HashMap<Query, broadcast::WeakSender<Event>>>>,
+    watchers: Arc<Mutex<HashMap<Query, Vec<mpsc::UnboundedSender<Event>>>>>,
     write_lock: Arc<tokio::sync::Mutex<()>>,
 }
 
@@ -56,26 +55,6 @@ impl SqliteStore {
         (sql, params)
     }
 
-    async fn poll_events(
-        pool: &SqlitePool,
-        query: &Query,
-        last_sequence: i64,
-    ) -> Result<Vec<Event>, Error> {
-        const POLL_INTERVAL: Duration = Duration::from_millis(500);
-
-        let (sql, params) = Self::build_events_query(query, Some(last_sequence));
-        loop {
-            let mut sqlx_query = sqlx::query_as::<_, Event>(&sql);
-            for param in params.iter() {
-                sqlx_query = sqlx_query.bind(param);
-            }
-            let events = sqlx_query.fetch_all(pool).await.map_err(Error::Database)?;
-            if !events.is_empty() {
-                return Ok(events);
-            }
-            tokio::time::sleep(POLL_INTERVAL).await;
-        }
-    }
 }
 
 impl EventStore for SqliteStore {
@@ -140,44 +119,21 @@ impl EventStore for SqliteStore {
             .collect::<Result<Vec<T>, Error>>()
     }
 
-    fn get_or_create_watcher(&self, query: &Query) -> broadcast::Receiver<Event> {
-        let mut watchers = self.watchers.lock().unwrap();
-        if let Some(tx) = watchers
-            .get(query)
-            .and_then(|tx| tx.upgrade().map(|tx| tx.subscribe()))
-        {
-            return tx;
+    async fn poll_new_events(
+        &self,
+        query: &Query,
+        last_sequence: i64,
+    ) -> Result<Vec<Event>, Error> {
+        let (sql, params) = Self::build_events_query(query, Some(last_sequence));
+        let mut sqlx_query = sqlx::query_as::<_, Event>(&sql);
+        for param in params.iter() {
+            sqlx_query = sqlx_query.bind(param);
         }
-        let pool = self.pool.clone();
-        let query = query.clone();
-        let (tx, rx) = broadcast::channel(1);
-        watchers.insert(query.clone(), tx.downgrade());
+        let events = sqlx_query.fetch_all(&self.pool).await.map_err(Error::Database)?;
+        Ok(events)
+    }
 
-        tokio::spawn(async move {
-            tracing::info!(?query, "watcher started");
-            let mut last_seen = 0i64;
-            'main: loop {
-                match Self::poll_events(&pool, &query, last_seen).await {
-                    Ok(events) => {
-                        tracing::info!(num_events = events.len(), "fetched events");
-                        for event in events {
-                            tracing::info!(?event.sequence, "sending event");
-                            let sequence = event.sequence;
-                            if let Err(err) = tx.send(event) {
-                                tracing::error!(?err, "error sending event");
-                                break 'main;
-                            }
-                            last_seen = last_seen.max(sequence);
-                        }
-                    }
-                    Err(err) => {
-                        tracing::error!(?err, "error polling events");
-                        break 'main;
-                    }
-                }
-            }
-            tracing::info!(?query, "watcher stopped");
-        });
-        rx
+    fn get_watchers(&self) -> &Arc<Mutex<HashMap<Query, Vec<mpsc::UnboundedSender<Event>>>>> {
+        &self.watchers
     }
 }
