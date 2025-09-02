@@ -1,271 +1,255 @@
-# DabGent MQ - Efficient Message Queue for Rust
+# DabGent MQ
 
-A high-performance, database-backed message queue implementation for Rust that seamlessly supports both SQLite and PostgreSQL. Designed for use as an in-process message bus with support for topics, streams, and JSON payloads up to 1MB in size.
+A lean event sourcing library for Rust, supporting both PostgreSQL and SQLite backends with real-time event streaming capabilities.
 
 ## Features
 
-- **Dual Database Support**: Seamlessly switch between SQLite and PostgreSQL
-- **Topic-Based Routing**: Publish and subscribe to specific topics with wildcard support
-- **Stream Processing**: Efficient message streaming with offset tracking
-- **Priority Queues**: Support for message priorities
-- **At-Least-Once Delivery**: Reliable message delivery with acknowledgment
-- **Consumer Groups**: Multiple consumers with automatic load balancing
-- **Large Payloads**: Support for JSON payloads up to 1MB
-- **Async/Await**: Full async support with Tokio runtime
-- **Performance Optimized**: 
-  - Connection pooling
-  - Prepared statements
-  - Batch operations
-  - Database-specific optimizations
-
-## Installation
-
-Add to your `Cargo.toml`:
-
-```toml
-[dependencies]
-dabgent_mq = "0.1.0"
-```
+- **Dual Database Support**: PostgreSQL and SQLite implementations
+- **Event Sourcing**: Store and replay events with full audit trails
+- **Real-time Subscriptions**: Subscribe to event streams with automatic polling
+- **Type Safety**: Strongly typed events with compile-time guarantees
+- **Metadata Support**: Rich event metadata with correlation and causation tracking
+- **Concurrent Safe**: Built with Tokio for async/await and thread safety
 
 ## Quick Start
 
+### 1. Define Your Events
+
 ```rust
-use dabgent_mq::{DatabaseType, MessageQueue};
-use serde_json::json;
+use dabgent_mq::models::Event;
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct UserCreated {
+    pub user_id: String,
+    pub email: String,
+    pub name: String,
+}
+
+impl Event for UserCreated {
+    const EVENT_VERSION: &'static str = "1.0";
+
+    fn event_type() -> &'static str {
+        "UserCreated"
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct UserUpdated {
+    pub user_id: String,
+    pub email: Option<String>,
+    pub name: Option<String>,
+}
+
+impl Event for UserUpdated {
+    const EVENT_VERSION: &'static str = "1.0";
+
+    fn event_type() -> &'static str {
+        "UserUpdated"
+    }
+}
+```
+
+### 2. Setup Database Connection
+
+#### PostgreSQL
+
+```rust
+use dabgent_mq::db::{postgres::PostgresStore, EventStore};
+use sqlx::PgPool;
 
 #[tokio::main]
-async fn main() -> dabgent_mq::Result<()> {
-    // Initialize with SQLite
-    let queue = MessageQueue::new(
-        DatabaseType::Sqlite,
-        "sqlite://messages.db"
-    ).await?;
-    
-    // Or with PostgreSQL
-    // let queue = MessageQueue::new(
-    //     DatabaseType::Postgres,
-    //     "postgres://user:pass@localhost/mydb"
-    // ).await?;
-    
-    // Create a stream
-    queue.create_stream("orders").await?;
-    
-    // Publish a message
-    let msg_id = queue.publish(
-        "orders",
-        "order.created",
-        json!({
-            "order_id": "12345",
-            "amount": 99.99
-        })
-    ).await?;
-    
-    // Subscribe and consume
-    let mut subscriber = queue.subscribe(
-        "orders", 
-        vec!["order.*".to_string()]
-    ).await?;
-    
-    let messages = subscriber.poll().await?;
-    for msg in messages {
-        println!("Received: {:?}", msg);
-        subscriber.ack(msg.id).await?;
-    }
-    
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let pool = PgPool::connect("postgresql://user:pass@localhost/events").await?;
+    let store = PostgresStore::new(pool);
+
+    // Run migrations
+    store.migrate().await;
+
+    // Use the store...
     Ok(())
 }
 ```
 
-## Architecture
-
-### Database Schema
-
-The system uses three main tables:
-
-1. **messages**: Core message storage with indexing for efficient queries
-   - Composite indexes on (stream_id, created_at, consumed_at)
-   - Partial indexes for unconsumed messages
-   - Priority-based ordering support
-
-2. **streams**: Stream metadata and configuration
-   - Tracks last offset for replay
-   - Stores stream-specific configuration
-
-3. **consumers**: Active consumer tracking
-   - Heartbeat mechanism for liveness
-   - Offset tracking per consumer
-
-### Database-Specific Optimizations
-
-**PostgreSQL:**
-- `SKIP LOCKED` for concurrent consumer support
-- `NOTIFY/LISTEN` for real-time updates
-- JSONB for efficient JSON queries
-- Native batch insert with `UNNEST`
-
-**SQLite:**
-- WAL mode for concurrent reads
-- Row-level locking strategy
-- Optimized transaction batching
-- TEXT storage with JSON parsing
-
-## Usage Examples
-
-### Publishing with Priority
+#### SQLite
 
 ```rust
-// High-priority message
-queue.publish_with_priority(
-    "notifications",
-    "alert.critical",
-    json!({"message": "System down!"}),
-    10  // Higher priority
+use dabgent_mq::db::{sqlite::SqliteStore, EventStore};
+use sqlx::SqlitePool;
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let pool = SqlitePool::connect("sqlite:events.db").await?;
+    let store = SqliteStore::new(pool);
+
+    // Run migrations
+    store.migrate().await;
+
+    // Use the store...
+    Ok(())
+}
+```
+
+### 3. Store Events
+
+```rust
+use dabgent_mq::db::Metadata;
+use uuid::Uuid;
+
+// Create metadata
+let metadata = Metadata::default()
+    .with_correlation_id(Uuid::new_v4())
+    .with_causation_id(Uuid::new_v4());
+
+// Create and store an event
+let event = UserCreated {
+    user_id: "user-123".to_string(),
+    email: "user@example.com".to_string(),
+    name: "John Doe".to_string(),
+};
+
+store.push_event(
+    "user-stream",      // stream_id
+    "user-123",         // aggregate_id
+    &event,
+    &metadata,
 ).await?;
 ```
 
-### Batch Publishing
+### 4. Load Events
 
 ```rust
-use dabgent_mq::Message;
+use dabgent_mq::db::Query;
 
-let messages = vec![
-    Message::new("events", "user.login", json!({"user_id": 1})),
-    Message::new("events", "user.logout", json!({"user_id": 2})),
-];
+// Query for all events in a stream
+let query = Query {
+    stream_id: "user-stream".to_string(),
+    event_type: None,
+    aggregate_id: None,
+};
 
-let ids = queue.publish_batch(messages).await?;
+let events: Vec<UserCreated> = store.load_events(&query).await?;
+
+// Query for specific event type
+let query = Query {
+    stream_id: "user-stream".to_string(),
+    event_type: Some("UserCreated".to_string()),
+    aggregate_id: Some("user-123".to_string()),
+};
+
+let user_events: Vec<UserCreated> = store.load_events(&query).await?;
 ```
 
-### Stream-Based Subscription
+### 5. Real-time Subscriptions
 
 ```rust
-use futures::StreamExt;
+// Subscribe to events in real-time
+let query = Query {
+    stream_id: "user-stream".to_string(),
+    event_type: Some("UserCreated".to_string()),
+    aggregate_id: None,
+};
 
-let subscriber = queue.subscribe("events", vec!["user.*".to_string()]).await?;
-let mut stream = subscriber.into_stream();
+let mut subscription = store.subscribe::<UserCreated>(&query)?;
 
-while let Some(message) = stream.next().await {
-    process_message(message).await;
+// Process events as they arrive
+tokio::spawn(async move {
+    while let Some(event) = subscription.recv().await {
+        println!("Received event: {:?}", event);
+    }
+});
+```
+
+## Advanced Usage
+
+### Event Replay and Projections
+
+```rust
+// Load all events for an aggregate and build a projection
+let query = Query {
+    stream_id: "my-stream".to_string(),
+    event_type: None,
+    aggregate_id: Some("entity-123".to_string()),
+};
+
+// Load different event types
+let events: Vec<MyEvent> = store.load_events(&query).await?;
+
+// Build user projection
+let mut user_projection = UserProjection::new();
+for event in created_events {
+    user_projection.apply_created(event);
+}
+for event in updated_events {
+    user_projection.apply_updated(event);
 }
 ```
 
-### Message Replay
+### Multiple Subscribers
 
 ```rust
-// Replay from beginning
-let mut replay = queue.stream("events")
-    .from_offset(0)
-    .batch_size(100)
-    .build();
+// Multiple processes can subscribe to the same stream
+let query = Query {
+    stream_id: "user-stream".to_string(),
+    event_type: None,
+    aggregate_id: None,
+};
 
-while let Some(msg) = replay.next().await {
-    println!("Replaying: {:?}", msg);
-}
+// Subscriber 1: Audit log
+let mut audit_sub = store.subscribe::<UserCreated>(&query)?;
+tokio::spawn(async move {
+    while let Some(event) = audit_sub.recv().await {
+        log_to_audit_system(event).await;
+    }
+});
+
+// Subscriber 2: Email notifications
+let mut email_sub = store.subscribe::<UserCreated>(&query)?;
+tokio::spawn(async move {
+    while let Some(event) = email_sub.recv().await {
+        send_welcome_email(event.email).await;
+    }
+});
 ```
 
-### Topic Patterns
-
-The queue supports flexible topic matching:
-
-- `*` - Matches all topics
-- `order.*` - Matches `order.created`, `order.updated`, etc.
-- `*.created` - Matches `order.created`, `user.created`, etc.
-- Exact matches: `order.created`
-
-### Consumer Management
+### Custom Metadata
 
 ```rust
-// Register custom consumer
-use dabgent_mq::{Consumer, SubscribeOptions};
+use serde_json::json;
 
-let options = SubscribeOptions::new("orders")
-    .consumer_id("worker-1")
-    .topics(vec!["order.created".to_string()])
-    .batch_size(50)
-    .from_offset(1000);
+let metadata = Metadata::new(
+    Some(Uuid::new_v4()),  // correlation_id
+    Some(Uuid::new_v4()),  // causation_id
+    Some(json!({           // custom metadata
+        "user_agent": "MyApp/1.0",
+        "ip_address": "192.168.1.1",
+        "trace_id": "abc123"
+    }))
+);
 
-let subscriber = queue.subscribe_with_options(options).await?;
+store.push_event("user-stream", "user-123", &event, &metadata).await?;
+```
 
-// Heartbeat to maintain consumer registration
-subscriber.heartbeat().await?;
+## Database Schema
 
-// Clean up expired consumers (> 60 seconds inactive)
-let removed = queue.cleanup_expired_consumers(60).await?;
+The library automatically manages database migrations. The events table structure:
+
+```sql
+CREATE TABLE events (
+    stream_id TEXT NOT NULL,
+    event_type TEXT NOT NULL,
+    aggregate_id TEXT NOT NULL,
+    sequence BIGINT NOT NULL,
+    event_version TEXT NOT NULL,
+    data JSONB NOT NULL,        -- JSON in SQLite
+    metadata JSONB NOT NULL,    -- JSON in SQLite
+    created_at TIMESTAMPTZ NOT NULL,
+    PRIMARY KEY (stream_id, event_type, aggregate_id, sequence)
+);
 ```
 
 ## Performance Considerations
 
-### Message Size
-- Maximum payload size: 1MB
-- Large messages are validated before insertion
-- Consider external storage for larger payloads
-
-### Batching
-- Use batch operations for bulk inserts
-- Configure appropriate batch sizes (default: 100)
-- Batch acknowledgments when possible
-
-### Polling Strategy
-- Long polling with configurable timeout (default: 30s)
-- Automatic heartbeat during streaming
-- Exponential backoff on errors
-
-### Connection Pooling
-- Default: 20 connections
-- Configurable via pool options
-- Automatic connection recycling
-
-## Database Setup
-
-### SQLite
-```sql
--- Automatic setup on first run
--- Uses WAL mode for concurrency
--- Creates indexes automatically
-```
-
-### PostgreSQL
-```sql
--- Automatic setup on first run
--- Requires CREATE TABLE permissions
--- Optional: Enable pg_notify for real-time updates
-```
-
-## Error Handling
-
-```rust
-use dabgent_mq::MqError;
-
-match queue.publish("stream", "topic", payload).await {
-    Ok(id) => println!("Published: {}", id),
-    Err(MqError::MessageTooLarge(size, max)) => {
-        println!("Message too large: {} > {}", size, max);
-    }
-    Err(MqError::Database(e)) => {
-        println!("Database error: {}", e);
-    }
-    Err(e) => println!("Other error: {}", e),
-}
-```
-
-## Testing
-
-Run tests with:
-```bash
-cargo test
-
-# For integration tests with real databases:
-DATABASE_URL=postgres://user:pass@localhost/test cargo test
-DATABASE_URL=sqlite://test.db cargo test
-```
-
-## License
-
-MIT
-
-## Contributing
-
-Contributions are welcome! Please ensure:
-- Tests pass for both SQLite and PostgreSQL
-- Code follows Rust best practices
-- Documentation is updated for new features
+- Events are automatically assigned sequential numbers within each stream
+- Indexes are created for efficient querying by stream, event type, aggregate, and timestamp
+- Real-time subscriptions use polling with intervals
