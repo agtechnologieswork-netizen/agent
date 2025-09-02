@@ -128,7 +128,7 @@ let query = Query {
     aggregate_id: None,
 };
 
-let events: Vec<UserCreated> = store.load_events(&query).await?;
+let events: Vec<UserCreated> = store.load_events(&query, None).await?;
 
 // Query for specific event type
 let query = Query {
@@ -137,7 +137,7 @@ let query = Query {
     aggregate_id: Some("user-123".to_string()),
 };
 
-let user_events: Vec<UserCreated> = store.load_events(&query).await?;
+let user_events: Vec<UserCreated> = store.load_events(&query, None).await?;
 ```
 
 ### 5. Real-time Subscriptions
@@ -154,8 +154,11 @@ let mut subscription = store.subscribe::<UserCreated>(&query)?;
 
 // Process events as they arrive
 tokio::spawn(async move {
-    while let Some(event) = subscription.recv().await {
-        println!("Received event: {:?}", event);
+    while let Some(event) = subscription.next().await {
+        match event {
+            Ok(e) => println!("Received event: {:?}", e),
+            Err(err) => eprintln!("Error receiving event: {:?}", err),
+        }
     }
 });
 ```
@@ -172,8 +175,21 @@ let query = Query {
     aggregate_id: Some("entity-123".to_string()),
 };
 
-// Load different event types
-let events: Vec<MyEvent> = store.load_events(&query).await?;
+// Load events for projection
+let created_query = Query {
+    stream_id: "user-stream".to_string(),
+    event_type: Some("UserCreated".to_string()),
+    aggregate_id: Some("entity-123".to_string()),
+};
+
+let updated_query = Query {
+    stream_id: "user-stream".to_string(),
+    event_type: Some("UserUpdated".to_string()),
+    aggregate_id: Some("entity-123".to_string()),
+};
+
+let created_events: Vec<UserCreated> = store.load_events(&created_query, None).await?;
+let updated_events: Vec<UserUpdated> = store.load_events(&updated_query, None).await?;
 
 // Build user projection
 let mut user_projection = UserProjection::new();
@@ -198,16 +214,20 @@ let query = Query {
 // Subscriber 1: Audit log
 let mut audit_sub = store.subscribe::<UserCreated>(&query)?;
 tokio::spawn(async move {
-    while let Some(event) = audit_sub.recv().await {
-        log_to_audit_system(event).await;
+    while let Some(event) = audit_sub.next().await {
+        if let Ok(e) = event {
+            log_to_audit_system(e).await;
+        }
     }
 });
 
 // Subscriber 2: Email notifications
 let mut email_sub = store.subscribe::<UserCreated>(&query)?;
 tokio::spawn(async move {
-    while let Some(event) = email_sub.recv().await {
-        send_welcome_email(event.email).await;
+    while let Some(event) = email_sub.next().await {
+        if let Ok(e) = event {
+            send_welcome_email(e.email).await;
+        }
     }
 });
 ```
@@ -253,3 +273,52 @@ CREATE TABLE events (
 - Events are automatically assigned sequential numbers within each stream
 - Indexes are created for efficient querying by stream, event type, aggregate, and timestamp
 - Real-time subscriptions use polling with intervals
+
+## Benchmarks
+
+The library includes comprehensive benchmarks for measuring throughput under various configurations.
+
+### Running Benchmarks
+
+```bash
+# Run all benchmarks
+cargo bench
+```
+
+### Benchmark Scenarios
+
+The benchmarks test various producer/consumer configurations with different payload sizes:
+
+**Payload Sizes:**
+- 1KB - Small messages
+- 4KB - Typical messages
+- 256KB - Large messages
+- 512KB - Very large messages
+- 1MB - Maximum size messages
+
+**Configurations:**
+- `1p_1c` - 1 producer, 1 consumer (baseline)
+- `1p_2c` - 1 producer, 2 consumers (fan-out)
+- `2p_2c` - 2 producers, 2 consumers (balanced)
+- `4p_4c` - 4 producers, 4 consumers (high concurrency)
+- `1p_4c` - 1 producer, 4 consumers (heavy fan-out)
+- `4p_1c` - 4 producers, 1 consumer (many-to-one)
+
+**Throughput Tests:**
+- Write throughput - Sequential writes of 1000 messages
+- Read throughput - Sequential reads of 1000 messages
+- High contention - 10 concurrent producers writing to the same stream
+
+### Interpreting Results
+
+Benchmark output shows:
+- **Time**: Duration per iteration
+- **Throughput**: Messages per second (elem/s)
+
+Example output:
+```
+pubsub/1kb_1p_1c/1024   time:   [109.49 ms 111.15 ms 111.57 ms]
+                        thrpt:  [896.33 elem/s 899.68 elem/s 913.34 elem/s]
+```
+
+This indicates ~900 messages per second for 1KB payloads with 1 producer and 1 consumer.
