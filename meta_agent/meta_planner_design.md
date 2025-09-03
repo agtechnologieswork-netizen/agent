@@ -92,6 +92,142 @@ The planner can work with any infrastructure:
 - CLI applications
 - Test harnesses
 
+---
+
+## Integration with DabGent MQ Infrastructure
+
+### Available Production Infrastructure
+
+The merged codebase includes **DabGent MQ** (`dabgent/dabgent_mq/`), a complete event sourcing and messaging system:
+
+**Core Features:**
+- **Dual Database Support**: PostgreSQL and SQLite backends with automatic migrations
+- **Event Sourcing**: Full audit trails with sequence tracking and metadata
+- **Real-time Subscriptions**: Stream events with automatic polling and fan-out
+- **Type Safety**: Strongly typed events with compile-time guarantees
+- **Concurrent Safe**: Built with async/await and proper locking
+- **Performance**: Benchmarked throughput with various producer/consumer patterns
+
+**Event Store API:**
+```rust
+pub trait EventStore: Clone + Send + Sync + 'static {
+    async fn push_event<T: Event>(&self, stream_id: &str, aggregate_id: &str, event: &T, metadata: &Metadata) -> Result<(), Error>;
+    async fn load_events<T: Event>(&self, query: &Query, sequence: Option<i64>) -> Result<Vec<T>, Error>;
+    fn subscribe<T: Event>(&self, query: &Query) -> Result<EventStream<T>, Error>;
+}
+```
+
+**Event Metadata:**
+```rust
+pub struct Metadata {
+    pub correlation_id: Option<uuid::Uuid>,
+    pub causation_id: Option<uuid::Uuid>,
+    pub extra: Option<JsonValue>,
+}
+```
+
+**Database Schema:**
+```sql
+CREATE TABLE events (
+    stream_id TEXT NOT NULL,
+    event_type TEXT NOT NULL,
+    aggregate_id TEXT NOT NULL,
+    sequence BIGINT NOT NULL,
+    event_version TEXT NOT NULL,
+    data JSONB NOT NULL,
+    metadata JSONB NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL,
+    PRIMARY KEY (stream_id, event_type, aggregate_id, sequence)
+);
+```
+
+### Integration Strategy
+
+**1. Replace Minimal Traits**
+Our minimal `events::EventStore` and `messaging::EventBus` can be replaced with DabGent MQ adapters:
+
+```rust
+// Instead of our InMemoryEventStore
+use dabgent_mq::db::{EventStore, sqlite::SqliteStore, Query};
+use dabgent_mq::models::Event;
+
+// Planner events implement the Event trait
+impl Event for crate::planner::Event {
+    const EVENT_VERSION: &'static str = "1.0";
+    fn event_type() -> &'static str {
+        match self {
+            Event::TasksPlanned { .. } => "TasksPlanned",
+            Event::TaskDispatched { .. } => "TaskDispatched",
+            // ... other variants
+        }
+    }
+}
+```
+
+**2. Enhanced Event Metadata**
+DabGent MQ provides richer metadata than our minimal `EventMetadata`:
+
+```rust
+// Our current
+pub struct EventMetadata {
+    pub id: String,
+    pub aggregate_id: String,
+    pub timestamp: u64,
+    // ...
+}
+
+// DabGent MQ provides
+pub struct Metadata {
+    pub correlation_id: Option<uuid::Uuid>,  // Trace across services
+    pub causation_id: Option<uuid::Uuid>,    // What caused this event
+    pub extra: Option<JsonValue>,            // Custom metadata
+}
+```
+
+**3. Real-time Event Streaming**
+DabGent MQ includes subscription capabilities our design lacked:
+
+```rust
+// Subscribe to planner events in real-time
+let query = Query {
+    stream_id: "planner-events".to_string(),
+    event_type: Some("TaskDispatched".to_string()),
+    aggregate_id: None,
+};
+
+let mut subscription = store.subscribe::<TaskDispatchedEvent>(&query)?;
+while let Some(event) = subscription.next().await {
+    // Handle task dispatch events as they occur
+    executor.handle_task(event?).await;
+}
+```
+
+### Revised Architecture
+
+**Event Sourced Planner with Production Infrastructure:**
+```
+User Input → Command::Initialize
+    ↓
+Planner.process() → Events
+    ↓
+DabGent MQ EventStore.push_event()
+    ↓
+Real-time EventStream subscription
+    ↓
+Executor receives events → processes tasks
+    ↓
+ExecutorEvent::TaskCompleted → Command::HandleExecutorEvent
+    ↓
+Planner.process() → More events
+```
+
+**Integration Benefits:**
+- **Production Ready**: Proven event store with migrations, transactions, and error handling
+- **Scalable**: Benchmarked performance with various producer/consumer patterns
+- **Observable**: Rich metadata for tracing and debugging
+- **Resilient**: Proper sequence tracking and duplicate detection
+- **Real-time**: Stream events as they occur without polling infrastructure
+
 ## 2) Public Interfaces & Data Types
 
 > Integrate into `meta_draft/src/actors.rs` (or adjacent module). Enums below extend your existing pipeline types.

@@ -40,27 +40,21 @@
 - [x] Context compaction tests
 - [x] Task execution flow tests
 
-## Phase 2: Infrastructure Integration (Future)
+## Phase 2: DabGent MQ Integration (Current Priority)
 
-### Milestone 2.1 — Event Store Integration
-- [ ] Create event store trait:
-  - [ ] `trait EventStore { append(), load_all(), load_from() }`
-  - [ ] In-memory implementation for testing
-  - [ ] File-based implementation for development
-- [ ] Add event persistence:
-  - [ ] Save events after each `process()` call
-  - [ ] Load events on startup
-  - [ ] Support for event replay
+### Milestone 2.1 — Replace Minimal Infrastructure ⭐
+- [x] Basic event store trait and in-memory implementation (now superseded by DabGent MQ)
+- [ ] **HIGH PRIORITY**: Implement `dabgent_mq::models::Event` for planner events
+- [ ] **HIGH PRIORITY**: Create DabGent MQ adapter for planner persistence
+- [ ] **HIGH PRIORITY**: Add planner event → DabGent MQ integration
+- [ ] **HIGH PRIORITY**: Replace `InMemoryEventStore` usage with `SqliteStore`
+- [ ] Add correlation_id and causation_id to planner operations
 
-### Milestone 2.2 — Message Bus Adapter
-- [ ] Create bus adapter for async integration:
-  - [ ] Convert Commands from bus messages
-  - [ ] Publish Events to appropriate topics
-  - [ ] Handle ExecutorEvents from bus
-- [ ] Implement routing:
-  - [ ] Map PlannerCmd in events to executor topics
-  - [ ] Subscribe to executor event topics
-  - [ ] Route clarification requests to UI
+### Milestone 2.2 — Real-time Event Streaming
+- [ ] **MEDIUM PRIORITY**: Create event subscription handlers for executor integration
+- [ ] **MEDIUM PRIORITY**: Set up stream_id and query patterns for planner events
+- [ ] **MEDIUM PRIORITY**: Add real-time task dispatch via EventStream subscriptions
+- [ ] **MEDIUM PRIORITY**: Implement fan-out pattern for multiple subscribers (audit, metrics, etc.)
 
 ## Phase 3: LLM Integration
 
@@ -139,10 +133,11 @@
 - Comprehensive test suite
 - Example usage patterns
 
-### 🚧 Next Steps
-1. **Infrastructure Integration** - Connect to existing meta_agent system
-2. **LLM Enhancement** - Replace simple parser with LLM-based planning
-3. **Production Features** - Add persistence, monitoring, advanced features
+### 🚧 Next Steps (Revised with DabGent MQ)
+1. **DabGent MQ Integration** - Replace our minimal traits with production infrastructure
+2. **Real-time Event Streaming** - Leverage subscription capabilities for reactive architecture
+3. **LLM Enhancement** - Replace simple parser with LLM-based planning
+4. **Advanced Features** - Add sophisticated event processing patterns
 
 ## Key Design Benefits
 
@@ -185,15 +180,73 @@ async fn handle(planner: Arc<Mutex<Planner>>, cmd: Command) {
 }
 ```
 
+## Architecture Gaps Analysis
+
+### What We Built vs What's Available
+
+**✅ Our Strengths:**
+- **Handler Trait**: Clean separation of business logic from infrastructure
+- **Event Sourcing**: Proper fold() implementation for state reconstruction  
+- **Command/Event Pattern**: Well-structured planner domain logic
+- **Comprehensive Tests**: Full test coverage for planner behavior
+
+**🎯 Integration Opportunities with DabGent MQ:**
+- **Production Event Store**: Replace our `InMemoryEventStore` with `SqliteStore`/`PostgresStore`
+- **Real-time Streaming**: Add reactive event processing via subscriptions
+- **Rich Metadata**: Enhance event tracing with correlation_id/causation_id
+- **Performance**: Leverage benchmarked throughput capabilities
+- **Migrations**: Database schema evolution support
+
+**🔄 Architecture Evolution:**
+```
+Before: Handler → InMemoryEventStore → Manual polling
+After:  Handler → DabGent MQ → Real-time EventStream → Reactive processing
+```
+
+### Immediate Integration Tasks
+
+**Phase 2A: Core Integration (Week 1)**
+1. Add `dabgent_mq` dependency to `meta_agent/Cargo.toml`
+2. Implement `Event` trait for our planner events  
+3. Create adapter layer: `planner::Event` ↔ `dabgent_mq::Event`
+4. Replace `InMemoryEventStore` with `SqliteStore` in examples
+5. Update tests to use production event store
+
+**Phase 2B: Streaming Architecture (Week 2)**  
+1. Create event subscription handlers for planner → executor communication
+2. Implement reactive task dispatch via `EventStream`
+3. Add metadata enrichment (correlation_id for tracing)
+4. Create fan-out pattern for audit, metrics, monitoring
+
+**Phase 2C: Production Readiness (Week 3)**
+1. Add database migrations for planner events table
+2. Performance testing with DabGent MQ benchmarks
+3. Add proper error handling and retry logic
+4. Create deployment documentation
+
+### Integration Benefits
+
+**Immediate:**
+- Production-ready persistence with ACID guarantees
+- Real-time event processing without custom polling
+- Rich metadata for debugging and tracing
+- Proven performance characteristics
+
+**Long-term:**
+- Multi-aggregate event sourcing patterns
+- Event replay and projection capabilities
+- Horizontal scaling via multiple subscribers  
+- Integration with other services via shared event store
+
 ## Dependencies & Prerequisites
-- Rust toolchain (1.70+)
+- Rust toolchain (1.70+) 
+- **DabGent MQ**: Full event sourcing and messaging system (already merged!)
+- SQLite or PostgreSQL for production event storage
 - Existing meta_agent codebase
-- Optional: Message bus for async integration
-- Optional: Event store for persistence
 
 ## Implementation Philosophy
-- Start simple, add complexity as needed
-- Maintain clean separation between business logic and infrastructure
-- Write tests alongside implementation
-- Use the Handler trait as the integration boundary
-- Let infrastructure handle persistence, messaging, monitoring
+- **Leverage existing infrastructure** - Don't rebuild what DabGent MQ already provides
+- Maintain clean separation between business logic and infrastructure via Handler trait
+- Write tests alongside implementation, using production infrastructure in tests
+- Use DabGent MQ as the integration boundary for all persistence and messaging
+- Focus on planner domain logic; let DabGent MQ handle event sourcing infrastructure
