@@ -1,6 +1,5 @@
 use crate::planner::types::{ExecutorEvent, PlannerCmd, PlannerState, NodeKind, TaskStatus, Task};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 
 /// Core handler trait for event-sourced components
 pub trait Handler {

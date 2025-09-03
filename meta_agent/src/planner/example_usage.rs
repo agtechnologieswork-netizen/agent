@@ -2,6 +2,7 @@
 // This shows how the planner can be used without bus/messaging infrastructure
 
 use crate::planner::{Command, Event, Handler, Planner, PlannerCmd, ExecutorEvent};
+use crate::events::{EventMetadata, InMemoryEventStore, PersistedEvent, EventStore};
 
 /// Example of how to use the planner in a simple synchronous context
 pub fn simple_usage_example() {
@@ -14,9 +15,20 @@ pub fn simple_usage_example() {
         attachments: vec![],
     }).expect("Failed to initialize");
     
-    // Events emitted would be sent to the bus/executor
-    for event in &events {
-        println!("Event emitted: {:?}", event);
+    // Persist events in-memory (example)
+    let mut store: InMemoryEventStore<Event> = InMemoryEventStore::new();
+    for (idx, ev) in events.into_iter().enumerate() {
+        store.append(PersistedEvent {
+            meta: EventMetadata {
+                id: format!("{}", idx + 1),
+                aggregate_id: "planner-1".into(),
+                timestamp: idx as u64,
+                causation_id: None,
+                correlation_id: None,
+                version: 1,
+            },
+            payload: ev,
+        });
     }
     
     // Simulate executor completing a task
