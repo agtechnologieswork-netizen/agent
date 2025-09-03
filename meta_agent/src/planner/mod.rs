@@ -8,6 +8,8 @@
 
 pub mod handler;
 pub mod types;
+#[cfg(any(test, feature = "mq"))]
+pub mod mq;
 
 #[cfg(test)]
 pub mod example_usage;

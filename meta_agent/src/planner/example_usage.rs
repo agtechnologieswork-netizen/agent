@@ -2,7 +2,12 @@
 // This shows how the planner can be used without bus/messaging infrastructure
 
 use crate::planner::{Command, Event, Handler, Planner, PlannerCmd, ExecutorEvent};
-use crate::events::{EventMetadata, InMemoryEventStore, PersistedEvent, EventStore};
+#[cfg(feature = "mq")]
+use dabgent_mq::db::{EventStore as MqEventStore, Query};
+#[cfg(feature = "mq")]
+use dabgent_mq::db::sqlite::SqliteStore;
+#[cfg(feature = "mq")]
+use dabgent_mq::db::Metadata as MqMetadata;
 
 /// Example of how to use the planner in a simple synchronous context
 pub fn simple_usage_example() {
@@ -15,19 +20,36 @@ pub fn simple_usage_example() {
         attachments: vec![],
     }).expect("Failed to initialize");
     
-    // Persist events in-memory (example)
-    let mut store: InMemoryEventStore<Event> = InMemoryEventStore::new();
-    for (idx, ev) in events.into_iter().enumerate() {
-        store.append(PersistedEvent {
-            meta: EventMetadata {
-                id: format!("{}", idx + 1),
-                aggregate_id: "planner-1".into(),
-                timestamp: idx as u64,
-                causation_id: None,
-                correlation_id: None,
-                version: 1,
-            },
-            payload: ev,
+    #[cfg(feature = "mq")]
+    {
+        // Directly persist events to DabGent MQ (SQLite)
+        // Use an in-memory SQLite pool for demonstration
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        rt.block_on(async move {
+            let pool = sqlx::sqlite::SqlitePoolOptions::new()
+                .max_connections(5)
+                .connect("sqlite::memory:")
+                .await
+                .expect("pool");
+            let store = SqliteStore::new(pool);
+            store.migrate().await;
+            let aggregate_id = "planner-1";
+            for ev in events {
+                let meta = MqMetadata::default();
+                store
+                    .push_event("planner", aggregate_id, &ev, &meta)
+                    .await
+                    .expect("push");
+            }
+
+            // Reload and fold
+            let query = Query {
+                stream_id: "planner".to_string(),
+                event_type: None,
+                aggregate_id: Some(aggregate_id.to_string()),
+            };
+            let loaded: Vec<Event> = store.load_events(&query, None).await.expect("load");
+            let _restored = Planner::fold(&loaded);
         });
     }
     
