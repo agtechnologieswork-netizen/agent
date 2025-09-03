@@ -43,16 +43,17 @@
 ## Phase 2: DabGent MQ Foundation (Current Sprint)
 
 ### Milestone 2.1 — Core Integration ⭐ IMMEDIATE
-- [ ] **Step 1**: Add `dabgent_mq` dependency to Cargo.toml
+- [x] **Step 1**: Add `dabgent_mq` dependency to Cargo.toml
   ```toml
-  dabgent_mq = { path = "../dabgent/dabgent_mq", features = ["sqlite"] }
+  dabgent_mq = { path = "../dabgent/dabgent_mq" }
   ```
-- [ ] **Step 2**: Implement `dabgent_mq::models::Event` trait for planner events
-- [ ] **Step 3**: Create PlannerStore adapter wrapping SqliteStore
-- [ ] **Step 4**: Update example_usage.rs to use real persistence
-- [ ] **Step 5**: Write integration test proving event persistence/replay
+- [x] **Step 2**: Implement `dabgent_mq::models::Event` trait for planner events
+- [x] **Step 3**: Direct DabGent MQ integration (no adapter)
+- [x] **Step 4**: Update example_usage.rs to use real persistence (SQLite pool + migrate)
+- [x] **Step 5**: Write integration test proving event persistence/replay
 
 ### Milestone 2.2 — Event Streaming Architecture
+- [x] Validate subscriptions via test (real-time stream with SqliteStore)
 - [ ] Create subscription handlers for TaskDispatched → executor routing
 - [ ] Implement correlation_id tracking across command/event chains
 - [ ] Set up fan-out subscriptions for monitoring/audit/metrics

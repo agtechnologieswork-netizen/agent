@@ -233,33 +233,34 @@ while let Some(event) = subscription.next().await {
 }
 ```
 
-### Planner-DabGent MQ Integration Points
+### Planner-DabGent MQ Integration Points (Implemented)
 
 **1. Event Definition**:
 ```rust
 // src/planner/events_mq.rs
 impl dabgent_mq::models::Event for planner::Event {
     const EVENT_VERSION: &'static str = "1.0";
-    fn event_type(&self) -> &'static str { /* ... */ }
+    fn event_type(&self) -> &'static str { "PlannerEvent" }
 }
 ```
 
-**2. Storage Adapter**:
+**2. Direct Persistence (no adapter)**:
 ```rust
-// src/planner/store.rs
-pub struct PlannerStore {
-    store: SqliteStore,
-    stream_id: String,
-}
+// example_usage.rs (behind feature = "mq")
+let pool = sqlx::sqlite::SqlitePoolOptions::new()
+    .max_connections(5)
+    .connect("sqlite::memory:")
+    .await?;
+let store = SqliteStore::new(pool);
+store.migrate().await;
+store.push_event("planner", "session-1", &event, &Metadata::default()).await?;
 ```
 
-**3. Subscription Handlers**:
+**3. Subscriptions Validated in Tests**:
 ```rust
-// src/planner/subscriptions.rs
-pub async fn subscribe_executor_events(store: &PlannerStore) {
-    let mut stream = store.subscribe::<Event>(&query)?;
-    // Route events to appropriate executors
-}
+// tests/mq_subscribe_test.rs (feature = "mq")
+let mut stream = store.subscribe::<Event>(&query)?;
+let got = tokio::time::timeout(Duration::from_secs(3), async { stream.next().await }).await?;
 ```
 
 **How DabGent MQ Enables Our Grand Vision:**
