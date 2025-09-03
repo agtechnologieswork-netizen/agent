@@ -1,37 +1,55 @@
 # Event-Sourced Planner — Implementation Design (meta_agent)
 
-**Goal**: Build a clean, testable planner using the Handler trait pattern with event sourcing capabilities.
+**Goal**: Build a production-ready AI planner leveraging DabGent MQ's event sourcing infrastructure and the Handler trait pattern.
 
-**Core Capabilities**:
+**Foundation**: DabGent MQ (`dabgent/dabgent_mq/`) provides the production event sourcing and messaging backbone that enables all our capabilities.
+
+**Core Capabilities (Powered by DabGent MQ)**:
 - Parse plain text input into executable task sequence
-- Execute tasks sequentially via command/event pattern
-- Handle clarification requests with pause/resume semantics
-- Compact context between steps to manage token limits
-- Rebuild state from event log for reliability
+- Execute tasks via event-driven patterns using DabGent MQ's real-time subscriptions
+- Handle clarification requests with pause/resume using event streams
+- Compact context between steps with events tracking all transformations
+- Rebuild state from DabGent MQ's persistent event log with full audit trail
+- Scale horizontally via DabGent MQ's fan-out subscriptions
 
-**Key Principles**:
-- Separation of business logic from infrastructure via Handler trait
-- All state changes via domain events
-- Clean command → event flow
-- Deterministic replay from events via fold()
-- Infrastructure-agnostic design
+**Architectural Principles**:
+- Handler trait for business logic + DabGent MQ for infrastructure
+- All state changes via domain events persisted to DabGent MQ
+- Event streams enable reactive executor coordination
+- Deterministic replay from DabGent MQ's sequenced events via fold()
+- Production-ready from day one with SQLite/PostgreSQL backends
 
 ---
 
-## 1) Architecture Overview
+## 1) Architecture Overview: Handler + DabGent MQ
 
-### Handler Trait Pattern
-The planner implements a clean Handler trait that separates business logic from infrastructure:
+### The Synergy: Clean Domain Logic Meets Production Infrastructure
+
+Our architecture combines:
+1. **Handler Trait**: Pure business logic with no infrastructure dependencies
+2. **DabGent MQ**: Production event store with persistence, streaming, and metadata
 
 **Core Handler Trait**:
 ```rust
 pub trait Handler {
     type Command;
-    type Event;
+    type Event;  // Will implement dabgent_mq::models::Event
     type Error;
 
     fn process(&mut self, command: Self::Command) -> Result<Vec<Self::Event>, Self::Error>;
-    fn fold(events: &[Self::Event]) -> Self;
+    fn fold(events: &[Self::Event]) -> Self;  // Reconstruct from DabGent MQ events
+}
+```
+
+**DabGent MQ Integration**:
+```rust
+use dabgent_mq::db::{EventStore, sqlite::SqliteStore};
+use dabgent_mq::models::{Event as MqEvent, Metadata};
+
+// Our events implement DabGent MQ's Event trait
+impl MqEvent for crate::planner::Event {
+    const EVENT_VERSION: &'static str = "1.0";
+    fn event_type(&self) -> &'static str { /* ... */ }
 }
 ```
 
@@ -58,55 +76,71 @@ pub enum Event {
 }
 ```
 
-**Clean Separation**:
+**Architecture Flow with DabGent MQ**:
 ```
 Commands → Planner.process() → Events
                 ↓
          Internal State Update
                 ↓
-         Return Events to Caller
-                
-The caller (infrastructure) handles:
-- Message bus publication
-- Event persistence
-- HTTP/gRPC transport
-- Async coordination
+         DabGent MQ EventStore.push_event()
+                ↓
+         Real-time EventStream subscriptions
+                ↓
+    Executors receive events → Process tasks
+                ↓
+    Results flow back via events → Planner
 ```
 
-**Event Sourcing via fold()**:
+**DabGent MQ Handles**:
+- Event persistence with ACID guarantees
+- Real-time streaming to subscribers
+- Sequence tracking and deduplication
+- Correlation/causation metadata
+- Database migrations and schema evolution
+
+**Event Sourcing with DabGent MQ**:
 ```rust
-// Save events
+// Save events to DabGent MQ
 let events = planner.process(command)?;
-storage.append(&events);
+for event in events {
+    store.push_event("planner", aggregate_id, &event, &metadata).await?;
+}
 
-// Later: Rebuild state
-let historical_events = storage.load_all();
+// Later: Rebuild state from DabGent MQ
+let query = Query { stream_id: "planner".into(), aggregate_id: Some(id), ..Default::default() };
+let historical_events = store.load_events(&query, None).await?;
 let planner = Planner::fold(&historical_events);
+
+// Real-time subscriptions
+let mut stream = store.subscribe::<Event>(&query)?;
+while let Some(event) = stream.next().await {
+    executor.handle(event?).await;
+}
 ```
 
-**Integration Flexibility**:
-The planner can work with any infrastructure:
-- Synchronous direct calls
-- Async message buses (Kafka, Redis, RabbitMQ)
-- HTTP/gRPC servers
-- CLI applications
-- Test harnesses
+**Integration Patterns Enabled by DabGent MQ**:
+- **Direct + Persistent**: Synchronous calls with event persistence
+- **Streaming**: Real-time event subscriptions for reactive processing
+- **Fan-out**: Multiple executors subscribing to same event stream
+- **Replay**: Time-travel debugging via event history
+- **Distributed**: Multi-service coordination via shared event store
+- **Testing**: In-memory SQLite for fast, realistic tests
 
 ---
 
-## Integration with DabGent MQ Infrastructure
+## 2) DabGent MQ: The Production Foundation
 
-### Available Production Infrastructure
+### Core Infrastructure Components
 
-The merged codebase includes **DabGent MQ** (`dabgent/dabgent_mq/`), a complete event sourcing and messaging system:
+DabGent MQ provides the production infrastructure that makes our planner immediately deployable:
 
-**Core Features:**
-- **Dual Database Support**: PostgreSQL and SQLite backends with automatic migrations
-- **Event Sourcing**: Full audit trails with sequence tracking and metadata
-- **Real-time Subscriptions**: Stream events with automatic polling and fan-out
-- **Type Safety**: Strongly typed events with compile-time guarantees
-- **Concurrent Safe**: Built with async/await and proper locking
-- **Performance**: Benchmarked throughput with various producer/consumer patterns
+**Core Features That Enable Our Vision:**
+- **Dual Database Support**: PostgreSQL and SQLite backends with automatic migrations - enables both local development and production scale
+- **Event Sourcing**: Full audit trails with sequence tracking and metadata - perfect for debugging complex task sequences and replaying failed plans
+- **Real-time Subscriptions**: Stream events with automatic polling and fan-out - enables reactive executor coordination and parallel task monitoring
+- **Type Safety**: Strongly typed events with compile-time guarantees - ensures our complex event hierarchies remain maintainable
+- **Concurrent Safe**: Built with async/await and proper locking - supports parallel task execution patterns we'll add in future phases
+- **Performance**: Benchmarked throughput with various producer/consumer patterns - scales to handle enterprise-grade planning workloads
 
 **Event Store API:**
 ```rust
@@ -141,10 +175,9 @@ CREATE TABLE events (
 );
 ```
 
-### Integration Strategy
+### Integration Architecture
 
-**1. Replace Minimal Traits**
-Our minimal `events::EventStore` and `messaging::EventBus` can be replaced with DabGent MQ adapters:
+**Event Persistence Layer**:
 
 ```rust
 // Instead of our InMemoryEventStore
@@ -164,8 +197,7 @@ impl Event for crate::planner::Event {
 }
 ```
 
-**2. Enhanced Event Metadata**
-DabGent MQ provides richer metadata than our minimal `EventMetadata`:
+**Event Metadata System**:
 
 ```rust
 // Our current
@@ -184,8 +216,7 @@ pub struct Metadata {
 }
 ```
 
-**3. Real-time Event Streaming**
-DabGent MQ includes subscription capabilities our design lacked:
+**Streaming Architecture**:
 
 ```rust
 // Subscribe to planner events in real-time
@@ -202,33 +233,53 @@ while let Some(event) = subscription.next().await {
 }
 ```
 
-### Revised Architecture
+### Planner-DabGent MQ Integration Points
 
-**Event Sourced Planner with Production Infrastructure:**
-```
-User Input → Command::Initialize
-    ↓
-Planner.process() → Events
-    ↓
-DabGent MQ EventStore.push_event()
-    ↓
-Real-time EventStream subscription
-    ↓
-Executor receives events → processes tasks
-    ↓
-ExecutorEvent::TaskCompleted → Command::HandleExecutorEvent
-    ↓
-Planner.process() → More events
+**1. Event Definition**:
+```rust
+// src/planner/events_mq.rs
+impl dabgent_mq::models::Event for planner::Event {
+    const EVENT_VERSION: &'static str = "1.0";
+    fn event_type(&self) -> &'static str { /* ... */ }
+}
 ```
 
-**Integration Benefits:**
-- **Production Ready**: Proven event store with migrations, transactions, and error handling
-- **Scalable**: Benchmarked performance with various producer/consumer patterns
-- **Observable**: Rich metadata for tracing and debugging
-- **Resilient**: Proper sequence tracking and duplicate detection
-- **Real-time**: Stream events as they occur without polling infrastructure
+**2. Storage Adapter**:
+```rust
+// src/planner/store.rs
+pub struct PlannerStore {
+    store: SqliteStore,
+    stream_id: String,
+}
+```
 
-## 2) Public Interfaces & Data Types
+**3. Subscription Handlers**:
+```rust
+// src/planner/subscriptions.rs
+pub async fn subscribe_executor_events(store: &PlannerStore) {
+    let mut stream = store.subscribe::<Event>(&query)?;
+    // Route events to appropriate executors
+}
+```
+
+**How DabGent MQ Enables Our Grand Vision:**
+
+**Immediate Benefits:**
+- **Production Ready**: Proven event store with migrations, transactions, and error handling - no need to build persistence layer
+- **Scalable**: Benchmarked performance - ready for complex multi-agent orchestration
+- **Observable**: Rich metadata for tracing - enables the metrics/telemetry we planned
+- **Resilient**: Proper sequence tracking - supports checkpoint/restore features
+- **Real-time**: Stream events as they occur - foundation for parallel execution patterns
+
+**Future Features Enabled:**
+- **Advanced NodeKind Routing**: EventStream subscriptions can route specialized tasks (`UnitTest`, `Retrieval`, `Analysis`) to specialized executors
+- **Parallel Task Execution**: Fan-out pattern supports DAG execution when we're ready
+- **Checkpoint/Restore**: Event sourcing provides natural checkpoint boundaries
+- **Multi-Agent Coordination**: Shared event store enables complex agent interactions
+- **Time-Travel Debugging**: Replay events to any point for debugging failed plans
+- **A/B Testing**: Fork event streams to test different planning strategies
+
+## 3) Public Interfaces & Data Types (DabGent MQ Compatible)
 
 > Integrate into `meta_draft/src/actors.rs` (or adjacent module). Enums below extend your existing pipeline types.
 
@@ -331,7 +382,7 @@ impl Handler for Planner {
 
 ---
 
-## 3) Control Flow
+## 4) Control Flow with Event Streaming
 
 ### Activity (PlantUML)
 ```plantuml
@@ -484,7 +535,7 @@ impl Planner {
 
 ---
 
-## 4) Planning & Attachments
+## 5) Planning & Attachments (Event-Driven)
 
 **Parsing strategy (v1, deterministic):**
 - Normalize input (trim, collapse whitespace), split into candidate steps by:
@@ -503,51 +554,73 @@ impl Planner {
 
 ---
 
-## 5) Integration Points
+## 6) Integration Points Leveraging DabGent MQ
 
 The Handler trait enables flexible integration with any infrastructure:
 
-### Direct Integration
+### Direct Integration with Persistence
 ```rust
-// Simple synchronous usage
+// Synchronous with DabGent MQ persistence
+let store = SqliteStore::new("planner.db").await?;
 let mut planner = Planner::new();
 let events = planner.process(Command::Initialize {
     user_input: "Analyze code and run tests".to_string(),
     attachments: vec![],
 })?;
 
-// Infrastructure handles events
+// Persist events to DabGent MQ
 for event in events {
-    handle_event(event);
+    store.push_event("planner", session_id, &event, &metadata).await?;
+    // Also trigger any real-time subscribers
 }
 ```
 
-### Message Bus Integration
+### Reactive Event-Driven Integration
 ```rust
-// Async with message bus
-async fn handle_command(planner: Arc<Mutex<Planner>>, command: Command) {
+// Event-driven with DabGent MQ streaming
+async fn handle_command(planner: Arc<Mutex<Planner>>, store: PlannerStore, command: Command) {
     let mut planner = planner.lock().await;
     let events = planner.process(command).unwrap();
     
+    // Persist and stream events
     for event in events {
-        // Extract any commands to send
-        if let Event::TaskDispatched { command, .. } = event {
-            bus.publish("executor.commands", command).await;
-        }
-        // Store event
-        event_store.append(event).await;
+        // Store with rich metadata
+        let metadata = Metadata {
+            correlation_id: Some(session_id),
+            causation_id: Some(command_id),
+            extra: None,
+        };
+        store.push_event(&event, &metadata).await?;
+        // DabGent MQ automatically notifies all subscribers
     }
 }
+
+// Executors subscribe to relevant events
+tokio::spawn(async {
+    let mut stream = store.subscribe_task_dispatched().await?;
+    while let Some(event) = stream.next().await {
+        executor.process_task(event).await;
+    }
+});
 ```
 
-### Event Sourcing Integration
+### Event Sourcing with DabGent MQ
 ```rust
-// Rebuild from events
-let historical_events = event_store.load_all().await;
+// Rebuild from DabGent MQ event history
+let query = Query {
+    stream_id: "planner".to_string(),
+    aggregate_id: Some(session_id.to_string()),
+    event_type: None,
+};
+let historical_events = store.load_events::<Event>(&query, None).await?;
 let planner = Planner::fold(&historical_events);
 
 // Continue from restored state
 let events = planner.process(Command::Continue)?;
+
+// Time-travel debugging
+let events_until = store.load_events(&query, Some(sequence_num)).await?;
+let past_state = Planner::fold(&events_until);
 ```
 
 - Infrastructure maps `NodeKind` → suitable actor/tool (code agent, test runner, retriever, etc.)
@@ -556,7 +629,7 @@ let events = planner.process(Command::Continue)?;
 
 ---
 
-## 6) Error & Clarification Policy
+## 7) Error & Clarification Policy (Event-Based)
 
 - **NeedsClarification** pauses the loop; only resume on `ClarificationProvided`.
 - Pause semantics: set `waiting_for_clarification = true` and `pending_clarification_for = Some(node_id)`; `step` returns early until an `ExecutorEvent::ClarificationProvided` is processed for that node.
@@ -565,7 +638,7 @@ let events = planner.process(Command::Continue)?;
 
 ---
 
-## 7) Minimal Example
+## 8) Minimal Example with DabGent MQ
 
 **Input**: “Add login with session cookies. Use basic auth. Read API spec at https://example.com/spec.pdf. Then write unit tests.”
 
@@ -579,56 +652,151 @@ If ambiguity (e.g., *cookie expiry?*), emit `RequestClarification` and wait.
 
 ---
 
-## 8) Extensibility
+## 9) Extensibility via Event Patterns
 
 See section 11 (Future Work) for planned extensions beyond v1.
 
 ---
 
-## 9) Testing
+## 10) Testing with DabGent MQ
 
-- Unit: parse → tasks mapping; event handling transitions.
-- Integration: scripted sequence (Completed → NeedsClarification → ClarificationProvided → Completed).
-- Load: long task lists + compaction threshold respected.
-
----
-
-## 10) Definition of Done
-
-- Enums extended; planner compiles and is called on new input.
-- Sequential loop executes tasks; clarification pause/resume works.
-- Context compaction active; final summary emitted.
-- Basic tests passing (unit + one integration path).
-
----
-
-## 11) Scope: Not Now (v1)
-
-- Advanced `NodeKind` variants (e.g., `UnitTest`, `Retrieval`, `Analysis`, `Refactor`, `CodeImplementation`).
-- Non-URL attachments (image refs, file refs) and parsing of local files.
-- Checkpointing, cancellation/abort flows, or persistence of planner state.
-- Retries/backoff policies beyond simple log-and-advance on failure.
-- Parallel or graph/DAG execution; v1 is strictly sequential.
-- LLM-backed planning; v1 uses deterministic parsing heuristics.
-- Long-term memory/vector store; v1 uses a rolling compact string summary.
-- Rich metrics/telemetry; v1 may include minimal logging only.
+- **Unit Tests**: Parse → tasks mapping; event handling transitions
+- **Integration Tests with DabGent MQ**: 
+  ```rust
+  #[tokio::test]
+  async fn test_with_dabgent_mq() {
+      let store = SqliteStore::in_memory().await.unwrap();
+      // Test full flow with real persistence
+  }
+  ```
+- **Event Replay Tests**: Verify fold() with DabGent MQ events
+- **Load Tests**: Long task lists with DabGent MQ's benchmarked throughput
 
 ---
 
-## 12) Future Work
+## 11) Definition of Done
 
-- Expand `NodeKind` as new tools/agents ship (e.g., `UnitTest`, `Retrieval`, `Analysis`, `Refactor`, `CodeImplementation`).
-- Introduce `AttachmentKind` and `Attachment` handling for images and files.
-- Add retry policies with caps/backoff and failure classification.
-- Checkpoint/save/restore planner state and cancellation support.
-- Optional parallelization or partial ordering once executors support it.
-- Replace heuristic `plan_tasks` with an LLM-backed planner (same `Task` API).
-- Upgrade `context_summary` to a vector store or structured memory.
-- Add richer metrics, tracing, and UI affordances for clarifications.
+- Planner events implement `dabgent_mq::models::Event` trait
+- Events persist to DabGent MQ SQLite/PostgreSQL store
+- State reconstructs correctly from DabGent MQ event history
+- Event subscriptions deliver TaskDispatched to executors
+- Integration tests pass with real DabGent MQ database
+- Clarification pause/resume works via event streams
+- Context compaction tracked via ContextCompacted events
 
 ---
 
-## 12) Context Squeezing Integration
+## 12) Roadmap: Building on DabGent MQ Foundation
+
+### Phase 1 (Current) - Core Handler + DabGent MQ Integration
+- ✅ Basic Handler trait implementation
+- ✅ Simple NodeKind variants (`Clarification`, `ToolCall`, `Processing`)
+- 🚧 **DabGent MQ Integration** (This Week):
+  - [ ] Implement `dabgent_mq::models::Event` for planner events
+  - [ ] Create PlannerStore wrapping SqliteStore
+  - [ ] Enable event subscriptions for executors
+  - [ ] Add correlation/causation metadata
+- 🚧 Event sourcing with DabGent MQ persistence
+
+### Phase 2 (Next Quarter) - Enhanced Capabilities
+- **Advanced NodeKind variants**: `UnitTest`, `Retrieval`, `Analysis`, `Refactor`, `CodeImplementation`
+  - DabGent MQ subscriptions will route each type to specialized executors
+- **Rich Attachments**: Beyond URLs to image/file references
+  - Store attachment metadata in DabGent MQ's `extra` field
+- **LLM-Backed Planning**: Replace heuristic parser
+  - Use LLM to understand dependencies and optimal task ordering
+
+### Phase 3 (6 Months) - Production Features
+- **Checkpoint/Restore**: Natural boundaries via event sequences
+  - DabGent MQ's sequence tracking provides checkpoint markers
+- **Retry Policies**: Exponential backoff with circuit breakers
+  - Track retry attempts in event metadata
+- **Cancellation/Abort**: Graceful task interruption
+  - Emit cancellation events, executors subscribe and respond
+
+### Phase 4 (Year 1) - Advanced Architecture
+- **Parallel/DAG Execution**: Task dependency graphs
+  - DabGent MQ fan-out enables parallel task dispatch
+  - Track dependencies in event metadata
+- **Long-term Memory**: Vector store integration
+  - Index completed tasks for similarity search
+  - Store embeddings alongside events
+- **Rich Telemetry**: Comprehensive observability
+  - DabGent MQ metadata enables distributed tracing
+  - Correlation IDs track request flow across services
+
+---
+
+## 13) The Grand Vision: AI Platform on DabGent MQ
+
+### Near-Term Extensions (Enabled by DabGent MQ)
+
+**Specialized Task Types** (via EventStream routing):
+- `NodeKind::UnitTest` → Test runner executor
+- `NodeKind::Retrieval` → RAG pipeline executor
+- `NodeKind::Analysis` → Code analysis executor
+- `NodeKind::Refactor` → AST manipulation executor
+- `NodeKind::CodeImplementation` → Code generation executor
+
+**Rich Media Handling**:
+```rust
+enum AttachmentKind {
+    Link(String),              // URLs
+    ImageRef(String),          // Vision model inputs
+    FileRef(String),           // Code files, docs
+    EmbeddingRef(String),      // Vector store references
+    ScreenshotRef(String),     // UI testing artifacts
+}
+```
+
+**Advanced Error Recovery**:
+- Classification of failure types (transient, permanent, user-fixable)
+- Exponential backoff with jitter
+- Circuit breaker patterns
+- Automatic rollback via event replay
+
+### Long-Term Vision (The Platform)
+
+**Distributed Planning**:
+- Multiple planners collaborating via shared event store
+- Hierarchical planning (meta-planner → sub-planners)
+- Cross-team task coordination
+- Global optimization of resource usage
+
+**Intelligent Memory Systems**:
+- Vector store for semantic task similarity
+- Graph database for dependency tracking
+- Time-series DB for performance metrics
+- Knowledge graph of completed tasks
+
+**Developer Experience**:
+- Real-time UI showing task progress
+- Interactive clarification dialogs
+- Time-travel debugging interface
+- Performance profiling dashboards
+- Task template marketplace
+
+**AI-Assisted Planning**:
+- Learn from successful task sequences
+- Predict likely clarification points
+- Suggest optimal task ordering
+- Auto-generate test cases
+- Identify reusable sub-plans
+
+### The Ultimate Goal
+
+Create a self-improving AI development system where:
+1. **Planning becomes smarter** through event analysis
+2. **Executors become more capable** through specialization
+3. **Failures become learning opportunities** through replay
+4. **Patterns become reusable templates** through extraction
+5. **Teams collaborate** through shared event streams
+
+DabGent MQ provides the foundation for all of this - we just need to build on top of it.
+
+---
+
+## 14) Context Squeezing Integration
 
 The planner integrates with the LLM-based context compaction utilities from `agent/utils.rs`:
 
