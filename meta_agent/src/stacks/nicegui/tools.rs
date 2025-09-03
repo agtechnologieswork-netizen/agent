@@ -388,6 +388,9 @@ Test failures:
                 })),
                 finish_reason: FinishReason::Stop,
                 output_tokens: 150,
+                input_tokens: 0,
+                cache_read_input_tokens: None,
+                cache_creation_input_tokens: None,
             })
         }
     }
