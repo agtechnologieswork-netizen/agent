@@ -1,86 +1,96 @@
-# Event-Sourced Planner — Implementation Design (meta_agent / meta_draft)
+# Event-Sourced Planner — Implementation Design (meta_agent)
 
-**Goal**: Build an event-sourcing‑first planner/executor system with MQ transport and context compaction.
+**Goal**: Build a clean, testable planner using the Handler trait pattern with event sourcing capabilities.
 
 **Core Capabilities**:
 - Parse plain text input into executable task sequence
-- Execute tasks sequentially via event-driven communication
+- Execute tasks sequentially via command/event pattern
 - Handle clarification requests with pause/resume semantics
 - Compact context between steps to manage token limits
 - Rebuild state from event log for reliability
 
 **Key Principles**:
-- Event Store as single source of truth
+- Separation of business logic from infrastructure via Handler trait
 - All state changes via domain events
-- Idempotent message handling
-- Deterministic replay from events
+- Clean command → event flow
+- Deterministic replay from events via fold()
+- Infrastructure-agnostic design
 
 ---
 
 ## 1) Architecture Overview
 
-### Event-Sourced Foundation
-The planner is built on event sourcing from the ground up, following `dabgent_agent` patterns:
+### Handler Trait Pattern
+The planner implements a clean Handler trait that separates business logic from infrastructure:
 
-**Core Components**:
-1. **Event Store**: Append-only log of all domain events (source of truth)
-2. **Message Bus**: Async communication between planner and executor via MQ
-3. **Outbox Pattern**: Transactional event publishing with retry
-4. **Inbox Pattern**: Deduplication and idempotent message processing
-5. **Projections**: Rebuild read models (PlannerState) from event stream
-
-**Domain Events** (Core to the system):
+**Core Handler Trait**:
 ```rust
-pub enum PlannerDomainEvent {
-    // Planning events
-    TaskPlanned { task_id: u64, description: String, kind: NodeKind },
-    TasksOrdered { task_ids: Vec<u64> },
-    
-    // Execution events  
-    TaskDispatched { task_id: u64, at: Timestamp },
-    TaskCompleted { task_id: u64, result_ref: String },
-    TaskFailed { task_id: u64, error: String },
-    
-    // Clarification events
+pub trait Handler {
+    type Command;
+    type Event;
+    type Error;
+
+    fn process(&mut self, command: Self::Command) -> Result<Vec<Self::Event>, Self::Error>;
+    fn fold(events: &[Self::Event]) -> Self;
+}
+```
+
+**Commands** (Input to the planner):
+```rust
+pub enum Command {
+    Initialize { user_input: String, attachments: Vec<Attachment> },
+    HandleExecutorEvent(ExecutorEvent),
+    Continue,
+    CompactContext { max_tokens: usize },
+}
+```
+
+**Events** (Output from the planner):
+```rust
+pub enum Event {
+    TasksPlanned { tasks: Vec<TaskPlan> },
+    TaskDispatched { task_id: u64, command: PlannerCmd },
+    TaskStatusUpdated { task_id: u64, status: TaskStatus, result: Option<String> },
     ClarificationRequested { task_id: u64, question: String },
     ClarificationReceived { task_id: u64, answer: String },
-    
-    // Context events
-    ContextCompacted { summary_ref: String, budget: usize },
+    ContextCompacted { summary: String, removed_task_ids: Vec<u64> },
+    PlanningCompleted { summary: String },
 }
 ```
 
-**Message Flow**:
+**Clean Separation**:
 ```
-User Input → plan_tasks() → TaskPlanned events → Event Store
-                                                      ↓
-                                              Outbox → MQ Bus
-                                                      ↓
-Executor consumes → processes → ExecutorEvent → MQ Bus
-                                                      ↓
-                                   Inbox → step() → New Events
+Commands → Planner.process() → Events
+                ↓
+         Internal State Update
+                ↓
+         Return Events to Caller
+                
+The caller (infrastructure) handles:
+- Message bus publication
+- Event persistence
+- HTTP/gRPC transport
+- Async coordination
 ```
 
-**Message Envelope** (All messages on the bus):
+**Event Sourcing via fold()**:
 ```rust
-pub struct Envelope {
-    pub headers: MessageHeaders {
-        event_type: String,
-        aggregate_id: String,      // planner instance id
-        causation_id: String,       // what caused this event
-        correlation_id: String,     // trace across services
-        message_id: String,         // unique, for dedup
-        timestamp: u64,
-        version: u8,
-    },
-    pub payload: Vec<u8>,          // serialized event
-}
+// Save events
+let events = planner.process(command)?;
+storage.append(&events);
+
+// Later: Rebuild state
+let historical_events = storage.load_all();
+let planner = Planner::fold(&historical_events);
 ```
 
-**Routing & Topics**:
-- `planner.cmd.*` - Commands from planner to executor
-- `executor.evt.*` - Events from executor to planner  
-- `ui.evt.*` - Events from UI (clarifications)
+**Integration Flexibility**:
+The planner can work with any infrastructure:
+- Synchronous direct calls
+- Async message buses (Kafka, Redis, RabbitMQ)
+- HTTP/gRPC servers
+- CLI applications
+- Test harnesses
 
 ## 2) Public Interfaces & Data Types
 
@@ -149,25 +159,39 @@ pub struct PlannerState {
 }
 ```
 
-### Planner runtime composition (LLM, Compactor, Event I/O)
+### Planner Implementation
 
 ```rust
 pub struct PlannerConfig {
     pub system_prompt: String,
-    pub profile: String, // squeezing profile
+    pub profile: String,           // compaction profile
+    pub token_budget: usize,       // max tokens for context
+    pub error_char_limit: usize,   // max chars for error messages
 }
 
-pub struct Planner<L: LlmClient, C: Compactor, E: EventBus> {
-    pub state: PlannerState,
-    pub llm: L,
-    pub compactor: C,
-    pub config: PlannerConfig,
-    pub bus: E,
+pub struct Planner {
+    state: PlannerState,
+    event_log: Vec<Event>,  // For audit/debugging
+}
+
+impl Handler for Planner {
+    type Command = Command;
+    type Event = Event;
+    type Error = PlannerError;
+    
+    fn process(&mut self, command: Command) -> Result<Vec<Event>, PlannerError> {
+        // Process command, update state, emit events
+    }
+    
+    fn fold(events: &[Event]) -> Self {
+        // Rebuild state from events
+    }
 }
 ```
 
-- The planner owns its own LLM client and a Compactor instance.
-- The Compactor is used to summarize/compact results into `context_summary` without naive truncation, respecting a token/character budget.
+- The planner is pure business logic without infrastructure dependencies
+- External components (LLM, Compactor) are accessed via the infrastructure layer
+- State changes only through events for auditability
 
 ---
 
@@ -200,116 +224,124 @@ stop
 @enduml
 ```
 
-### Event-Driven Implementation
+### Handler Implementation
 ```rust
 impl Planner {
-    /// Parse input and emit TaskPlanned events
-    pub async fn plan_tasks(&mut self, input: &str) -> Result<()> {
-        let tasks = parse_input_to_tasks(input)?;
+    /// Process commands and emit events
+    fn process(&mut self, command: Command) -> Result<Vec<Event>, PlannerError> {
+        let mut events = Vec::new();
         
-        for task in tasks {
-            // Emit domain event (persisted to event store)
-            self.emit_event(PlannerDomainEvent::TaskPlanned {
-                task_id: task.id,
-                description: task.description,
-                kind: task.kind,
-            }).await?;
-        }
-        
-        // Emit ordering event
-        self.emit_event(PlannerDomainEvent::TasksOrdered {
-            task_ids: tasks.iter().map(|t| t.id).collect(),
-        }).await?;
-        
-        Ok(())
-    }
-
-    /// Process events from inbox and emit new events
-    pub async fn step(&mut self, incoming: Option<ExecutorEvent>) -> Result<()> {
-        // Process incoming event and emit domain events
-        if let Some(evt) = incoming {
-            match evt {
-                ExecutorEvent::TaskCompleted { node_id, result } => {
-                    // Store result externally for large payloads
-                    let result_ref = self.store_result(&result).await?;
-                    
-                    self.emit_event(PlannerDomainEvent::TaskCompleted {
-                        task_id: node_id,
-                        result_ref,
-                    }).await?;
-                    
-                    // Trigger compaction
-                    let summary_ref = self.compact_context(&result).await?;
-                    self.emit_event(PlannerDomainEvent::ContextCompacted {
-                        summary_ref,
-                        budget: self.config.token_budget,
-                    }).await?;
-                }
+        match command {
+            Command::Initialize { user_input, attachments } => {
+                // Parse input into tasks
+                let tasks = self.parse_input(&user_input)?;
+                events.push(Event::TasksPlanned { tasks });
                 
-                ExecutorEvent::NeedsClarification { node_id, question } => {
-                    self.emit_event(PlannerDomainEvent::ClarificationRequested {
-                        task_id: node_id,
-                        question: question.clone(),
-                    }).await?;
-                    
-                    // Publish to UI topic
-                    self.bus.publish("ui.clarification.request", 
-                        PlannerCmd::RequestClarification { node_id, question }
-                    ).await?;
-                }
+                // Apply event and check for first task dispatch
+                self.apply_event(&events[0]);
                 
-                ExecutorEvent::ClarificationProvided { node_id, answer } => {
-                    self.emit_event(PlannerDomainEvent::ClarificationReceived {
-                        task_id: node_id,
-                        answer,
-                    }).await?;
-                }
-                
-                ExecutorEvent::TaskFailed { node_id, error } => {
-                    self.emit_event(PlannerDomainEvent::TaskFailed {
-                        task_id: node_id,
-                        error,
-                    }).await?;
+                if let Some(cmd) = self.generate_next_command() {
+                    if let Some(task_id) = self.state.get_next_undispatched_task() {
+                        events.push(Event::TaskDispatched {
+                            task_id,
+                            command: cmd,
+                        });
+                        self.apply_event(&events[1]);
+                    }
                 }
             }
-        }
-        
-        // Check if we should dispatch next task
-        if !self.state.waiting_for_clarification {
-            if let Some(next_task_id) = self.get_next_undispatched_task() {
-                // Check idempotency - don't dispatch twice
-                if !self.is_dispatched(next_task_id) {
-                    self.emit_event(PlannerDomainEvent::TaskDispatched {
-                        task_id: next_task_id,
-                        at: Timestamp::now(),
-                    }).await?;
-                    
-                    // Publish command to executor
-                    let task = self.state.get_task(next_task_id)?;
-                    self.bus.publish("executor.task.execute",
-                        PlannerCmd::ExecuteTask {
-                            node_id: task.id,
-                            kind: task.kind,
-                            parameters: task.description,
+            
+            Command::HandleExecutorEvent(executor_event) => {
+                match executor_event {
+                    ExecutorEvent::TaskCompleted { node_id, result } => {
+                        events.push(Event::TaskStatusUpdated {
+                            task_id: node_id,
+                            status: TaskStatus::Completed,
+                            result: Some(result),
+                        });
+                        self.apply_event(&events[0]);
+                        
+                        // Dispatch next task or complete
+                        if let Some(cmd) = self.generate_next_command() {
+                            match cmd {
+                                PlannerCmd::Complete { summary } => {
+                                    events.push(Event::PlanningCompleted { summary });
+                                }
+                                _ => {
+                                    if let Some(task_id) = self.state.get_next_undispatched_task() {
+                                        events.push(Event::TaskDispatched {
+                                            task_id,
+                                            command: cmd,
+                                        });
+                                    }
+                                }
+                            }
+                            if events.len() > 1 {
+                                self.apply_event(&events[1]);
+                            }
                         }
-                    ).await?;
+                    }
+                    
+                    ExecutorEvent::NeedsClarification { node_id, question } => {
+                        events.push(Event::ClarificationRequested {
+                            task_id: node_id,
+                            question,
+                        });
+                        self.apply_event(&events[0]);
+                    }
+                    
+                    ExecutorEvent::ClarificationProvided { node_id, answer } => {
+                        events.push(Event::ClarificationReceived {
+                            task_id: node_id,
+                            answer,
+                        });
+                        self.apply_event(&events[0]);
+                        
+                        // Resume task execution
+                        if let Some(cmd) = self.generate_next_command() {
+                            events.push(Event::TaskDispatched {
+                                task_id: node_id,
+                                command: cmd,
+                            });
+                            self.apply_event(&events[1]);
+                        }
+                    }
+                    
+                    ExecutorEvent::TaskFailed { node_id, error } => {
+                        events.push(Event::TaskStatusUpdated {
+                            task_id: node_id,
+                            status: TaskStatus::Failed,
+                            result: Some(error),
+                        });
+                        self.apply_event(&events[0]);
+                    }
+                }
+            }
+            
+            Command::Continue => {
+                // Continue with next task
+                if let Some(cmd) = self.generate_next_command() {
+                    // Handle based on command type
+                    // ... (similar to above)
+                }
+            }
+            
+            Command::CompactContext { max_tokens } => {
+                let (summary, removed_ids) = self.compact_context(max_tokens);
+                if !removed_ids.is_empty() {
+                    events.push(Event::ContextCompacted {
+                        summary,
+                        removed_task_ids: removed_ids,
+                    });
+                    self.apply_event(&events[0]);
                 }
             }
         }
         
-        Ok(())
-    }
-    
-    /// Emit event to store and outbox
-    async fn emit_event(&mut self, event: PlannerDomainEvent) -> Result<()> {
-        // Transaction: store event + add to outbox
-        self.event_store.append(event.clone()).await?;
-        self.outbox.add(event).await?;
+        // Store events in log for debugging
+        self.event_log.extend(events.clone());
         
-        // Update local projection immediately
-        self.state.apply_event(&event);
-        
-        Ok(())
+        Ok(events)
     }
 }
 ```
@@ -337,10 +369,54 @@ impl Planner {
 
 ## 5) Integration Points
 
-- Create `Planner` (with `PlannerState`, LLM, Compactor) inside `actors.rs` (or `planner.rs` re-exported).
-- When new **user input** arrives: build `attachments`, call `plan_tasks`, then call `step(ctx, None)`.
-- Transport: MQ bus (see §13). `PlannerCmd` is published; `ExecutorEvent` is consumed from the bus and fed to `step(ctx, Some(evt))`.
-- Ensure executor maps `NodeKind` → suitable actor/tool (code agent, test runner, retriever, etc.).
+The Handler trait enables flexible integration with any infrastructure:
+
+### Direct Integration
+```rust
+// Simple synchronous usage
+let mut planner = Planner::new();
+let events = planner.process(Command::Initialize {
+    user_input: "Analyze code and run tests".to_string(),
+    attachments: vec![],
+})?;
+
+// Infrastructure handles events
+for event in events {
+    handle_event(event);
+}
+```
+
+### Message Bus Integration
+```rust
+// Async with message bus
+async fn handle_command(planner: Arc<Mutex<Planner>>, command: Command) {
+    let mut planner = planner.lock().await;
+    let events = planner.process(command).unwrap();
+    
+    for event in events {
+        // Extract any commands to send
+        if let Event::TaskDispatched { command, .. } = event {
+            bus.publish("executor.commands", command).await;
+        }
+        // Store event
+        event_store.append(event).await;
+    }
+}
+```
+
+### Event Sourcing Integration
+```rust
+// Rebuild from events
+let historical_events = event_store.load_all().await;
+let planner = Planner::fold(&historical_events);
+
+// Continue from restored state
+let events = planner.process(Command::Continue)?;
+```
+
+- Infrastructure maps `NodeKind` → suitable actor/tool (code agent, test runner, retriever, etc.)
+- External services (LLM, Compactor) are injected via infrastructure layer
+- All messaging concerns stay outside the planner's business logic
 
 ---
 
