@@ -1,0 +1,22 @@
+id: factory-missing-extends-doc
+message: "Factory class should have @extends PHPDoc annotation"
+severity: warning
+language: php
+rule:
+  all:
+    - pattern: |
+        class $NAME extends Factory
+        {
+            $$$
+        }
+    - not:
+        precedes:
+          pattern: |
+            /**
+             * @extends $$$
+             */
+note: |
+  Add PHPDoc annotation above the class:
+  /**
+   * @extends \Illuminate\Database\Eloquent\Factories\Factory<\App\Models\ModelName>
+   */

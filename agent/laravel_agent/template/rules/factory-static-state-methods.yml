@@ -1,0 +1,30 @@
+id: factory-static-state-methods
+message: "Factory state methods should return 'static' type"
+severity: error
+language: php
+rule:
+  pattern: |
+    public function $METHOD(): $TYPE
+    {
+        return $this->state($$$);
+    }
+  not:
+    has:
+      pattern: "definition"
+      inside:
+        identifier: $METHOD
+  not:
+    any:
+      - has:
+          pattern: "static"
+          inside:
+            identifier: $TYPE
+      - has:
+          pattern: "self"
+          inside:
+            identifier: $TYPE
+fix: |
+  public function $METHOD(): static
+  {
+      return $this->state($$$);
+  }

@@ -1,0 +1,15 @@
+id: model-casts-definition
+message: "Extract casts from Laravel models"
+severity: info
+language: php
+rule:
+  any:
+    - pattern: |
+        protected $casts = [$$$CASTS];
+    - pattern: |
+        protected function casts(): array
+        {
+            return [$$$CASTS];
+        }
+note: |
+  Extracts cast definitions from Laravel models (both property and method syntax).

@@ -1,0 +1,9 @@
+id: factory-no-this-faker
+message: "Use fake() helper instead of $this->faker in Laravel factories"
+severity: error
+language: php
+rule:
+  pattern: |
+    $this->faker->$METHOD($$$)
+fix: |
+  fake()->$METHOD($$$)

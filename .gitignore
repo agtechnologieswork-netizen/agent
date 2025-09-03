@@ -173,4 +173,7 @@ agent/FSMAppRecovery.ipynb
 agent/app_dumps/*.*
 agent/bin/*.*
 agent/laravel_agent/template_backup_*/**
+agent/benchmark_results*/*
+
+# Keep our meta_agent nicegui output ignore
 meta_agent/nicegui_output/

@@ -1,0 +1,12 @@
+id: request-validation-rules
+message: "Extract validation rules from Laravel form requests"
+severity: info
+language: php
+rule:
+  pattern: |
+    public function rules(): array
+    {
+        return [$$$RULES];
+    }
+note: |
+  Extracts validation rules from Laravel form request classes.

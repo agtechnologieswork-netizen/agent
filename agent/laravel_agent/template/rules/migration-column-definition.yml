@@ -1,0 +1,13 @@
+id: migration-column-definition
+message: "Extract column definitions from migrations"
+severity: info
+language: php
+rule:
+  any:
+    - pattern: |
+        $table->$TYPE('$COLUMN')
+    - pattern: |
+        $table->$TYPE('$COLUMN')->$$$
+note: |
+  Extracts all column definitions from Laravel migrations for cross-layer validation.
+  Captures column name and type.

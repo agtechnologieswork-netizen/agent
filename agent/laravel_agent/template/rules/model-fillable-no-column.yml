@@ -1,0 +1,16 @@
+id: model-fillable-no-column
+message: "Model has fillable field that may not have corresponding database column"
+severity: warning
+language: php
+rule:
+  inside:
+    kind: class_declaration
+    has:
+      field: body
+      has:
+        pattern: |
+          protected $fillable = [$$$];
+note: |
+  This warns about fillable fields in models. Ensure each fillable field
+  has a corresponding column in the database migration. This rule serves
+  as a reminder to check cross-layer consistency.

@@ -9,6 +9,7 @@ from core.dagger_utils import ExecResult
 import uuid
 import logging
 from tenacity import retry, stop_after_attempt, wait_exponential_jitter, retry_if_exception_type, before_sleep_log
+from core.dagger_utils import write_files_bulk as _write_files_bulk
 
 logger = get_logger(name)
 
@@ -25,11 +26,21 @@ def _sorted_set(s: set[str]) -> list[str]:
 
 @object_type
 class Workspace:
-    client: dagger.Client
     ctr: Container
     start: Directory
     protected: set[str]
     allowed: set[str]
+
+    def __post_init__(self):
+        # dagger.Client can't be serialized by cattrs in newer versions
+        # so we store it as a private attribute outside the dataclass
+        self._client: dagger.Client | None = None
+    
+    @property
+    def client(self) -> dagger.Client:
+        if self._client is None:
+            raise RuntimeError("Client not initialized")
+        return self._client
 
     @classmethod
     async def create(
@@ -53,7 +64,9 @@ class Workspace:
             ctr = ctr.with_exec(cmd)
 
         ctr = ctr.with_env_variable("INSTANCE_ID", uuid.uuid4().hex)
-        return cls(client=client, ctr=ctr, start=my_context, protected=set(protected), allowed=set(allowed))
+        workspace = cls(ctr=ctr, start=my_context, protected=set(protected), allowed=set(allowed))
+        workspace._client = client
+        return workspace
 
     @function
     def permissions(self, protected: list[str] = [], allowed: list[str] = []) -> Self:
@@ -111,6 +124,13 @@ class Workspace:
             .with_exec(["sed", "-n", f"{start},{end}p", path])
             .stdout()
         )
+
+    @function
+    @retry_transport_errors
+    async def write_files_bulk(self, files: dict[str, str]) -> Self:
+        new_ctr = await _write_files_bulk(self.ctr, files, self.client)
+        self.ctr = new_ctr
+        return self
 
     @function
     @retry_transport_errors
@@ -186,13 +206,14 @@ class Workspace:
 
     @function
     def clone(self) -> Self:
-        return type(self)(
-            client=self.client,
+        cloned = type(self)(
             ctr=self.ctr,
             start=self.start,
             protected=self.protected,
             allowed=self.allowed
         )
+        cloned._client = self._client
+        return cloned
 
     @function
     @retry_transport_errors

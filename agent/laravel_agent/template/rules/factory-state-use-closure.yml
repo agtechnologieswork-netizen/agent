@@ -1,0 +1,15 @@
+id: factory-state-use-closure
+message: "state() method should use a closure for dynamic values"
+severity: warning
+language: php
+rule:
+  pattern: |
+    $this->state([$$$])
+  not:
+    has:
+      any:
+        - pattern: "fn"
+        - pattern: "function"
+note: |
+  Use a closure in state() method to ensure proper factory behavior.
+  Example: $this->state(fn (array $attributes) => ['field' => value])

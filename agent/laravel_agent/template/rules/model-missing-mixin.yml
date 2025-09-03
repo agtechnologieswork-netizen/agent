@@ -1,0 +1,19 @@
+id: model-missing-mixin
+message: "Model PHPDoc missing @mixin \\Eloquent annotation"
+severity: warning
+language: php
+rule:
+  all:
+    - inside:
+        kind: class_declaration
+        has:
+          pattern: |
+            class $MODEL extends Model
+    - precedes:
+        kind: comment
+        regex: "/\\*\\*"
+        not:
+          regex: "@mixin\\s+\\\\Eloquent"
+note: |
+  Add @mixin \Eloquent to model PHPDoc for better IDE support.
+  This enables autocompletion for Eloquent query builder methods.

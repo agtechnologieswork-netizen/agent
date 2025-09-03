@@ -6,6 +6,7 @@ from typing import Dict, Self, Optional, Literal, Any
 from dataclasses import dataclass
 from core.statemachine import StateMachine, State, Context
 from core.application import BaseApplicationContext
+from core.dagger_utils import write_files_bulk
 from llm.utils import get_best_coding_llm_client, get_universal_llm_client
 from llm.alloy import AlloyLLM
 from core.actors import BaseData
@@ -416,7 +417,7 @@ class FSMApplication:
 
     def maybe_error(self) -> str | None:
         return self.fsm.context.error
-    
+
     def is_agent_search_failed_error(self) -> bool:
         """Check if the error is an AgentSearchFailedException"""
         return self.fsm.context.error_type == "AgentSearchFailedException"
@@ -492,8 +493,7 @@ class FSMApplication:
             logger.info(
                 f"SERVER get_diff_with: Snapshot sample paths (up to 5): {sorted_snapshot_keys[:5]}"
             )
-            for file_path, content in snapshot.items():
-                start = start.with_new_file(file_path, content)
+            start = await write_files_bulk(start, snapshot, self.client)
             start = start.with_exec(["git", "add", "."]).with_exec(
                 ["git", "commit", "-m", "'snapshot'"]
             )
@@ -506,37 +506,46 @@ class FSMApplication:
                 ["git", "commit", "-m", "'initial'", "--allow-empty"]
             )
 
+        tree_snapshot = await start.with_exec(["tree"]).stdout()
+        logger.error(f"[ctr tree] [snapshot]\n{tree_snapshot}")
+
         # Add template files (they will appear in diff if not in snapshot)
         template_dir = self.client.host().directory("./nicegui_agent/template")
         start = start.with_directory(".", template_dir)
         logger.info("SERVER get_diff_with: Added template directory to workspace")
 
+        tree_snapshot = await start.with_exec(["tree"]).stdout()
+        logger.error(f"[ctr tree] [template]\n{tree_snapshot}")
+
         # Add FSM context files on top
-        for file_path, content in self.fsm.context.files.items():
-            start = start.with_new_file(file_path, content)
+        start = await write_files_bulk(start, self.fsm.context.files, self.client)
+
+        tree_snapshot = await start.with_exec(["tree"]).stdout()
+        logger.error(f"[ctr tree] [fsm_context]\n{tree_snapshot}")
+        fsm_file_keys = list(self.fsm.context.files.keys())
+        logger.error(f"[fsm context] [files] {fsm_file_keys}")
 
         logger.info(
             "SERVER get_diff_with: Calling workspace.diff() to generate final diff."
         )
-        diff = ""
-        try:
-            diff = (
-                await start.with_exec(["git", "add", "."])
-                .with_exec(["git", "diff", "HEAD"])
-                .stdout()
+        diff = (
+            await start.with_exec(["git", "add", "."])
+            .with_exec(["git", "diff", "HEAD"])
+            .stdout()
+        )
+        logger.info(
+            f"SERVER get_diff_with: workspace.diff() Succeeded. Diff length: {len(diff)}"
+        )
+        if not diff:
+            logger.warning(
+                "SERVER get_diff_with: Diff output is EMPTY. This might be expected if states match or an issue."
             )
-            logger.info(
-                f"SERVER get_diff_with: workspace.diff() Succeeded. Diff length: {len(diff)}"
-            )
-            if not diff:
-                logger.warning(
-                    "SERVER get_diff_with: Diff output is EMPTY. This might be expected if states match or an issue."
-                )
-        except Exception as e:
-            logger.exception(
-                "SERVER get_diff_with: Error during workspace.diff() execution."
-            )
-            diff = f"# ERROR GENERATING DIFF: {e}"
+        diff_names_only = (
+            await start.with_exec(["git", "add", "."])
+            .with_exec(["git", "diff", "HEAD", "--name-only"])
+            .stdout()
+        )
+        logger.error(f"[diff] [names] {diff_names_only}")
 
         return diff
 

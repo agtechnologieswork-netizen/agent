@@ -5,6 +5,7 @@ import enum
 from typing import Dict, Self, Optional, Literal, Any
 from dataclasses import dataclass, field
 from core.statemachine import StateMachine, State, Context
+from core.dagger_utils import write_files_bulk
 from llm.utils import get_best_coding_llm_client
 from core.actors import BaseData
 from core.base_node import Node
@@ -314,10 +315,10 @@ class FSMApplication:
         logger.info(
             f"SERVER get_diff_with: Received snapshot with {len(snapshot)} files."
         )
-        
+
         # Temporary fix: exclude .png and .ico files from diffs
         def should_exclude_from_diff(file_path: str) -> bool:
-            return file_path.lower().endswith(('.png', '.ico'))
+            return file_path.lower().endswith((".png", ".ico"))
 
         # Start with empty directory and git init
         start = self.client.container().from_("alpine/git").with_workdir("/app")
@@ -331,15 +332,7 @@ class FSMApplication:
             logger.info(
                 f"SERVER get_diff_with: Snapshot sample paths (up to 5): {sorted_snapshot_keys[:5]}"
             )
-
-            # Create a directory with all snapshot files first
-            snapshot_dir = self.client.directory()
-            for file_path, content in snapshot.items():
-                if not should_exclude_from_diff(file_path):
-                    snapshot_dir = snapshot_dir.with_new_file(file_path, content)
-
-            # Now add the entire directory at once
-            start = start.with_directory(".", snapshot_dir)
+            start = await write_files_bulk(start, snapshot, self.client)
             start = start.with_exec(["git", "add", "."]).with_exec(
                 ["git", "commit", "-m", "'snapshot'"]
             )
@@ -355,45 +348,43 @@ class FSMApplication:
         # Add template files (they will appear in diff if not in snapshot)
         template_dir = self.client.host().directory(self.template_path())
         start = start.with_directory(".", template_dir)
+        # Bake template mount so the files persist independently of host
+        start = await start.sync()
         logger.info("SERVER get_diff_with: Added template directory to workspace")
-        
+
         # Exclude .png and .ico files from being tracked by git
         # Using || true to prevent failures if no files are found
-        start = start.with_exec(["sh", "-c", "find . -name '*.png' -o -name '*.ico' | xargs -r git rm --cached || true"])
+        start = start.with_exec(
+            [
+                "sh",
+                "-c",
+                "find . -name '*.png' -o -name '*.ico' | xargs -r git rm --cached || true",
+            ]
+        )
 
         # Add FSM context files on top
-        if self.fsm.context.files:
-            # Create a directory with all FSM files
-            fsm_dir = self.client.directory()
-            for file_path, content in self.fsm.context.files.items():
-                if not should_exclude_from_diff(file_path):
-                    fsm_dir = fsm_dir.with_new_file(file_path, content)
-
-            # Add the entire FSM directory at once
-            start = start.with_directory(".", fsm_dir)
+        filtered_ctx_files = {
+            k: v
+            for k, v in self.fsm.context.files.items()
+            if not should_exclude_from_diff(k)
+        }
+        start = await write_files_bulk(start, filtered_ctx_files, self.client)
 
         logger.info(
             "SERVER get_diff_with: Calling workspace.diff() to generate final diff."
         )
-        diff = ""
-        try:
-            diff = (
-                await start.with_exec(["git", "add", "."])
-                .with_exec(["git", "diff", "HEAD"])
-                .stdout()
+        diff = (
+            await start.with_exec(["git", "add", "."])
+            .with_exec(["git", "diff", "HEAD"])
+            .stdout()
+        )
+        logger.info(
+            f"SERVER get_diff_with: workspace.diff() Succeeded. Diff length: {len(diff)}"
+        )
+        if not diff:
+            logger.warning(
+                "SERVER get_diff_with: Diff output is EMPTY. This might be expected if states match or an issue."
             )
-            logger.info(
-                f"SERVER get_diff_with: workspace.diff() Succeeded. Diff length: {len(diff)}"
-            )
-            if not diff:
-                logger.warning(
-                    "SERVER get_diff_with: Diff output is EMPTY. This might be expected if states match or an issue."
-                )
-        except Exception as e:
-            logger.exception(
-                "SERVER get_diff_with: Error during workspace.diff() execution."
-            )
-            diff = f"# ERROR GENERATING DIFF: {e}"
 
         return diff
 

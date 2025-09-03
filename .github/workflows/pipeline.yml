@@ -273,6 +273,7 @@ jobs:
           docker buildx build \
             --platform linux/arm64 \
             --target prod \
+            --no-cache \
             -t ${{ env.ECR_REGISTRY }}/${{ env.ECR_REPOSITORY }}:$IMAGE_TAG \
             -t ${{ env.ECR_REGISTRY }}/${{ env.ECR_REPOSITORY }}:${{ env.BRANCH_NAME }}-latest \
             --push \

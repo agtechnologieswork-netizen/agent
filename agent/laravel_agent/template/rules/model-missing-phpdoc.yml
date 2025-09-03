@@ -1,0 +1,28 @@
+id: model-missing-phpdoc
+message: "Model missing PHPDoc documentation"
+severity: error
+language: php
+rule:
+  all:
+    - pattern: |
+        class $MODEL extends Model
+        {
+            $$$
+        }
+    - not:
+        precedes:
+          kind: comment
+          regex: "/\\*\\*"
+note: |
+  All models must have PHPDoc documentation with:
+  - @property annotations for all database columns
+  - @method annotations for query builder methods
+  - @mixin \Eloquent for IDE support
+  
+  Example:
+  /**
+   * @property int $id
+   * @property string $name
+   * @mixin \Eloquent
+   */
+  class User extends Model

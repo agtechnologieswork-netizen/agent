@@ -1,0 +1,10 @@
+id: test-example-file
+message: "Example test file should be deleted"
+severity: error
+language: php
+rule:
+  filename:
+    regex: "ExampleTest\\.php$"
+note: |
+  Laravel's default example test files conflict with architectural rules.
+  Delete this file and create proper Pest tests instead.

@@ -1,0 +1,9 @@
+id: model-fillable-fields
+message: "Extract fillable fields from Laravel models"
+severity: info
+language: php
+rule:
+  pattern: |
+    protected $fillable = [$$$FIELDS];
+note: |
+  Extracts fillable field definitions from Laravel models for cross-layer validation.
