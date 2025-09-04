@@ -1,5 +1,6 @@
 # Implementation Tasks — Building the AI-Native Development Platform
 
+> **MVP NOTE**: See `meta_planner_tasks_MVP.md` for radical scope cut. This document contains the full roadmap.
 > From Handler trait to distributed AI orchestration - powered by DabGent MQ
 
 ## Phase 1: Core Implementation ✅ COMPLETED

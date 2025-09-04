@@ -10,6 +10,7 @@ pub mod handler;
 pub mod types;
 pub mod llm;
 pub mod llm_handler;
+pub mod cli;
 
 #[cfg(feature = "mq")]
 pub mod mq;

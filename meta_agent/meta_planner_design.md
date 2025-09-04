@@ -1,5 +1,7 @@
 # Event-Sourced Planner — Implementation Design (meta_agent)
 
+> **MVP NOTE**: See `meta_planner_design_MVP.md` for radical scope cut. This document contains the full vision.
+
 **Goal**: Build a production-ready AI planner leveraging DabGent MQ's event sourcing infrastructure and the Handler trait pattern.
 
 **Foundation**: DabGent MQ (`dabgent/dabgent_mq/`) provides the production event sourcing and messaging backbone that enables all our capabilities.
