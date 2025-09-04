@@ -1642,6 +1642,7 @@ dependencies = [
  "dabgent_mq",
  "dagger-sdk",
  "eyre",
+ "regex",
  "rig-core",
  "serde",
  "serde_json",

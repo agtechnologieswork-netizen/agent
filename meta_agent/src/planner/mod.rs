@@ -8,6 +8,8 @@
 
 pub mod handler;
 pub mod types;
+pub mod llm;
+pub mod llm_handler;
 
 #[cfg(feature = "mq")]
 pub mod mq;

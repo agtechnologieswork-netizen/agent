@@ -70,11 +70,11 @@
 ## Phase 3: Intelligence Layer (Weeks 3-4)
 
 ### Milestone 3.1 — LLM-Powered Planning
-- [ ] **Smart Task Extraction**:
-  - [ ] Parse natural language into structured task graphs
-  - [ ] Identify task dependencies and optimal ordering
-  - [ ] Classify NodeKind using semantic understanding
-  - [ ] Extract implied requirements and constraints
+- [x] **Smart Task Extraction** ✅ COMPLETED:
+  - [x] Parse natural language into structured task graphs (`llm.rs::parse_tasks()`)
+  - [x] Identify task dependencies and optimal ordering (`llm.rs::analyze_dependencies()`)
+  - [x] Classify NodeKind using semantic understanding (`llm.rs::classify_node_kind()`)
+  - [x] Extract implied requirements and constraints (`llm.rs::extract_attachments()`)
 - [ ] **Attachment Intelligence**:
   - [ ] Identify required resources from context
   - [ ] Validate URL accessibility

@@ -80,20 +80,17 @@ pub struct TaskPlan {
     pub attachments: Vec<crate::planner::types::Attachment>,
 }
 
-/// Error types for planner operations
+/// Error types for planner operations (MVP: simplified)
 #[derive(Debug, thiserror::Error)]
 pub enum PlannerError {
-    #[error("Invalid command in current state: {0}")]
+    #[error("Invalid command: {0}")]
     InvalidCommand(String),
     
     #[error("Task not found: {0}")]
     TaskNotFound(u64),
     
-    #[error("LLM error: {0}")]
-    LlmError(String),
-    
-    #[error("Parsing error: {0}")]
-    ParseError(String),
+    #[error("External error: {0}")]
+    ExternalError(String),
 }
 
 /// Event-sourced planner implementation
@@ -188,53 +185,17 @@ impl Planner {
         }
     }
 
-    /// Parse user input and generate task plan
+    /// Parse user input and generate task plan (MVP: simple fallback)
     fn parse_input(&self, user_input: &str) -> Result<Vec<TaskPlan>, PlannerError> {
-        // This is a simplified implementation
-        // In production, this would call an LLM to parse and plan
+        // MVP: Simple single-task fallback for when LLM is unavailable
+        // Real parsing should be done by LLM
         
-        let mut tasks = Vec::new();
-        let mut next_id = self.state.next_id;
-        
-        // Simple heuristic: split by newlines or sentence endings
-        let lines: Vec<&str> = user_input
-            .split('\n')
-            .filter(|s| !s.trim().is_empty())
-            .collect();
-        
-        for line in lines {
-            let line = line.trim();
-            
-            // Classify based on keywords (simplified)
-            let kind = if line.contains('?') || line.to_lowercase().contains("clarif") {
-                NodeKind::Clarification
-            } else if line.to_lowercase().contains("tool") || line.to_lowercase().contains("run") {
-                NodeKind::ToolCall
-            } else {
-                NodeKind::Processing
-            };
-            
-            tasks.push(TaskPlan {
-                id: next_id,
-                description: line.to_string(),
-                kind,
-                attachments: Vec::new(),
-            });
-            
-            next_id += 1;
-        }
-        
-        if tasks.is_empty() {
-            // Create a single processing task for the entire input
-            tasks.push(TaskPlan {
-                id: next_id,
-                description: user_input.to_string(),
-                kind: NodeKind::Processing,
-                attachments: Vec::new(),
-            });
-        }
-        
-        Ok(tasks)
+        Ok(vec![TaskPlan {
+            id: self.state.next_id,
+            description: user_input.to_string(),
+            kind: NodeKind::Processing,
+            attachments: Vec::new(),
+        }])
     }
 
     /// Generate the next command to dispatch
@@ -284,33 +245,11 @@ impl Planner {
         None
     }
 
-    /// Compact context by summarizing completed tasks
-    fn compact_context(&self, max_tokens: usize) -> (String, Vec<u64>) {
-        // Simple implementation: keep most recent tasks
-        // In production, use LLM to summarize
-        
-        let estimated_tokens_per_task = 50; // Rough estimate
-        let keep_count = max_tokens / estimated_tokens_per_task;
-        
-        let mut removed_ids = Vec::new();
-        let mut summary_parts = Vec::new();
-        
-        for (i, task) in self.state.tasks.iter().enumerate() {
-            if i >= keep_count && task.status == TaskStatus::Completed {
-                summary_parts.push(format!("Completed: {}", task.description));
-                removed_ids.push(task.id);
-            }
-        }
-        
-        let summary = if summary_parts.is_empty() {
-            self.state.context_summary.clone()
-        } else {
-            format!("{}\nPrevious work: {}", 
-                self.state.context_summary, 
-                summary_parts.join("; "))
-        };
-        
-        (summary, removed_ids)
+    /// Compact context (MVP: no-op, real implementation uses LLM)
+    fn compact_context(&self, _max_tokens: usize) -> (String, Vec<u64>) {
+        // MVP: Return existing summary without compaction
+        // Real compaction should be done by LLM
+        (self.state.context_summary.clone(), Vec::new())
     }
 }
 

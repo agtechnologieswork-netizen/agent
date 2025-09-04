@@ -72,14 +72,12 @@ pub enum ExecutorEvent {
     },
 }
 
-/// Attachment types (for future use)
+/// Attachment types (MVP: just URLs and files)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum AttachmentKind {
     /// URL reference
     Link(String),
-    /// Image reference (URL or opaque id)
-    ImageRef(String),
-    /// File reference (path or opaque id)
+    /// File reference (path)
     FileRef(String),
 }
 
@@ -267,26 +265,17 @@ impl PlannerState {
     }
 }
 
-/// Planner configuration
+/// Planner configuration (MVP: minimal config)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PlannerConfig {
-    /// System prompt for LLM interactions
-    pub system_prompt: String,
-    /// Compaction profile ("coding", "analysis", etc.)
-    pub profile: String,
     /// Maximum tokens for context
     pub token_budget: usize,
-    /// Maximum characters for error messages
-    pub error_char_limit: usize,
 }
 
 impl Default for PlannerConfig {
     fn default() -> Self {
         Self {
-            system_prompt: "You are a helpful task planning assistant.".to_string(),
-            profile: "coding".to_string(),
             token_budget: 4000,
-            error_char_limit: 500,
         }
     }
 }

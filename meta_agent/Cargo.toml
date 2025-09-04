@@ -22,6 +22,7 @@ walkdir = "2.4"
 dabgent_mq = { path = "../dabgent/dabgent_mq" }
 sqlx = { version = "0.8", features = ["sqlite", "runtime-tokio", "tls-native-tls"] }
 chrono = { version = "0.4", features = ["serde"] }
+regex = "1.10"
 
 [features]
 default = []
