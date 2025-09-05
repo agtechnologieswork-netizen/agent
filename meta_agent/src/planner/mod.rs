@@ -9,16 +9,10 @@
 pub mod handler;
 pub mod types;
 pub mod llm;
-pub mod llm_handler;
 pub mod cli;
 
 #[cfg(feature = "mq")]
 pub mod mq;
-#[cfg(feature = "mq")]
-pub mod mq_integration;
-
-#[cfg(test)]
-pub mod example_usage;
 
 // Re-export core handler trait and implementation
 pub use handler::{Command, Event, Handler, Planner, PlannerError, TaskPlan};
