@@ -1,8 +1,9 @@
-use criterion::{BenchmarkId, Criterion, black_box, criterion_group, criterion_main};
+use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
 use dabgent_mq::db::{EventStore, Metadata, Query, sqlite::SqliteStore};
 use dabgent_mq::models::Event;
 use serde::{Deserialize, Serialize};
 use sqlx::sqlite::SqlitePool;
+use std::hint::black_box;
 use std::sync::Arc;
 use tokio::runtime::Runtime;
 use tokio::sync::Barrier;
