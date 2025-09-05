@@ -15,12 +15,20 @@ pub async fn run_cli(llm: Option<Box<dyn LLMClientDyn>>, model: String) -> Resul
     println!("Type your request and press Enter:");
     println!();
     
-    // Read user input
-    print!("> ");
-    io::stdout().flush()?;
-    let mut input = String::new();
-    io::stdin().read_line(&mut input)?;
-    let input = input.trim();
+    // Read user input (support non-interactive via PLANNER_INPUT)
+    let input_env = std::env::var("PLANNER_INPUT").ok();
+    let input_owned: String;
+    let input = if let Some(val) = input_env {
+        input_owned = val;
+        input_owned.trim()
+    } else {
+        print!("> ");
+        io::stdout().flush()?;
+        let mut input_buf = String::new();
+        io::stdin().read_line(&mut input_buf)?;
+        input_owned = input_buf;
+        input_owned.trim()
+    };
     
     if input.is_empty() {
         println!("No input provided.");
