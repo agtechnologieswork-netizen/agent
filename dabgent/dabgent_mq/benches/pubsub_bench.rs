@@ -19,7 +19,7 @@ struct BenchEvent {
 
 impl Event for BenchEvent {
     const EVENT_VERSION: &'static str = "1.0";
-    fn event_type() -> &'static str {
+    fn event_type(&self) -> &'static str {
         "BenchEvent"
     }
 }

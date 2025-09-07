@@ -452,6 +452,8 @@ name = "dabgent_agent"
 version = "0.1.0"
 dependencies = [
  "chrono",
+ "dabgent_mq",
+ "dabgent_sandbox",
  "eyre",
  "rig-core",
  "serde",

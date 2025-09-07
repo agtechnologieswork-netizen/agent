@@ -22,7 +22,7 @@ pub struct Event {
     pub created_at: DateTime<Utc>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Metadata {
     pub correlation_id: Option<uuid::Uuid>,
     pub causation_id: Option<uuid::Uuid>,
@@ -58,22 +58,14 @@ impl Metadata {
     }
 }
 
-impl Default for Metadata {
-    fn default() -> Self {
-        Metadata {
-            correlation_id: None,
-            causation_id: None,
-            extra: None,
-        }
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct Query {
     pub stream_id: String,
     pub event_type: Option<String>,
     pub aggregate_id: Option<String>,
 }
+
+type SubscriberMap<T> = HashMap<Query, Vec<mpsc::UnboundedSender<T>>>;
 
 pub trait EventStore: Clone + Send + Sync + 'static {
     fn push_event<T: models::Event>(
@@ -104,7 +96,7 @@ pub trait EventStore: Clone + Send + Sync + 'static {
         sequence: Option<i64>,
     ) -> impl Future<Output = Result<Vec<Event>, Error>> + Send;
 
-    fn get_watchers(&self) -> &Arc<Mutex<HashMap<Query, Vec<mpsc::UnboundedSender<Event>>>>>;
+    fn get_watchers(&self) -> &Arc<Mutex<SubscriberMap<Event>>>;
 
     fn subscribe<T: models::Event + 'static>(
         &self,

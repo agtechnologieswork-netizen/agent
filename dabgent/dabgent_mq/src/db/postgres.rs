@@ -28,27 +28,24 @@ impl PostgresStore {
         let mut param_counter = 2;
 
         if let Some(event_type) = &query.event_type {
-            conditions.push(format!("event_type = ${}", param_counter));
+            conditions.push(format!("event_type = ${param_counter}"));
             params.push(event_type.clone());
             param_counter += 1;
         }
 
         if let Some(aggregate_id) = &query.aggregate_id {
-            conditions.push(format!("aggregate_id = ${}", param_counter));
+            conditions.push(format!("aggregate_id = ${param_counter}"));
             params.push(aggregate_id.clone());
             param_counter += 1;
         }
 
         if let Some(last_seq) = last_sequence {
-            conditions.push(format!("sequence > ${}", param_counter));
+            conditions.push(format!("sequence > ${param_counter}"));
             params.push(last_seq.to_string());
         }
 
         let where_clause = conditions.join(" AND ");
-        let sql = format!(
-            "SELECT * FROM events WHERE {} ORDER BY sequence ASC",
-            where_clause
-        );
+        let sql = format!("SELECT * FROM events WHERE {where_clause} ORDER BY sequence ASC");
         (sql, params)
     }
 }
@@ -87,7 +84,7 @@ impl EventStore for PostgresStore {
             "#
         )
         .bind(stream_id)
-        .bind(T::event_type())
+        .bind(event.event_type())
         .bind(aggregate_id)
         .bind(next_sequence)
         .bind(T::EVENT_VERSION)
