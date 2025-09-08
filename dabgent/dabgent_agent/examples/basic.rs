@@ -1,10 +1,11 @@
 use dabgent_agent::agent::{self};
 use dabgent_agent::handler::Handler;
 use dabgent_agent::thread::{self};
+use dabgent_agent::toolbox::{self};
 use dabgent_mq::EventStore;
 use dabgent_mq::db::{Query, sqlite::SqliteStore};
-use dabgent_sandbox::Sandbox;
 use dabgent_sandbox::dagger::Sandbox as DaggerSandbox;
+use dabgent_sandbox::{Sandbox, SandboxDyn};
 use eyre::Result;
 use rig::client::ProviderClient;
 
@@ -20,10 +21,12 @@ async fn run() {
         let sandbox = sandbox(&client).await?;
         let store = store().await;
 
-        let tools = dabgent_agent::toolbox::basic::toolset();
+        let mut tools = dabgent_agent::toolbox::basic::toolset();
+        tools.push(Box::new(DoneTool));
         let llm_worker = agent::Worker::new(llm, store.clone(), SYSTEM_PROMPT.to_owned(), tools);
 
-        let tools = dabgent_agent::toolbox::basic::toolset();
+        let mut tools = dabgent_agent::toolbox::basic::toolset();
+        tools.push(Box::new(DoneTool));
         let mut sandbox_worker = agent::ToolWorker::new(sandbox.boxed(), store.clone(), tools);
 
         tokio::spawn(async move {
@@ -33,10 +36,8 @@ async fn run() {
             let _ = sandbox_worker.run("basic", "thread").await;
         });
 
-        // launch
-
         let event = thread::Event::Prompted(
-            "app that fetches my ip using some api like ipify.org".to_owned(),
+            "minimal script that fetches my ip using some api like ipify.org".to_owned(),
         );
         store
             .push_event("basic", "thread", &event, &Default::default())
@@ -51,9 +52,10 @@ async fn run() {
         let mut receiver = store.subscribe::<thread::Event>(&query)?;
         let mut events = store.load_events(&query, None).await?;
         while let Some(event) = receiver.next().await {
-            tracing::info!(?event);
-            events.push(event?);
+            let event = event?;
+            events.push(event.clone());
             let thread = thread::Thread::fold(&events);
+            tracing::info!(?thread.state, ?event, "event");
             match thread.state {
                 thread::State::Done => break,
                 _ => continue,
@@ -93,3 +95,43 @@ Workspace is already set up using uv init.
 Use uv package manager if you need to add extra libraries.
 Program will be run using uv run main.py command.
 ";
+
+pub struct DoneTool;
+
+impl toolbox::Tool for DoneTool {
+    type Args = serde_json::Value;
+    type Output = String;
+    type Error = String;
+
+    fn name(&self) -> String {
+        "done".to_string()
+    }
+
+    fn definition(&self) -> rig::completion::ToolDefinition {
+        rig::completion::ToolDefinition {
+            name: self.name(),
+            description: "Run checks, if successful mark task as finished".to_string(),
+            parameters: serde_json::json!({
+                "type": "object",
+                "properties": {},
+            }),
+        }
+    }
+
+    async fn call(
+        &self,
+        _args: Self::Args,
+        sandbox: &mut Box<dyn SandboxDyn>,
+    ) -> eyre::Result<eyre::Result<Self::Output, Self::Error>> {
+        let result = sandbox.exec("uv run main.py").await?;
+        if result.exit_code == 0 {
+            Ok(Ok("success".to_string()))
+        } else {
+            let error = format!(
+                "code: {}\nstdout: {}\nstderr: {}",
+                result.exit_code, result.stdout, result.stderr
+            );
+            Ok(Err(error))
+        }
+    }
+}

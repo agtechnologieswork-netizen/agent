@@ -35,6 +35,7 @@ impl Handler for Thread {
                         true => State::Agent,
                         false => State::UserWait,
                     };
+                    thread.update_done_call(response);
                     thread.messages.push(response.message());
                 }
                 Event::ToolCompleted(response) => {
@@ -60,9 +61,19 @@ impl Thread {
                 return false;
             };
             res.id.eq(done_id) && res.content.iter().any(|tool| {
-                matches!(tool, rig::message::ToolResultContent::Text(text) if text.text == "success")
+                matches!(tool, rig::message::ToolResultContent::Text(text) if text.text == "\"success\"")
             })
         })
+    }
+
+    pub fn update_done_call(&mut self, response: &CompletionResponse) {
+        for item in response.choice.iter() {
+            if let rig::message::AssistantContent::ToolCall(call) = item {
+                if call.function.name == "done" {
+                    self.done_call_id = Some(call.id.clone());
+                }
+            }
+        }
     }
 
     pub fn has_tool_calls(response: &CompletionResponse) -> bool {

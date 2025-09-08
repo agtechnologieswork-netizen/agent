@@ -22,7 +22,7 @@ impl crate::Sandbox for Sandbox {
             .build()
             .unwrap();
         let ctr = ctr.with_exec_opts(command, opts);
-        let res = ExecResult::get_output(&self.ctr).await?;
+        let res = ExecResult::get_output(&ctr).await?;
         self.ctr = ctr;
         Ok(res)
     }
