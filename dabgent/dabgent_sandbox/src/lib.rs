@@ -1,4 +1,3 @@
-pub mod commands;
 pub mod dagger;
 use eyre::Result;
 use serde::{Deserialize, Serialize};
@@ -20,13 +19,13 @@ pub trait Sandbox {
 
     fn boxed(self) -> Box<dyn SandboxDyn>
     where
-        Self: Sized + 'static,
+        Self: Sized + Send + Sync + 'static,
     {
         Box::new(self)
     }
 }
 
-pub trait SandboxDyn {
+pub trait SandboxDyn: Send + Sync {
     fn exec<'a>(
         &'a mut self,
         command: &'a str,
@@ -50,7 +49,7 @@ pub trait SandboxDyn {
     ) -> Pin<Box<dyn Future<Output = Result<Vec<String>>> + Send + 'a>>;
 }
 
-impl<T: Sandbox> SandboxDyn for T {
+impl<T: Sandbox + Send + Sync> SandboxDyn for T {
     fn exec<'a>(
         &'a mut self,
         command: &'a str,

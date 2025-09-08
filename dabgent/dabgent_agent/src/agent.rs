@@ -1,24 +1,20 @@
 use crate::handler::Handler;
 use crate::llm::{Completion, CompletionResponse, LLMClient};
 use crate::thread::{Command, Event, Thread};
+use crate::toolbox::ToolDyn;
 use dabgent_mq::EventStore;
-use dabgent_sandbox::SandboxFork;
+use dabgent_sandbox::{SandboxDyn, SandboxForkDyn};
 use eyre::Result;
 
 pub struct Worker<T: LLMClient, E: EventStore> {
     llm: T,
     event_store: E,
     preamble: String,
-    tools: Vec<rig::completion::ToolDefinition>,
+    tools: Vec<Box<dyn ToolDyn>>,
 }
 
 impl<T: LLMClient, E: EventStore> Worker<T, E> {
-    pub fn new(
-        llm: T,
-        event_store: E,
-        preamble: String,
-        tools: Vec<rig::completion::ToolDefinition>,
-    ) -> Self {
+    pub fn new(llm: T, event_store: E, preamble: String, tools: Vec<Box<dyn ToolDyn>>) -> Self {
         Worker {
             llm,
             event_store,
@@ -64,23 +60,25 @@ impl<T: LLMClient, E: EventStore> Worker<T, E> {
         let completion = Completion::new(MODEL.to_owned(), message)
             .history(history)
             .preamble(self.preamble.clone())
-            .tools(self.tools.clone())
+            .tools(self.tools.iter().map(|tool| tool.definition()).collect())
             .temperature(1.0)
             .max_tokens(8192);
         self.llm.completion(completion).await
     }
 }
 
-pub struct ToolWorker<T: dabgent_sandbox::SandboxFork, E: EventStore> {
+pub struct ToolWorker<T: SandboxDyn + SandboxForkDyn, E: EventStore> {
     sandbox: T,
     event_store: E,
+    tools: Vec<Box<dyn ToolDyn>>,
 }
 
-impl<T: dabgent_sandbox::SandboxFork, E: EventStore> ToolWorker<T, E> {
-    pub fn new(sandbox: T, event_store: E) -> Self {
+impl<T: SandboxDyn + SandboxForkDyn, E: EventStore> ToolWorker<T, E> {
+    pub fn new(sandbox: T, event_store: E, tools: Vec<Box<dyn ToolDyn>>) -> Self {
         Self {
             sandbox,
             event_store,
+            tools,
         }
     }
 
@@ -94,13 +92,11 @@ impl<T: dabgent_sandbox::SandboxFork, E: EventStore> ToolWorker<T, E> {
         let mut receiver = self.event_store.subscribe::<Event>(&query)?;
         while let Some(event) = receiver.next().await {
             match event {
-                Ok(Event::LlmCompleted(event)) => {}
-                Ok(_) => {
-                    panic!("Unexpected event type")
-                }
+                Ok(Event::LlmCompleted(response)) if Thread::has_tool_calls(&response) => {}
                 Err(error) => {
                     tracing::error!(?error, "sandbox worker");
                 }
+                _ => continue,
             }
         }
         todo!();
