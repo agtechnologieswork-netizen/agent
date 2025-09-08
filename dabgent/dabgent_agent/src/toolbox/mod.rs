@@ -58,3 +58,29 @@ impl<T: Tool> ToolDyn for T {
         })
     }
 }
+
+pub trait ToolCallExt {
+    fn to_result(
+        &self,
+        result: Result<serde_json::Value, serde_json::Value>,
+    ) -> rig::message::ToolResult;
+}
+
+impl ToolCallExt for rig::message::ToolCall {
+    fn to_result(
+        &self,
+        result: Result<serde_json::Value, serde_json::Value>,
+    ) -> rig::message::ToolResult {
+        use rig::message::ToolResultContent;
+        let inner = match result {
+            Ok(value) => value,
+            Err(error) => serde_json::json!({"error": error}),
+        };
+        let inner = serde_json::to_string(&inner).unwrap();
+        rig::message::ToolResult {
+            id: self.id.clone(),
+            call_id: self.call_id.clone(),
+            content: rig::OneOrMany::one(ToolResultContent::Text(inner.into())),
+        }
+    }
+}

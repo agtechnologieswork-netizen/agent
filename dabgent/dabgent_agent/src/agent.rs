@@ -1,9 +1,9 @@
 use crate::handler::Handler;
 use crate::llm::{Completion, CompletionResponse, LLMClient};
-use crate::thread::{Command, Event, Thread};
-use crate::toolbox::ToolDyn;
+use crate::thread::{Command, Event, Thread, ToolResponse};
+use crate::toolbox::{ToolCallExt, ToolDyn};
 use dabgent_mq::EventStore;
-use dabgent_sandbox::{SandboxDyn, SandboxForkDyn};
+use dabgent_sandbox::SandboxDyn;
 use eyre::Result;
 
 pub struct Worker<T: LLMClient, E: EventStore> {
@@ -67,14 +67,14 @@ impl<T: LLMClient, E: EventStore> Worker<T, E> {
     }
 }
 
-pub struct ToolWorker<T: SandboxDyn + SandboxForkDyn, E: EventStore> {
-    sandbox: T,
+pub struct ToolWorker<E: EventStore> {
+    sandbox: Box<dyn SandboxDyn>,
     event_store: E,
     tools: Vec<Box<dyn ToolDyn>>,
 }
 
-impl<T: SandboxDyn + SandboxForkDyn, E: EventStore> ToolWorker<T, E> {
-    pub fn new(sandbox: T, event_store: E, tools: Vec<Box<dyn ToolDyn>>) -> Self {
+impl<E: EventStore> ToolWorker<E> {
+    pub fn new(sandbox: Box<dyn SandboxDyn>, event_store: E, tools: Vec<Box<dyn ToolDyn>>) -> Self {
         Self {
             sandbox,
             event_store,
@@ -82,8 +82,7 @@ impl<T: SandboxDyn + SandboxForkDyn, E: EventStore> ToolWorker<T, E> {
         }
     }
 
-    pub async fn run(&self, stream_id: &str, aggregate_id: &str) -> Result<()> {
-        let mut workspace = self.sandbox.fork().await?;
+    pub async fn run(&mut self, stream_id: &str, aggregate_id: &str) -> Result<()> {
         let query = dabgent_mq::db::Query {
             stream_id: stream_id.to_owned(),
             event_type: Some("llm_completed".to_owned()),
@@ -92,13 +91,53 @@ impl<T: SandboxDyn + SandboxForkDyn, E: EventStore> ToolWorker<T, E> {
         let mut receiver = self.event_store.subscribe::<Event>(&query)?;
         while let Some(event) = receiver.next().await {
             match event {
-                Ok(Event::LlmCompleted(response)) if Thread::has_tool_calls(&response) => {}
+                Ok(Event::LlmCompleted(response)) if Thread::has_tool_calls(&response) => {
+                    let events = self.event_store.load_events::<Event>(&query, None).await?;
+                    let mut thread = Thread::fold(&events);
+                    let tools = self.run_tools(&response).await?;
+                    let command = {
+                        let tools = tools.into_iter().map(rig::message::UserContent::ToolResult);
+                        ToolResponse {
+                            content: rig::OneOrMany::many(tools)?,
+                        }
+                    };
+                    let new_events = thread.process(Command::Tool(command))?;
+                    for event in new_events.iter() {
+                        self.event_store
+                            .push_event(stream_id, aggregate_id, event, &Default::default())
+                            .await?;
+                    }
+                }
                 Err(error) => {
                     tracing::error!(?error, "sandbox worker");
                 }
                 _ => continue,
             }
         }
-        todo!();
+        Ok(())
+    }
+
+    async fn run_tools(
+        &mut self,
+        response: &CompletionResponse,
+    ) -> Result<Vec<rig::message::ToolResult>> {
+        let mut results = Vec::new();
+        for content in response.choice.iter() {
+            if let rig::message::AssistantContent::ToolCall(call) = content {
+                let tool = self.tools.iter().find(|t| t.name() == call.function.name);
+                let result = match tool {
+                    Some(tool) => {
+                        let args = call.function.arguments.clone();
+                        tool.call(args, &mut self.sandbox).await?
+                    }
+                    None => {
+                        let error = format!("{} not found", call.function.name);
+                        Err(serde_json::json!(error))
+                    }
+                };
+                results.push(call.to_result(result));
+            }
+        }
+        Ok(results)
     }
 }
