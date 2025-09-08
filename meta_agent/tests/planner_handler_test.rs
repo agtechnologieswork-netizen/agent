@@ -14,9 +14,9 @@ fn planner_initialize_and_plan() {
         .expect("initialize should succeed");
 
     assert!(!events.is_empty());
-    // MVP: Current planner splits by newlines (3 tasks expected)
-    assert!(matches!(&events[0], Event::TasksPlanned { tasks } if tasks.len() == 3));
-    assert_eq!(planner.state().tasks.len(), 3);
+    // MVP: Basic planner creates single task
+    assert!(matches!(&events[0], Event::TasksPlanned { tasks } if tasks.len() == 1));
+    assert_eq!(planner.state().tasks.len(), 1);
 }
 
 #[test]

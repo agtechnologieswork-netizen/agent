@@ -11,8 +11,6 @@ use std::io::{self, Write};
 
 /// Run the planner CLI
 pub async fn run_cli(llm: Option<Box<dyn LLMClientDyn>>, model: String) -> Result<()> {
-    // Ensure env vars are loaded for agent/tests
-    crate::load_env_for_agent();
     println!("🤖 Event-Sourced LLM Planner (MVP)");
     println!("Type your request and press Enter:");
     println!();

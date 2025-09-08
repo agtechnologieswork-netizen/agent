@@ -8,13 +8,7 @@
 use crate::llm::{Completion, LLMClientDyn, CompletionResponse};
 use crate::planner::types::{NodeKind, AttachmentKind, Attachment};
 use crate::planner::handler::{TaskPlan, Event};
-fn extract_tag(input: &str, tag: &str) -> Option<String> {
-    let open = format!("<{}>", tag);
-    let close = format!("</{}>", tag);
-    let start = input.find(&open)? + open.len();
-    let end = input[start..].find(&close)? + start;
-    Some(input[start..end].to_string())
-}
+use crate::agent::utils::extract_tag;
 use eyre::Result;
 use rig::message::{Message, AssistantContent};
 use serde::{Deserialize, Serialize};

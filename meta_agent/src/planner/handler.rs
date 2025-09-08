@@ -185,32 +185,17 @@ impl Planner {
         }
     }
 
-    /// Parse user input and generate task plan (MVP: split by newlines)
+    /// Parse user input and generate task plan (MVP: simple fallback)
     fn parse_input(&self, user_input: &str) -> Result<Vec<TaskPlan>, PlannerError> {
-        // Split by newlines into individual tasks; trim and ignore empty lines
-        let mut next_id = self.state.next_id;
-        let mut plans = Vec::new();
-        for line in user_input.lines() {
-            let desc = line.trim();
-            if desc.is_empty() { continue; }
-            plans.push(TaskPlan {
-                id: next_id,
-                description: desc.to_string(),
-                kind: NodeKind::Processing,
-                attachments: Vec::new(),
-            });
-            next_id += 1;
-        }
-        // Fallback: if no lines produced, create a single task with the whole input
-        if plans.is_empty() {
-            plans.push(TaskPlan {
-                id: self.state.next_id,
-                description: user_input.to_string(),
-                kind: NodeKind::Processing,
-                attachments: Vec::new(),
-            });
-        }
-        Ok(plans)
+        // MVP: Simple single-task fallback for when LLM is unavailable
+        // Real parsing should be done by LLM
+        
+        Ok(vec![TaskPlan {
+            id: self.state.next_id,
+            description: user_input.to_string(),
+            kind: NodeKind::Processing,
+            attachments: Vec::new(),
+        }])
     }
 
     /// Generate the next command to dispatch
@@ -389,12 +374,14 @@ impl Handler for Planner {
             
             Command::CompactContext { max_tokens } => {
                 let (summary, removed_ids) = self.compact_context(max_tokens);
-                // Emit compaction event even if no tasks removed, to record summary
-                events.push(Event::ContextCompacted {
-                    summary,
-                    removed_task_ids: removed_ids,
-                });
-                self.apply_event(&events[0]);
+                
+                if !removed_ids.is_empty() {
+                    events.push(Event::ContextCompacted {
+                        summary,
+                        removed_task_ids: removed_ids,
+                    });
+                    self.apply_event(&events[0]);
+                }
             }
         }
         
