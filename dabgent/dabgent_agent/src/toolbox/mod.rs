@@ -19,7 +19,7 @@ pub trait Tool: Send + Sync {
 
 type ToolDynResult = Result<Result<serde_json::Value, serde_json::Value>>;
 
-pub trait ToolDyn {
+pub trait ToolDyn: Send + Sync {
     fn name(&self) -> String;
     fn definition(&self) -> rig::completion::ToolDefinition;
     fn call<'a>(
