@@ -5,6 +5,13 @@ pub struct Sandbox {
     ctr: dagger_sdk::Container,
 }
 
+impl Sandbox {
+    /// Create a sandbox from an existing Dagger container
+    pub fn from_container(ctr: dagger_sdk::Container) -> Self {
+        Self { ctr }
+    }
+}
+
 impl crate::Sandbox for Sandbox {
     async fn exec(&mut self, command: &str) -> Result<ExecResult> {
         let ctr = self.ctr.clone();

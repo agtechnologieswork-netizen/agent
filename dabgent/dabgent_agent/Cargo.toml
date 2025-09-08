@@ -16,3 +16,5 @@ thiserror = "2.0"
 rig-core = "0.19.0"
 dabgent_mq = { path = "../dabgent_mq" }
 dabgent_sandbox = { path = "../dabgent_sandbox" }
+clap = { version = "4.5.47", features = ["derive"] }
+tokio-stream = "0.1"
