@@ -1,24 +1,20 @@
 use crate::handler::Handler;
 use crate::llm::{Completion, CompletionResponse, LLMClient};
-use crate::thread::{Command, Event, Thread};
+use crate::thread::{Command, Event, Thread, ToolResponse};
+use crate::toolbox::{ToolCallExt, ToolDyn};
 use dabgent_mq::EventStore;
-use dabgent_sandbox::SandboxFork;
+use dabgent_sandbox::SandboxDyn;
 use eyre::Result;
 
 pub struct Worker<T: LLMClient, E: EventStore> {
     llm: T,
     event_store: E,
     preamble: String,
-    tools: Vec<rig::completion::ToolDefinition>,
+    tools: Vec<Box<dyn ToolDyn>>,
 }
 
 impl<T: LLMClient, E: EventStore> Worker<T, E> {
-    pub fn new(
-        llm: T,
-        event_store: E,
-        preamble: String,
-        tools: Vec<rig::completion::ToolDefinition>,
-    ) -> Self {
+    pub fn new(llm: T, event_store: E, preamble: String, tools: Vec<Box<dyn ToolDyn>>) -> Self {
         Worker {
             llm,
             event_store,
@@ -64,28 +60,29 @@ impl<T: LLMClient, E: EventStore> Worker<T, E> {
         let completion = Completion::new(MODEL.to_owned(), message)
             .history(history)
             .preamble(self.preamble.clone())
-            .tools(self.tools.clone())
+            .tools(self.tools.iter().map(|tool| tool.definition()).collect())
             .temperature(1.0)
             .max_tokens(8192);
         self.llm.completion(completion).await
     }
 }
 
-pub struct ToolWorker<T: dabgent_sandbox::SandboxFork, E: EventStore> {
-    sandbox: T,
+pub struct ToolWorker<E: EventStore> {
+    sandbox: Box<dyn SandboxDyn>,
     event_store: E,
+    tools: Vec<Box<dyn ToolDyn>>,
 }
 
-impl<T: dabgent_sandbox::SandboxFork, E: EventStore> ToolWorker<T, E> {
-    pub fn new(sandbox: T, event_store: E) -> Self {
+impl<E: EventStore> ToolWorker<E> {
+    pub fn new(sandbox: Box<dyn SandboxDyn>, event_store: E, tools: Vec<Box<dyn ToolDyn>>) -> Self {
         Self {
             sandbox,
             event_store,
+            tools,
         }
     }
 
-    pub async fn run(&self, stream_id: &str, aggregate_id: &str) -> Result<()> {
-        let mut workspace = self.sandbox.fork().await?;
+    pub async fn run(&mut self, stream_id: &str, aggregate_id: &str) -> Result<()> {
         let query = dabgent_mq::db::Query {
             stream_id: stream_id.to_owned(),
             event_type: Some("llm_completed".to_owned()),
@@ -94,116 +91,53 @@ impl<T: dabgent_sandbox::SandboxFork, E: EventStore> ToolWorker<T, E> {
         let mut receiver = self.event_store.subscribe::<Event>(&query)?;
         while let Some(event) = receiver.next().await {
             match event {
-                Ok(Event::LlmCompleted(event)) => {}
-                Ok(_) => {
-                    panic!("Unexpected event type")
+                Ok(Event::LlmCompleted(response)) if Thread::has_tool_calls(&response) => {
+                    let events = self.event_store.load_events::<Event>(&query, None).await?;
+                    let mut thread = Thread::fold(&events);
+                    let tools = self.run_tools(&response).await?;
+                    let command = {
+                        let tools = tools.into_iter().map(rig::message::UserContent::ToolResult);
+                        ToolResponse {
+                            content: rig::OneOrMany::many(tools)?,
+                        }
+                    };
+                    let new_events = thread.process(Command::Tool(command))?;
+                    for event in new_events.iter() {
+                        self.event_store
+                            .push_event(stream_id, aggregate_id, event, &Default::default())
+                            .await?;
+                    }
                 }
                 Err(error) => {
                     tracing::error!(?error, "sandbox worker");
                 }
+                _ => continue,
             }
         }
-        todo!()
+        Ok(())
     }
-}
 
-pub fn default_toolset() -> Vec<rig::completion::ToolDefinition> {
-    vec![
-        rig::completion::ToolDefinition {
-            name: "bash".to_string(),
-            description: "Run a bash command".to_string(),
-            parameters: serde_json::json!({
-                "type": "object",
-                "properties": {
-                    "command": {
-                        "type": "string",
-                        "description": "Command to run in the shell",
+    async fn run_tools(
+        &mut self,
+        response: &CompletionResponse,
+    ) -> Result<Vec<rig::message::ToolResult>> {
+        let mut results = Vec::new();
+        for content in response.choice.iter() {
+            if let rig::message::AssistantContent::ToolCall(call) = content {
+                let tool = self.tools.iter().find(|t| t.name() == call.function.name);
+                let result = match tool {
+                    Some(tool) => {
+                        let args = call.function.arguments.clone();
+                        tool.call(args, &mut self.sandbox).await?
                     }
-                },
-                "required": ["command"],
-            }),
-        },
-        rig::completion::ToolDefinition {
-            name: "write_file".to_string(),
-            description: "Write content to a file".to_string(),
-            parameters: serde_json::json!({
-                "type": "object",
-                "properties": {
-                    "path": {
-                        "type": "string",
-                        "description": "Path to the file",
-                    },
-                    "contents": {
-                        "type": "string",
-                        "description": "Content to write to the file",
+                    None => {
+                        let error = format!("{} not found", call.function.name);
+                        Err(serde_json::json!(error))
                     }
-                },
-                "required": ["path", "content"],
-            }),
-        },
-        rig::completion::ToolDefinition {
-            name: "read_file".to_string(),
-            description: "Read content from a file".to_string(),
-            parameters: serde_json::json!({
-                "type": "object",
-                "properties": {
-                    "path": {
-                        "type": "string",
-                        "description": "Path to the file",
-                    }
-                },
-                "required": ["path"],
-            }),
-        },
-        rig::completion::ToolDefinition {
-            name: "list_files".to_string(),
-            description: "List files in a directory".to_string(),
-            parameters: serde_json::json!({
-                "type": "object",
-                "properties": {
-                    "path": {
-                        "type": "string",
-                        "description": "Path to the directory",
-                    }
-                },
-                "required": ["path"],
-            }),
-        },
-        rig::completion::ToolDefinition {
-            name: "remove_file".to_string(),
-            description: "Remove a file".to_string(),
-            parameters: serde_json::json!({
-                "type": "object",
-                "properties": {
-                    "path": {
-                        "type": "string",
-                        "description": "Path to the file to remove",
-                    }
-                },
-                "required": ["path"],
-            }),
-        },
-        rig::completion::ToolDefinition {
-            name: "edit_file".to_string(),
-            description: "Edit a file by replacing text".to_string(),
-            parameters: serde_json::json!({
-                "type": "object",
-                "properties": {
-                    "path": {
-                        "type": "string",
-                        "description": "Path to the file",
-                    },
-                    "find": {
-                        "type": "string",
-                        "description": "Text to find in the file",
-                    },
-                    "replace": {
-                        "type": "string",
-                        "description": "Text to replace with",
-                    }
-                },
-                "required": ["path", "find", "replace"],
-            }),
-        },
-    ]
+                };
+                results.push(call.to_result(result));
+            }
+        }
+        Ok(results)
+    }
 }
