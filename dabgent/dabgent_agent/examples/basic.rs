@@ -1,7 +1,7 @@
 use dabgent_agent::agent::{self};
 use dabgent_agent::handler::Handler;
 use dabgent_agent::thread::{self};
-use dabgent_agent::toolbox::{self};
+use dabgent_agent::toolbox::{self, basic::toolset};
 use dabgent_mq::EventStore;
 use dabgent_mq::db::{Query, sqlite::SqliteStore};
 use dabgent_sandbox::dagger::Sandbox as DaggerSandbox;
@@ -21,12 +21,10 @@ async fn run() {
         let sandbox = sandbox(&client).await?;
         let store = store().await;
 
-        let mut tools = dabgent_agent::toolbox::basic::toolset();
-        tools.push(Box::new(DoneTool));
+        let tools = toolset(Validator);
         let llm_worker = agent::Worker::new(llm, store.clone(), SYSTEM_PROMPT.to_owned(), tools);
 
-        let mut tools = dabgent_agent::toolbox::basic::toolset();
-        tools.push(Box::new(DoneTool));
+        let tools = toolset(Validator);
         let mut sandbox_worker = agent::ToolWorker::new(sandbox.boxed(), store.clone(), tools);
 
         tokio::spawn(async move {
@@ -96,42 +94,19 @@ Use uv package manager if you need to add extra libraries.
 Program will be run using uv run main.py command.
 ";
 
-pub struct DoneTool;
+pub struct Validator;
 
-impl toolbox::Tool for DoneTool {
-    type Args = serde_json::Value;
-    type Output = String;
-    type Error = String;
-
-    fn name(&self) -> String {
-        "done".to_string()
-    }
-
-    fn definition(&self) -> rig::completion::ToolDefinition {
-        rig::completion::ToolDefinition {
-            name: self.name(),
-            description: "Run checks, if successful mark task as finished".to_string(),
-            parameters: serde_json::json!({
-                "type": "object",
-                "properties": {},
-            }),
-        }
-    }
-
-    async fn call(
-        &self,
-        _args: Self::Args,
-        sandbox: &mut Box<dyn SandboxDyn>,
-    ) -> eyre::Result<eyre::Result<Self::Output, Self::Error>> {
-        let result = sandbox.exec("uv run main.py").await?;
-        if result.exit_code == 0 {
-            Ok(Ok("success".to_string()))
-        } else {
-            let error = format!(
-                "code: {}\nstdout: {}\nstderr: {}",
-                result.exit_code, result.stdout, result.stderr
-            );
-            Ok(Err(error))
-        }
+impl toolbox::Validator for Validator {
+    async fn run(&self, sandbox: &mut Box<dyn SandboxDyn>) -> Result<Result<(), String>> {
+        sandbox.exec("uv run main.py").await.map(|result| {
+            if result.exit_code == 0 {
+                Ok(())
+            } else {
+                Err(format!(
+                    "code: {}\nstdout: {}\nstderr: {}",
+                    result.exit_code, result.stdout, result.stderr
+                ))
+            }
+        })
     }
 }
