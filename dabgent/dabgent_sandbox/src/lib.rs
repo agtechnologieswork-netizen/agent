@@ -2,6 +2,7 @@ pub mod commands;
 pub mod dagger;
 use eyre::Result;
 use serde::{Deserialize, Serialize};
+use std::pin::Pin;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ExecResult {
@@ -16,10 +17,108 @@ pub trait Sandbox {
     fn read_file(&self, path: &str) -> impl Future<Output = Result<String>> + Send;
     fn delete_file(&mut self, path: &str) -> impl Future<Output = Result<()>> + Send;
     fn list_directory(&self, path: &str) -> impl Future<Output = Result<Vec<String>>> + Send;
+
+    fn boxed(self) -> Box<dyn SandboxDyn>
+    where
+        Self: Sized + 'static,
+    {
+        Box::new(self)
+    }
+}
+
+pub trait SandboxDyn {
+    fn exec<'a>(
+        &'a mut self,
+        command: &'a str,
+    ) -> Pin<Box<dyn Future<Output = Result<ExecResult>> + Send + 'a>>;
+    fn write_file<'a>(
+        &'a mut self,
+        path: &'a str,
+        content: &'a str,
+    ) -> Pin<Box<dyn Future<Output = Result<()>> + Send + 'a>>;
+    fn read_file<'a>(
+        &'a self,
+        path: &'a str,
+    ) -> Pin<Box<dyn Future<Output = Result<String>> + Send + 'a>>;
+    fn delete_file<'a>(
+        &'a mut self,
+        path: &'a str,
+    ) -> Pin<Box<dyn Future<Output = Result<()>> + Send + 'a>>;
+    fn list_directory<'a>(
+        &'a self,
+        path: &'a str,
+    ) -> Pin<Box<dyn Future<Output = Result<Vec<String>>> + Send + 'a>>;
+}
+
+impl<T: Sandbox> SandboxDyn for T {
+    fn exec<'a>(
+        &'a mut self,
+        command: &'a str,
+    ) -> Pin<Box<dyn Future<Output = Result<ExecResult>> + Send + 'a>> {
+        Box::pin(self.exec(command))
+    }
+
+    fn write_file<'a>(
+        &'a mut self,
+        path: &'a str,
+        content: &'a str,
+    ) -> Pin<Box<dyn Future<Output = Result<()>> + Send + 'a>> {
+        Box::pin(self.write_file(path, content))
+    }
+
+    fn read_file<'a>(
+        &'a self,
+        path: &'a str,
+    ) -> Pin<Box<dyn Future<Output = Result<String>> + Send + 'a>> {
+        Box::pin(self.read_file(path))
+    }
+
+    fn delete_file<'a>(
+        &'a mut self,
+        path: &'a str,
+    ) -> Pin<Box<dyn Future<Output = Result<()>> + Send + 'a>> {
+        Box::pin(self.delete_file(path))
+    }
+
+    fn list_directory<'a>(
+        &'a self,
+        path: &'a str,
+    ) -> Pin<Box<dyn Future<Output = Result<Vec<String>>> + Send + 'a>> {
+        Box::pin(self.list_directory(path))
+    }
 }
 
 pub trait SandboxFork {
     fn fork(&self) -> impl Future<Output = Result<Self>> + Send
     where
-        Self: Sized;
+        Self: Sized + 'static;
+
+    fn boxed(self) -> Box<dyn SandboxForkDyn>
+    where
+        Self: Sized + 'static,
+    {
+        Box::new(self)
+    }
+}
+
+pub trait SandboxForkDyn {
+    fn fork<'a>(
+        &self,
+    ) -> Pin<Box<dyn Future<Output = Result<Box<dyn SandboxForkDyn>>> + Send + 'a>>;
+}
+
+impl<T: SandboxFork> SandboxForkDyn for T {
+    fn fork<'a>(
+        &self,
+    ) -> Pin<Box<dyn Future<Output = Result<Box<dyn SandboxForkDyn>>> + Send + 'a>> {
+        // let res = async {
+        //     let forked = self.fork().await?;
+        //     Ok(Box::new(forked) as Box<dyn SandboxForkDyn>)
+        // };
+        // todo!()
+        Box::pin(async move {
+            let forked = self.fork().await?;
+            Ok(Box::new(forked) as Box<dyn SandboxForkDyn>)
+        })
+    }
 }

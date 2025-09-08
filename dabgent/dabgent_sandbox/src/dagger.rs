@@ -1,6 +1,7 @@
 use crate::ExecResult;
 use eyre::Result;
 
+#[derive(Clone)]
 pub struct Sandbox {
     ctr: dagger_sdk::Container,
 }
