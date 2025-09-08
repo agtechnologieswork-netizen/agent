@@ -1,0 +1,39 @@
+[package]
+name = "meta_agent"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+eyre = "0.6"
+tokio = { version = "1", features = ["full"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tracing = "0.1"
+tracing-subscriber = "0.3"
+tera = "1.19"
+rig-core = "0.19.0"
+uuid = { version = "1", features = ["v4", "v7", "serde"] }
+chrono = { version = "0.4", features = ["serde"] }
+thiserror = "2.0"
+regex = "1.10"
+dotenvy = "0.15"
+
+# Optional MQ integration (for tests behind the `mq` feature)
+dabgent_mq = { path = "../dabgent/dabgent_mq", optional = true }
+sqlx = { version = "0.8", features = ["sqlite", "runtime-tokio", "tls-native-tls"], optional = true }
+
+clap = { version = "4.5", features = ["derive"] }
+
+[features]
+# Enables integration with DabGent MQ and SQLite-backed tests
+mq = ["dabgent_mq", "sqlx/sqlite"]
+
+authored-tests = []
+
+[dev-dependencies]
+# Useful for integration tests if run with `--features mq`
+sqlx = { version = "0.8", features = ["sqlite", "runtime-tokio", "tls-native-tls"] }
+
+[[bin]]
+name = "planner_cli"
+path = "src/bin/planner_cli.rs"
