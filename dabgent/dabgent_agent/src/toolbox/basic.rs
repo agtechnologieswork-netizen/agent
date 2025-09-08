@@ -299,5 +299,12 @@ impl Tool for EditFile {
 }
 
 pub fn toolset() -> Vec<Box<dyn super::ToolDyn>> {
-    vec![Box::new(Bash), Box::new(WriteFile), Box::new(EditFile)]
+    vec![
+        Box::new(Bash),
+        Box::new(WriteFile),
+        Box::new(ReadFile),
+        Box::new(LsDir),
+        Box::new(RmFile),
+        Box::new(EditFile),
+    ]
 }
