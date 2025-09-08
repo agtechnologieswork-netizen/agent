@@ -34,6 +34,38 @@ jobs:
           version: ">=0.11.5"
           args: check .
 
+  rust-checks:
+    name: Rust Checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - name: Cache cargo dependencies
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            dabgent/target/
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Run cargo check
+        working-directory: ./dabgent
+        run: cargo check
+
+      - name: Run cargo clippy
+        working-directory: ./dabgent
+        run: cargo clippy -- -D warnings
+
   build-template:
     name: Build Template
     runs-on: ubuntu-latest
