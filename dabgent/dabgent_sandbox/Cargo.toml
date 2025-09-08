@@ -1,0 +1,16 @@
+[package]
+name = "dabgent_sandbox"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+dagger-sdk = "0.18.16"
+tokio = { version = "1", features = ["full"] }
+serde = { version = "1", features = ["derive"] }
+eyre = "0.6"
+chrono = { version = "0.4", features = ["serde"] }
+serde_json = "1"
+uuid = { version = "1", features = ["v4", "v7", "serde"] }
+tracing = "0.1"
+tracing-subscriber = "0.3"
+thiserror = "2.0"
