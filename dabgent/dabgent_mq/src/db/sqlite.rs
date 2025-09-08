@@ -48,10 +48,14 @@ impl SqliteStore {
         }
 
         let where_clause = conditions.join(" AND ");
+<<<<<<< HEAD
         let sql = format!(
             "SELECT * FROM events WHERE {} ORDER BY sequence ASC",
             where_clause
         );
+=======
+        let sql = format!("SELECT * FROM events WHERE {where_clause} ORDER BY sequence ASC");
+>>>>>>> main
         (sql, params)
     }
 }
@@ -85,7 +89,11 @@ impl EventStore for SqliteStore {
             "#
         )
         .bind(stream_id)
+<<<<<<< HEAD
         .bind(T::event_type())
+=======
+        .bind(event.event_type())
+>>>>>>> main
         .bind(aggregate_id)
         .bind(next_sequence)
         .bind(T::EVENT_VERSION)

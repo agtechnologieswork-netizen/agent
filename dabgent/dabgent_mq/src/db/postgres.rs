@@ -28,27 +28,43 @@ impl PostgresStore {
         let mut param_counter = 2;
 
         if let Some(event_type) = &query.event_type {
+<<<<<<< HEAD
             conditions.push(format!("event_type = ${}", param_counter));
+=======
+            conditions.push(format!("event_type = ${param_counter}"));
+>>>>>>> main
             params.push(event_type.clone());
             param_counter += 1;
         }
 
         if let Some(aggregate_id) = &query.aggregate_id {
+<<<<<<< HEAD
             conditions.push(format!("aggregate_id = ${}", param_counter));
+=======
+            conditions.push(format!("aggregate_id = ${param_counter}"));
+>>>>>>> main
             params.push(aggregate_id.clone());
             param_counter += 1;
         }
 
         if let Some(last_seq) = last_sequence {
+<<<<<<< HEAD
             conditions.push(format!("sequence > ${}", param_counter));
+=======
+            conditions.push(format!("sequence > ${param_counter}"));
+>>>>>>> main
             params.push(last_seq.to_string());
         }
 
         let where_clause = conditions.join(" AND ");
+<<<<<<< HEAD
         let sql = format!(
             "SELECT * FROM events WHERE {} ORDER BY sequence ASC",
             where_clause
         );
+=======
+        let sql = format!("SELECT * FROM events WHERE {where_clause} ORDER BY sequence ASC");
+>>>>>>> main
         (sql, params)
     }
 }
@@ -87,7 +103,11 @@ impl EventStore for PostgresStore {
             "#
         )
         .bind(stream_id)
+<<<<<<< HEAD
         .bind(T::event_type())
+=======
+        .bind(event.event_type())
+>>>>>>> main
         .bind(aggregate_id)
         .bind(next_sequence)
         .bind(T::EVENT_VERSION)

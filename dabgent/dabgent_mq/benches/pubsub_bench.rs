@@ -1,8 +1,16 @@
+<<<<<<< HEAD
 use criterion::{BenchmarkId, Criterion, black_box, criterion_group, criterion_main};
+=======
+use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
+>>>>>>> main
 use dabgent_mq::db::{EventStore, Metadata, Query, sqlite::SqliteStore};
 use dabgent_mq::models::Event;
 use serde::{Deserialize, Serialize};
 use sqlx::sqlite::SqlitePool;
+<<<<<<< HEAD
+=======
+use std::hint::black_box;
+>>>>>>> main
 use std::sync::Arc;
 use tokio::runtime::Runtime;
 use tokio::sync::Barrier;
@@ -18,7 +26,11 @@ struct BenchEvent {
 
 impl Event for BenchEvent {
     const EVENT_VERSION: &'static str = "1.0";
+<<<<<<< HEAD
     fn event_type() -> &'static str {
+=======
+    fn event_type(&self) -> &'static str {
+>>>>>>> main
         "BenchEvent"
     }
 }

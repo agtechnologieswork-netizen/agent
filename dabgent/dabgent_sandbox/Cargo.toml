@@ -1,14 +1,10 @@
 [package]
-name = "dabgent_agent"
+name = "dabgent_sandbox"
 version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-<<<<<<< HEAD
-tokio = { version = "1.47.1", features = ["full"] }
-tracing = "0.1.41"
-tracing-subscriber = "0.3.19"
-=======
+dagger-sdk = "0.18.16"
 tokio = { version = "1", features = ["full"] }
 serde = { version = "1", features = ["derive"] }
 eyre = "0.6"
@@ -18,9 +14,3 @@ uuid = { version = "1", features = ["v4", "v7", "serde"] }
 tracing = "0.1"
 tracing-subscriber = "0.3"
 thiserror = "2.0"
-rig-core = "0.19.0"
-dabgent_mq = { path = "../dabgent_mq" }
-dabgent_sandbox = { path = "../dabgent_sandbox" }
-clap = { version = "4.5.47", features = ["derive"] }
-tokio-stream = "0.1"
->>>>>>> main
