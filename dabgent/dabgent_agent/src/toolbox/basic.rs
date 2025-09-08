@@ -1,4 +1,4 @@
-use super::Tool;
+use super::{Tool, Validator, ValidatorDyn};
 use dabgent_sandbox::SandboxDyn;
 use eyre::Result;
 use serde::{Deserialize, Serialize};
@@ -298,7 +298,54 @@ impl Tool for EditFile {
     }
 }
 
-pub fn toolset() -> Vec<Box<dyn super::ToolDyn>> {
+pub struct DoneTool {
+    validator: Box<dyn ValidatorDyn>,
+}
+
+impl DoneTool {
+    pub fn new<T: Validator + Send + Sync + 'static>(validator: T) -> Self {
+        Self {
+            validator: validator.boxed(),
+        }
+    }
+}
+
+impl Tool for DoneTool {
+    type Args = serde_json::Value;
+    type Output = String;
+    type Error = String;
+
+    fn name(&self) -> String {
+        "done".to_string()
+    }
+
+    fn definition(&self) -> rig::completion::ToolDefinition {
+        rig::completion::ToolDefinition {
+            name: self.name(),
+            description: "Run checks, if successful mark task as finished".to_string(),
+            parameters: serde_json::json!({
+                "type": "object",
+                "properties": {},
+            }),
+        }
+    }
+
+    async fn call(
+        &self,
+        _args: Self::Args,
+        sandbox: &mut Box<dyn SandboxDyn>,
+    ) -> eyre::Result<eyre::Result<Self::Output, Self::Error>> {
+        self.validator
+            .run(sandbox)
+            .await
+            .map(|result| match result {
+                Ok(_) => Ok("success".to_string()),
+                Err(err) => Err(format!("error: {}", err)),
+            })
+    }
+}
+
+pub fn toolset<T: Validator + Send + Sync + 'static>(validator: T) -> Vec<Box<dyn super::ToolDyn>> {
     vec![
         Box::new(Bash),
         Box::new(WriteFile),
@@ -306,5 +353,6 @@ pub fn toolset() -> Vec<Box<dyn super::ToolDyn>> {
         Box::new(LsDir),
         Box::new(RmFile),
         Box::new(EditFile),
+        Box::new(DoneTool::new(validator)),
     ]
 }

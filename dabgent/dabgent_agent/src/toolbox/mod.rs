@@ -59,6 +59,36 @@ impl<T: Tool> ToolDyn for T {
     }
 }
 
+pub trait Validator {
+    fn run(
+        &self,
+        sandbox: &mut Box<dyn SandboxDyn>,
+    ) -> impl Future<Output = Result<Result<(), String>>> + Send;
+
+    fn boxed(self) -> Box<dyn ValidatorDyn>
+    where
+        Self: Sized + Send + Sync + 'static,
+    {
+        Box::new(self)
+    }
+}
+
+pub trait ValidatorDyn: Send + Sync {
+    fn run<'a>(
+        &'a self,
+        sandbox: &'a mut Box<dyn SandboxDyn>,
+    ) -> Pin<Box<dyn Future<Output = Result<Result<(), String>>> + Send + 'a>>;
+}
+
+impl<T: Validator + Send + Sync> ValidatorDyn for T {
+    fn run<'a>(
+        &'a self,
+        sandbox: &'a mut Box<dyn SandboxDyn>,
+    ) -> Pin<Box<dyn Future<Output = Result<Result<(), String>>> + Send + 'a>> {
+        Box::pin(self.run(sandbox))
+    }
+}
+
 pub trait ToolCallExt {
     fn to_result(
         &self,
