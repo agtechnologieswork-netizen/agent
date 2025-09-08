@@ -10,11 +10,12 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 import polars as pl
 
-T = TypeVar('T', bound=BaseModel)
+T = TypeVar("T", bound=BaseModel)
 
 
 class ReactAdminParams(BaseModel):
     """Parsed React Admin query parameters"""
+
     sort_field: Optional[str] = None
     sort_order: Optional[str] = None
     start: int = 0
@@ -24,25 +25,27 @@ class ReactAdminParams(BaseModel):
 
 class ReactAdminListQuery(BaseModel):
     """React Admin list query parameters for Swagger documentation"""
+
     sort: Optional[str] = Field(
         None,
-        description="Sort parameter as JSON string, e.g., '[\"field\",\"ASC\"]'",
-        example='["first_name","ASC"]'
+        description='Sort parameter as JSON string, e.g., \'["field","ASC"]\'',
+        example='["first_name","ASC"]',
     )
     range: Optional[str] = Field(
         None,
         description="Range parameter as JSON string, e.g., '[0,24]'",
-        example='[0,24]'
+        example="[0,24]",
     )
     filter: Optional[str] = Field(
         None,
-        description="Filter parameter as JSON string, e.g., '{\"field\":\"value\"}'",
-        example='{"company":"acme"}'
+        description='Filter parameter as JSON string, e.g., \'{"field":"value"}\'',
+        example='{"company":"acme"}',
     )
 
 
 class ReactAdminListResponse(BaseModel, Generic[T]):
     """React Admin list response format"""
+
     data: List[T]
     total: int
 
@@ -52,6 +55,7 @@ class ReactAdminListResponse(BaseModel, Generic[T]):
 
 class ReactAdminItemResponse(BaseModel, Generic[T]):
     """React Admin single item response format"""
+
     data: T
 
     class Config:
@@ -67,7 +71,7 @@ class ResourceConfig:
         dataframe_getter: Callable[[], pl.DataFrame],
         dataframe_setter: Callable[[pl.DataFrame], None],
         model_class: Type[BaseModel],
-        searchable_fields: List[str] = None
+        searchable_fields: List[str] = None,
     ):
         self.name = name
         self.get_dataframe = dataframe_getter
@@ -86,9 +90,9 @@ class ReactAdminHelper:
         query_params = dict(request.query_params)
 
         # Parse sort parameter: sort=["field","order"]
-        if 'sort' in query_params:
+        if "sort" in query_params:
             try:
-                sort_data = json.loads(query_params['sort'])
+                sort_data = json.loads(query_params["sort"])
                 if isinstance(sort_data, list) and len(sort_data) >= 2:
                     params.sort_field = sort_data[0]
                     params.sort_order = sort_data[1]
@@ -96,9 +100,9 @@ class ReactAdminHelper:
                 pass
 
         # Parse range parameter: range=[start,end]
-        if 'range' in query_params:
+        if "range" in query_params:
             try:
-                range_data = json.loads(query_params['range'])
+                range_data = json.loads(query_params["range"])
                 if isinstance(range_data, list) and len(range_data) >= 2:
                     params.start = range_data[0]
                     params.end = range_data[1] + 1  # React Admin uses inclusive end
@@ -106,9 +110,9 @@ class ReactAdminHelper:
                 pass
 
         # Parse filter parameter: filter={"field":"value",...}
-        if 'filter' in query_params:
+        if "filter" in query_params:
             try:
-                params.filters = json.loads(query_params['filter'])
+                params.filters = json.loads(query_params["filter"])
             except json.JSONDecodeError:
                 params.filters = {}
 
@@ -116,15 +120,13 @@ class ReactAdminHelper:
 
     @staticmethod
     def apply_filters(
-        df: pl.DataFrame,
-        config: ResourceConfig,
-        filters: Dict[str, Any]
+        df: pl.DataFrame, config: ResourceConfig, filters: Dict[str, Any]
     ) -> pl.DataFrame:
         """Apply filters to a Polars DataFrame"""
         filtered_df = df
 
         for key, value in filters.items():
-            if key in ['id', 'ids', 'q']:
+            if key in ["id", "ids", "q"]:
                 continue  # These are handled separately
 
             if key in df.columns:
@@ -134,7 +136,9 @@ class ReactAdminHelper:
                     # For string fields, use contains for partial matching
                     if df[key].dtype == pl.Utf8:
                         filtered_df = filtered_df.filter(
-                            pl.col(key).str.to_lowercase().str.contains(str(value).lower())
+                            pl.col(key)
+                            .str.to_lowercase()
+                            .str.contains(str(value).lower())
                         )
                     else:
                         filtered_df = filtered_df.filter(pl.col(key) == value)
@@ -143,26 +147,41 @@ class ReactAdminHelper:
 
     @staticmethod
     def handle_get_list(
-        config: ResourceConfig,
-        params: ReactAdminParams
+        config: ResourceConfig, params: ReactAdminParams
     ) -> tuple[List[Dict], int]:
         """Handle getList operation"""
         df = config.get_dataframe()
 
         # Apply filters
-        if 'ids' in params.filters:
-            ids = params.filters['ids']
-            df = df.filter(pl.col('id').is_in(ids))
-        elif 'id' in params.filters:
-            ids = params.filters['id']
+        if "ids" in params.filters:
+            ids = params.filters["ids"]
+            # Convert to integers to match the id column type
+            try:
+                ids_int = [int(id_val) for id_val in ids]
+                df = df.filter(pl.col("id").is_in(ids_int))
+            except (ValueError, TypeError):
+                # If conversion fails, skip this filter
+                pass
+        elif "id" in params.filters:
+            ids = params.filters["id"]
             if isinstance(ids, list):
-                df = df.filter(pl.col('id').is_in(ids))
+                try:
+                    ids_int = [int(id_val) for id_val in ids]
+                    df = df.filter(pl.col("id").is_in(ids_int))
+                except (ValueError, TypeError):
+                    # If conversion fails, skip this filter
+                    pass
             else:
-                df = df.filter(pl.col('id') == ids)
+                try:
+                    id_int = int(ids)
+                    df = df.filter(pl.col("id") == id_int)
+                except (ValueError, TypeError):
+                    # If conversion fails, skip this filter
+                    pass
 
         # Apply general search
-        if 'q' in params.filters and config.searchable_fields:
-            search_term = params.filters['q'].lower()
+        if "q" in params.filters and config.searchable_fields:
+            search_term = params.filters["q"].lower()
             search_conditions = [
                 pl.col(field).str.to_lowercase().str.contains(search_term)
                 for field in config.searchable_fields
@@ -178,7 +197,7 @@ class ReactAdminHelper:
 
         # Apply sorting
         if params.sort_field and params.sort_field in df.columns:
-            df = df.sort(params.sort_field, descending=(params.sort_order == 'DESC'))
+            df = df.sort(params.sort_field, descending=(params.sort_order == "DESC"))
 
         # Apply pagination
         if params.end:
@@ -192,10 +211,14 @@ class ReactAdminHelper:
     def handle_get_one(config: ResourceConfig, item_id: int) -> Dict:
         """Handle getOne operation"""
         df = config.get_dataframe()
-        item_df = df.filter(pl.col('id') == item_id)
+        # Ensure item_id is an integer
+        item_id = int(item_id)
+        item_df = df.filter(pl.col("id") == item_id)
 
         if item_df.is_empty():
-            raise HTTPException(status_code=404, detail=f"Item with id {item_id} not found")
+            raise HTTPException(
+                status_code=404, detail=f"Item with id {item_id} not found"
+            )
 
         return item_df.to_dicts()[0]
 
@@ -205,12 +228,13 @@ class ReactAdminHelper:
         df = config.get_dataframe()
 
         # Generate new ID
-        max_id = df['id'].max() if not df.is_empty() else 0
-        new_id = (max_id + 1) if max_id is not None else 1
+        max_id = df["id"].max() if not df.is_empty() else 0
+        # Type hint: max_id is always a number (int/float) from polars max()
+        new_id = (max_id + 1) if max_id is not None else 1  # type: ignore[operator]
 
         # Remove 'id' from data if present and add our generated one
-        data = {k: v for k, v in data.items() if k != 'id'}
-        data['id'] = new_id
+        data = {k: v for k, v in data.items() if k != "id"}
+        data["id"] = new_id
 
         # Create new row with proper schema alignment
         if df.is_empty():
@@ -225,7 +249,7 @@ class ReactAdminHelper:
                 else:
                     # Fill missing columns with None or appropriate default
                     new_row_data[col] = None
-            
+
             new_row_df = pl.DataFrame([new_row_data])
             updated_df = pl.concat([df, new_row_df], how="vertical")
 
@@ -238,24 +262,28 @@ class ReactAdminHelper:
     def handle_update(config: ResourceConfig, item_id: int, data: Dict) -> Dict:
         """Handle update operation"""
         df = config.get_dataframe()
+        # Ensure item_id is an integer
+        item_id = int(item_id)
 
         # Get the existing row
-        existing_row = df.filter(pl.col('id') == item_id)
+        existing_row = df.filter(pl.col("id") == item_id)
         if existing_row.is_empty():
-            raise HTTPException(status_code=404, detail=f"Item with id {item_id} not found")
+            raise HTTPException(
+                status_code=404, detail=f"Item with id {item_id} not found"
+            )
 
         # Get the existing data as a dict
         existing_data = existing_row.to_dicts()[0]
-        
+
         # Merge the existing data with the update data (update only provided fields)
         updated_data = {**existing_data, **data}
-        
+
         # Ensure ID matches
-        updated_data['id'] = item_id
+        updated_data["id"] = item_id
 
         # Remove old row and add updated one with proper schema alignment
-        df_without_item = df.filter(pl.col('id') != item_id)
-        
+        df_without_item = df.filter(pl.col("id") != item_id)
+
         # Create new row with all columns from the original dataframe
         new_row_data = {}
         for col in df.columns:
@@ -263,9 +291,11 @@ class ReactAdminHelper:
                 new_row_data[col] = updated_data[col]
             else:
                 new_row_data[col] = None
-        
+
         updated_row_df = pl.DataFrame([new_row_data])
-        updated_df = pl.concat([df_without_item, updated_row_df], how="vertical").sort('id')
+        updated_df = pl.concat([df_without_item, updated_row_df], how="vertical").sort(
+            "id"
+        )
 
         # Save back
         config.set_dataframe(updated_df)
@@ -276,15 +306,19 @@ class ReactAdminHelper:
     def handle_delete(config: ResourceConfig, item_id: int) -> Dict:
         """Handle delete operation"""
         df = config.get_dataframe()
+        # Ensure item_id is an integer
+        item_id = int(item_id)
 
-        item_to_delete = df.filter(pl.col('id') == item_id)
+        item_to_delete = df.filter(pl.col("id") == item_id)
         if item_to_delete.is_empty():
-            raise HTTPException(status_code=404, detail=f"Item with id {item_id} not found")
+            raise HTTPException(
+                status_code=404, detail=f"Item with id {item_id} not found"
+            )
 
         deleted_item = item_to_delete.to_dicts()[0]
 
         # Remove item
-        updated_df = df.filter(pl.col('id') != item_id)
+        updated_df = df.filter(pl.col("id") != item_id)
 
         # Save back
         config.set_dataframe(updated_df)
@@ -295,8 +329,12 @@ class ReactAdminHelper:
     def create_list_response(data: List[Dict], total: int) -> JSONResponse:
         """Create a React Admin compatible list response"""
         response = JSONResponse(content=data)
-        response.headers['X-Total-Count'] = str(total)
-        response.headers['Access-Control-Expose-Headers'] = 'X-Total-Count'
+        # React Admin SimpleRestProvider expects Content-Range header
+        response.headers["Content-Range"] = f"items 0-{len(data)-1}/{total}"
+        response.headers["X-Total-Count"] = str(total)
+        response.headers["Access-Control-Expose-Headers"] = (
+            "Content-Range, X-Total-Count"
+        )
         return response
 
     @staticmethod
@@ -308,7 +346,15 @@ class ReactAdminHelper:
 def create_typed_query_params() -> tuple:
     """Create typed query parameters for FastAPI endpoints"""
     return (
-        Query(None, description="Sort parameter as JSON string", example='["first_name","ASC"]'),
-        Query(None, description="Range parameter as JSON string", example='[0,24]'),
-        Query(None, description="Filter parameter as JSON string", example='{"company":"acme"}')
+        Query(
+            None,
+            description="Sort parameter as JSON string",
+            example='["first_name","ASC"]',
+        ),
+        Query(None, description="Range parameter as JSON string", example="[0,24]"),
+        Query(
+            None,
+            description="Filter parameter as JSON string",
+            example='{"company":"acme"}',
+        ),
     )
