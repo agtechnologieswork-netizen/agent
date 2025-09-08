@@ -88,10 +88,10 @@ impl<T: Sandbox> SandboxDyn for T {
     }
 }
 
-pub trait SandboxFork {
+pub trait SandboxFork: Send + Sync {
     fn fork(&self) -> impl Future<Output = Result<Self>> + Send
     where
-        Self: Sized + 'static;
+        Self: Sized;
 
     fn boxed(self) -> Box<dyn SandboxForkDyn>
     where
@@ -102,23 +102,11 @@ pub trait SandboxFork {
 }
 
 pub trait SandboxForkDyn {
-    fn fork<'a>(
-        &self,
-    ) -> Pin<Box<dyn Future<Output = Result<Box<dyn SandboxForkDyn>>> + Send + 'a>>;
+    fn fork(&self) -> Pin<Box<dyn Future<Output = Result<Box<dyn SandboxForkDyn>>> + Send + '_>>;
 }
 
-impl<T: SandboxFork> SandboxForkDyn for T {
-    fn fork<'a>(
-        &self,
-    ) -> Pin<Box<dyn Future<Output = Result<Box<dyn SandboxForkDyn>>> + Send + 'a>> {
-        // let res = async {
-        //     let forked = self.fork().await?;
-        //     Ok(Box::new(forked) as Box<dyn SandboxForkDyn>)
-        // };
-        // todo!()
-        Box::pin(async move {
-            let forked = self.fork().await?;
-            Ok(Box::new(forked) as Box<dyn SandboxForkDyn>)
-        })
+impl<T: SandboxFork + 'static> SandboxForkDyn for T {
+    fn fork(&self) -> Pin<Box<dyn Future<Output = Result<Box<dyn SandboxForkDyn>>> + Send + '_>> {
+        Box::pin(async move { self.fork().await.map(|fork| fork.boxed()) })
     }
 }
