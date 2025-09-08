@@ -8,11 +8,7 @@ struct TestEvent(usize);
 
 impl Event for TestEvent {
     const EVENT_VERSION: &'static str = "1.0";
-<<<<<<< HEAD
-    fn event_type() -> &'static str {
-=======
     fn event_type(&self) -> &'static str {
->>>>>>> main
         "TestEvent"
     }
 }

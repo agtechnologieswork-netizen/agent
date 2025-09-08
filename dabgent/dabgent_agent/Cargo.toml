@@ -4,11 +4,6 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-<<<<<<< HEAD
-tokio = { version = "1.47.1", features = ["full"] }
-tracing = "0.1.41"
-tracing-subscriber = "0.3.19"
-=======
 tokio = { version = "1", features = ["full"] }
 serde = { version = "1", features = ["derive"] }
 eyre = "0.6"
@@ -23,4 +18,3 @@ dabgent_mq = { path = "../dabgent_mq" }
 dabgent_sandbox = { path = "../dabgent_sandbox" }
 clap = { version = "4.5.47", features = ["derive"] }
 tokio-stream = "0.1"
->>>>>>> main

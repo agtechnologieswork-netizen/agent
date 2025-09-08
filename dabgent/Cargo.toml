@@ -1,7 +1,3 @@
 [workspace]
-resolver = "3"
-<<<<<<< HEAD
-members = [ "dabgent_agent","dabgent_mq"]
-=======
+resolver = "2"
 members = ["dabgent_agent", "dabgent_mq", "dabgent_sandbox"]
->>>>>>> main
