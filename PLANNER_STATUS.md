@@ -3,47 +3,41 @@
 ## Current Implementation ✅
 
 ### What's Integrated
-- **Planner module** from `feat/meta-planner` branch successfully integrated into `dabgent_agent`
-- **60-line runner** in `planner/runner.rs` provides complete planning + execution
+- **Planner module** from `feat/meta-planner` branch integrated into `dabgent_agent`
+- **81-line runner** with timeout support (simplified from 107 lines)
+- **116-line test suite** (simplified from 175 lines)
 - **Working example** in `examples/planning.rs`
 
 ### Architecture
 ```
 dabgent_agent/src/
 ├── planner/
-│   ├── handler.rs    # Core planner logic (540 lines)
+│   ├── handler.rs    # Core planner logic
 │   ├── types.rs      # Type definitions
 │   ├── llm.rs        # LLM integration
 │   ├── mq.rs         # Event persistence
 │   ├── cli.rs        # CLI interface
-│   └── runner.rs     # Planning runner (60 lines) ✅
+│   └── runner.rs     # Minimal runner (81 lines)
 └── agent.rs          # Original Worker unchanged
 ```
 
 ### Usage
 ```rust
+// Default 5 minute timeout
 planner::runner::run(llm, store, preamble, tools, input).await?
+
+// Custom timeout (seconds)
+planner::runner::run_with_timeout(llm, store, preamble, tools, input, 60).await?
 ```
 
-## Next Steps
+## Tests
+- 3 integration tests, all passing
+- Test timeout handling
+- Test event persistence
+- Test planner initialization
 
-### 1. Testing & Validation
-- [ ] Run integration tests with real LLM
-- [ ] Test event flow between planner and worker
-- [ ] Validate task dispatching mechanism
-
-### 2. Production Readiness
-- [ ] Add proper error handling in runner
-- [ ] Implement timeout/cancellation
-- [ ] Add metrics/observability
-
-### 3. Feature Completion
-- [ ] Wire up clarification flow
-- [ ] Implement task result feedback
-- [ ] Add context management
-
-## Design Principles
-- **Minimal**: 60-line integration
-- **Non-invasive**: Original Worker unchanged
+## Design
+- **Minimal**: 81-line runner (down from 107)
+- **Simple**: Just two functions - `run()` and `run_with_timeout()`
+- **No config objects**: Just a timeout parameter
 - **Event-driven**: Follows dabgent patterns
-- **Composable**: Single function interface

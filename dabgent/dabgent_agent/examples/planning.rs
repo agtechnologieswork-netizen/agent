@@ -38,13 +38,14 @@ async fn run() {
         // User request
         let user_input = "Create a Python script that fetches weather data for New York and saves it to a JSON file".to_string();
         
-        // Run planning and execution using the simplified approach
-        planner::runner::run(
+        // Run planning with 60 second timeout
+        planner::runner::run_with_timeout(
             llm,
             store,
             preamble,
             tools,
             user_input,
+            60,
         ).await?;
         
         Ok(())
