@@ -1,0 +1,14 @@
+FROM python:3.12-slim-bookworm
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
+
+# Install development tools and PostgreSQL client
+RUN apt-get update && apt-get install -y \
+    postgresql-client \
+    curl \
+    git \
+    nodejs \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+COPY template/ .
+RUN uv sync
