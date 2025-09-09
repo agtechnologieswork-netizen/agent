@@ -141,3 +141,132 @@ impl<E: EventStore> ToolWorker<E> {
         Ok(results)
     }
 }
+
+/// Worker that processes planner events and coordinates task execution
+pub struct PlannerWorker<T: LLMClient, E: EventStore> {
+    llm: T,
+    event_store: E,
+    planner: crate::planner::Planner,
+    thread_bridge: crate::event_router::PlannerThreadBridge<E>,
+}
+
+impl<T: LLMClient, E: EventStore> PlannerWorker<T, E> {
+    /// Create a new planner worker
+    pub fn new(llm: T, event_store: E) -> Self {
+        Self {
+            llm,
+            event_store: event_store.clone(),
+            planner: crate::planner::Planner::new(),
+            thread_bridge: crate::event_router::PlannerThreadBridge::new(event_store),
+        }
+    }
+
+    /// Run the planner worker, subscribing to planner events
+    pub async fn run(&mut self, stream_id: &str, aggregate_id: &str) -> Result<()> {
+        let query = dabgent_mq::db::Query {
+            stream_id: format!("{}-planner", stream_id),
+            event_type: Some("TaskDispatched".to_string()),
+            aggregate_id: Some(aggregate_id.to_owned()),
+        };
+        
+        let mut receiver = self.event_store.subscribe::<crate::planner::Event>(&query)?;
+        
+        while let Some(event) = receiver.next().await {
+            match event {
+                Ok(crate::planner::Event::TaskDispatched { task_id, command }) => {
+                    // Route task to appropriate executor
+                    self.dispatch_to_executor(task_id, command).await?;
+                }
+                Ok(crate::planner::Event::ClarificationRequested { task_id, question }) => {
+                    // Handle clarification request
+                    tracing::info!("Clarification needed for task {}: {}", task_id, question);
+                    // In Phase 3, we'll implement UI interaction
+                }
+                Ok(_) => {
+                    // Other events are informational
+                    continue;
+                }
+                Err(error) => {
+                    tracing::error!(?error, "Error receiving planner event");
+                }
+            }
+        }
+        
+        Ok(())
+    }
+    
+    /// Dispatch a task to the appropriate executor based on NodeKind
+    async fn dispatch_to_executor(
+        &self,
+        task_id: u64,
+        command: crate::planner::PlannerCmd,
+    ) -> Result<()> {
+        // Use the bridge to convert planner commands to thread events
+        self.thread_bridge.handle_task_dispatch(task_id, command).await
+    }
+    
+    /// Initialize planning with user input
+    pub async fn initialize_planning(&mut self, user_input: String) -> Result<()> {
+        use crate::handler::Handler;
+        use crate::planner::Command;
+        
+        let command = Command::Initialize {
+            user_input,
+            attachments: vec![],
+        };
+        
+        let events = self.planner.process(command)?;
+        
+        // Store events to event store
+        for event in events {
+            self.event_store
+                .push_event(
+                    "planner",
+                    "session",
+                    &event,
+                    &dabgent_mq::db::Metadata::default(),
+                )
+                .await?;
+        }
+        
+        Ok(())
+    }
+    
+    /// Handle executor results and update planner state
+    pub async fn handle_executor_result(
+        &mut self,
+        task_id: u64,
+        result: Result<String>,
+    ) -> Result<()> {
+        use crate::handler::Handler;
+        use crate::planner::{Command, ExecutorEvent};
+        
+        let executor_event = match result {
+            Ok(output) => ExecutorEvent::TaskCompleted {
+                node_id: task_id,
+                result: output,
+            },
+            Err(error) => ExecutorEvent::TaskFailed {
+                node_id: task_id,
+                error: error.to_string(),
+            },
+        };
+        
+        let command = Command::HandleExecutorEvent(executor_event);
+        let events = self.planner.process(command)?;
+        
+        // Store resulting events
+        for event in events {
+            self.event_store
+                .push_event(
+                    "planner",
+                    "session",
+                    &event,
+                    &dabgent_mq::db::Metadata::default(),
+                )
+                .await?;
+        }
+        
+        Ok(())
+    }
+}
