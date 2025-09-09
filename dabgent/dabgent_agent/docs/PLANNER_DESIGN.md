@@ -9,13 +9,13 @@ The planner is an event-sourced, LLM-powered task planning system integrated int
 ### Module Structure
 ```
 dabgent_agent/src/planner/
-├── handler.rs    # Event-sourced planner with Handler trait (567 lines)
-├── types.rs      # Core type definitions (340 lines)  
-├── llm.rs        # LLM integration for task parsing (419 lines)
-├── mq.rs         # Event persistence layer (27 lines)
+├── handler.rs    # Event-sourced planner with Handler trait (421 lines)
+├── llm.rs        # LLM integration for task parsing (362 lines)
+├── types.rs      # Core type definitions (282 lines)  
 ├── runner.rs     # Minimal execution runner (81 lines)
+├── mq.rs         # Event persistence layer (27 lines)
 └── mod.rs        # Module exports (27 lines)
-Total: 1,461 lines
+Total: 1,200 lines
 ```
 
 ## Core Components

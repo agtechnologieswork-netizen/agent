@@ -15,19 +15,20 @@
 - [x] Removed feature flags - always available
 - [x] Removed CLI module (saved 97 lines)
 - [x] Deduplicated LLM calls (saved 12 lines)
+- [x] Extracted tests to separate files (saved 261 lines)
 - [x] Consolidated documentation
 
 ## 📊 Final Metrics
 
 | Component | Lines | 
 |-----------|-------|
-| handler.rs | 567 |
-| llm.rs | 419 |
-| types.rs | 340 |
+| handler.rs | 421 |
+| llm.rs | 362 |
+| types.rs | 282 |
 | runner.rs | 81 |
 | mq.rs | 27 |
 | mod.rs | 27 |
-| **Total** | **1,461** |
+| **Total** | **1,200** |
 
 ## 🚀 How to Use
 
