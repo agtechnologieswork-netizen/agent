@@ -173,17 +173,45 @@ impl Planner {
         }
     }
 
-    /// Parse user input and generate task plan (MVP: simple fallback)
+    /// Parse user input and generate task plan (multi-line -> multi-task)
     fn parse_input(&self, user_input: &str) -> Result<Vec<TaskPlan>, PlannerError> {
-        // MVP: Simple single-task fallback for when LLM is unavailable
-        // Real parsing should be done by LLM
+        // Split by newlines into individual tasks, ignore empty lines
+        let lines: Vec<String> = user_input
+            .lines()
+            .map(|l| l.trim())
+            .filter(|l| !l.is_empty())
+            .map(|l| l.to_string())
+            .collect();
 
-        Ok(vec![TaskPlan {
-            id: self.state.next_id,
-            description: user_input.to_string(),
-            kind: NodeKind::Processing,
-            attachments: Vec::new(),
-        }])
+        if lines.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let mut tasks: Vec<TaskPlan> = Vec::with_capacity(lines.len());
+        let mut next_id = self.state.next_id;
+
+        for line in lines {
+            // Very simple heuristic for NodeKind when LLM isn't used
+            let lower = line.to_lowercase();
+            let kind = if line.ends_with('?') {
+                NodeKind::Clarification
+            } else if lower.contains("run ") || lower.contains("test") || lower.contains("deploy") {
+                NodeKind::ToolCall
+            } else {
+                NodeKind::Processing
+            };
+
+            tasks.push(TaskPlan {
+                id: next_id,
+                description: line,
+                kind,
+                attachments: Vec::new(),
+            });
+
+            next_id += 1;
+        }
+
+        Ok(tasks)
     }
 
     /// Generate the next command to dispatch
