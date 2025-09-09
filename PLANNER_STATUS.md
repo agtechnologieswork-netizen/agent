@@ -31,10 +31,14 @@ planner::runner::run_with_timeout(llm, store, preamble, tools, input, 60).await?
 ```
 
 ## Tests
-- 3 integration tests, all passing
-- Test timeout handling
-- Test event persistence
-- Test planner initialization
+- **Integration tests** (`test_planner_integration.rs`): 3 tests, all passing
+  - Timeout handling
+  - Event persistence  
+  - Planner initialization
+- **End-to-end tests** (`test_planner_e2e.rs`): 3 tests, all passing
+  - Basic flow with event sourcing
+  - Continue command
+  - Attachments handling
 
 ## Design
 - **Minimal**: 81-line runner (down from 107)
