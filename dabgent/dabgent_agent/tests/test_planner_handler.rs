@@ -12,7 +12,6 @@ fn test_initialize_and_plan() {
 
     let events = planner.process(Command::Initialize {
         user_input: "Analyze the code\nRun tests\nDeploy to production".to_string(),
-        attachments: vec![],
     }).unwrap();
 
     // Should plan tasks and dispatch first one
@@ -30,7 +29,6 @@ fn test_task_execution_flow() {
     // Initialize with a task
     planner.process(Command::Initialize {
         user_input: "Test task".to_string(),
-        attachments: vec![],
     }).unwrap();
 
     // Complete the task
@@ -54,7 +52,6 @@ fn test_clarification_flow() {
     // Initialize with a clarification task
     planner.process(Command::Initialize {
         user_input: "What is the project name?".to_string(),
-        attachments: vec![],
     }).unwrap();
 
     // Request clarification
@@ -89,13 +86,11 @@ fn test_fold_reconstructs_state() {
                     id: 1,
                     description: "Task 1".to_string(),
                     kind: NodeKind::Processing,
-                    attachments: vec![],
                 },
                 TaskPlan {
                     id: 2,
                     description: "Task 2".to_string(),
                     kind: NodeKind::ToolCall,
-                    attachments: vec![],
                 },
             ],
         },
@@ -129,7 +124,6 @@ fn test_context_compaction() {
     // Initialize with multiple tasks
     planner.process(Command::Initialize {
         user_input: "Task 1\nTask 2\nTask 3\nTask 4\nTask 5".to_string(),
-        attachments: vec![],
     }).unwrap();
 
     // Complete some tasks by processing events

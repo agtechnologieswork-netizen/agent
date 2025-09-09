@@ -72,21 +72,7 @@ pub enum ExecutorEvent {
     },
 }
 
-/// Attachment types (MVP: just URLs and files)
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum AttachmentKind {
-    /// URL reference
-    Link(String),
-    /// File reference (path)
-    FileRef(String),
-}
-
-/// Attachment with metadata
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Attachment {
-    pub kind: AttachmentKind,
-    pub label: Option<String>,
-}
+// Attachments dropped for MVP simplicity
 
 /// Individual task in the execution plan
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -99,8 +85,6 @@ pub struct Task {
     pub kind: NodeKind,
     /// Current execution status
     pub status: TaskStatus,
-    /// Associated attachments (URLs, files, etc.)
-    pub attachments: Vec<Attachment>,
     /// Timestamp when task was created
     pub created_at: u64,
     /// Timestamp when task was last updated
@@ -120,7 +104,6 @@ impl Task {
             description,
             kind,
             status: TaskStatus::Planned,
-            attachments: Vec::new(),
             created_at: now,
             updated_at: now,
         }
@@ -135,10 +118,7 @@ impl Task {
             .as_secs();
     }
 
-    /// Add an attachment to the task
-    pub fn add_attachment(&mut self, attachment: Attachment) {
-        self.attachments.push(attachment);
-    }
+    // Attachments removed
 }
 
 /// Planner state that can be rebuilt from events

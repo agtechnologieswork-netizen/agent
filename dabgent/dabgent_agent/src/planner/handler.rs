@@ -8,7 +8,6 @@ pub enum Command {
     /// Initialize planner with user input
     Initialize {
         user_input: String,
-        attachments: Vec<crate::planner::types::Attachment>,
     },
     /// Process an event from the executor
     HandleExecutorEvent(ExecutorEvent),
@@ -65,7 +64,6 @@ pub struct TaskPlan {
     pub id: u64,
     pub description: String,
     pub kind: NodeKind,
-    pub attachments: Vec<crate::planner::types::Attachment>,
 }
 
 /// Error types for planner operations (MVP: simplified)
@@ -114,7 +112,6 @@ impl Planner {
             Event::TasksPlanned { tasks } => {
                 for plan in tasks {
                     let mut task = Task::new(plan.id, plan.description.clone(), plan.kind);
-                    task.attachments = plan.attachments.clone();
                     self.state.tasks.push(task);
                     if plan.id >= self.state.next_id {
                         self.state.next_id = plan.id + 1;
@@ -205,7 +202,6 @@ impl Planner {
                 id: next_id,
                 description: line,
                 kind,
-                attachments: Vec::new(),
             });
 
             next_id += 1;
@@ -278,18 +274,11 @@ impl Handler for Planner {
         let mut events = Vec::new();
 
         match command {
-            Command::Initialize { user_input, attachments } => {
+            Command::Initialize { user_input } => {
                 // Parse input and plan tasks
                 let tasks = self.parse_input(&user_input)?;
-
-                // Add attachments to first task if any
-                let mut tasks_with_attachments = tasks;
-                if !attachments.is_empty() && !tasks_with_attachments.is_empty() {
-                    tasks_with_attachments[0].attachments = attachments;
-                }
-
                 events.push(Event::TasksPlanned {
-                    tasks: tasks_with_attachments,
+                    tasks,
                 });
 
                 // Apply the event to update state

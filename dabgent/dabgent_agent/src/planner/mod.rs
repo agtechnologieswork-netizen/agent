@@ -18,7 +18,7 @@ pub use handler::{Command, Event, Planner, PlannerError, TaskPlan};
 // Re-export types
 pub use types::{
     NodeKind, TaskStatus, PlannerCmd, ExecutorEvent,
-    AttachmentKind, Attachment, Task, PlannerState, PlannerConfig
+    Task, PlannerState, PlannerConfig
 };
 
 // Re-export for convenience

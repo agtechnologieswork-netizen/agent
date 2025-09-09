@@ -46,7 +46,6 @@ where
         // Initialize planner
         let events = Planner::new().process(Command::Initialize {
             user_input: input,
-            attachments: vec![],
         })?;
         
         for event in events {

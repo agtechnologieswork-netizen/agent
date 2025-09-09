@@ -74,7 +74,6 @@ async fn test_planner_initialization() {
     let mut planner = Planner::new();
     let command = Command::Initialize {
         user_input: "Test task".to_string(),
-        attachments: vec![],
     };
     
     let events = planner.process(command);
@@ -93,7 +92,6 @@ async fn test_event_persistence() {
     
     let command = Command::Initialize {
         user_input: "Test task".to_string(),
-        attachments: vec![],
     };
     let events = planner.process(command).unwrap();
     

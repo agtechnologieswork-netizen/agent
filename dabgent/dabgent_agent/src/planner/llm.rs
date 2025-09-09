@@ -6,7 +6,7 @@
 //! - Context compaction and summarization
 
 use crate::llm::{Completion, LLMClientDyn, CompletionResponse};
-use crate::planner::types::{NodeKind, AttachmentKind, Attachment};
+use crate::planner::types::NodeKind;
 use crate::planner::handler::{TaskPlan, Event};
 use eyre::Result;
 use rig::message::{Message, AssistantContent};
@@ -114,7 +114,6 @@ Example:
 
 Remember to:
 - Break down complex requests into smaller, manageable tasks
-- Identify any URLs or file references as attachments
 - Mark ambiguous requirements as Clarification tasks
 - Ensure tasks are in logical execution order
 - Set proper dependencies between tasks"#,
@@ -175,45 +174,12 @@ Remember to:
                 .collect()
         };
 
-        // Extract attachments (URLs, files) from description
-        let attachments = self.extract_attachments(&description);
-
         Some(ParsedTask {
             id,
             description,
             kind,
             dependencies,
-            attachments,
         })
-    }
-
-    /// Extract attachments from task description
-    fn extract_attachments(&self, description: &str) -> Vec<Attachment> {
-        let mut attachments = Vec::new();
-
-        // Extract URLs
-        let url_regex = regex::Regex::new(r"https?://[^\s]+").unwrap();
-        for url_match in url_regex.find_iter(description) {
-            let url = url_match.as_str().to_string();
-            attachments.push(Attachment {
-                kind: AttachmentKind::Link(url.clone()),
-                label: Some(format!("URL: {}", url)),
-            });
-        }
-
-        // Extract file paths (more precise pattern - must have path separators or start with src/etc)
-        let file_regex = regex::Regex::new(r"\b(?:src/|tests/|\./)[\w/]+\.\w+\b").unwrap();
-        for file_match in file_regex.find_iter(description) {
-            let file = file_match.as_str().to_string();
-            if !file.starts_with("http") { // Avoid URLs
-                attachments.push(Attachment {
-                    kind: AttachmentKind::FileRef(file.clone()),
-                    label: Some(format!("File: {}", file)),
-                });
-            }
-        }
-
-        attachments
     }
 
     /// Classify NodeKind using semantic understanding
@@ -333,7 +299,6 @@ pub struct ParsedTask {
     pub description: String,
     pub kind: NodeKind,
     pub dependencies: Vec<u64>,
-    pub attachments: Vec<Attachment>,
 }
 
 impl From<ParsedTask> for TaskPlan {
@@ -342,7 +307,6 @@ impl From<ParsedTask> for TaskPlan {
             id: parsed.id,
             description: parsed.description,
             kind: parsed.kind,
-            attachments: parsed.attachments,
         }
     }
 }

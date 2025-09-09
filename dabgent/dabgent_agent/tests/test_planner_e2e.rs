@@ -22,7 +22,6 @@ async fn test_planner_basic_flow() {
     // Initialize with a simple task
     let command = Command::Initialize {
         user_input: "Write a function to add two numbers".to_string(),
-        attachments: vec![],
     };
     
     // Process should succeed
@@ -60,7 +59,6 @@ async fn test_planner_continue() {
     // Initialize
     let _ = planner.process(Command::Initialize {
         user_input: "Build a web application".to_string(),
-        attachments: vec![],
     }).unwrap();
     
     // Continue command should work
@@ -68,23 +66,4 @@ async fn test_planner_continue() {
     assert!(result.is_ok(), "Continue should work");
 }
 
-#[tokio::test]
-async fn test_planner_with_attachments() {
-    use dabgent_agent::planner::{Attachment, AttachmentKind};
-    
-    let mut planner = Planner::new();
-    
-    // Create an attachment
-    let attachment = Attachment {
-        kind: AttachmentKind::FileRef("requirements.txt".to_string()),
-        label: Some("Requirements".to_string()),
-    };
-    
-    // Initialize with attachment
-    let result = planner.process(Command::Initialize {
-        user_input: "Implement the requirements".to_string(),
-        attachments: vec![attachment],
-    });
-    
-    assert!(result.is_ok(), "Should handle attachments");
-}
+// Attachment-related test removed as attachments are out of MVP scope
