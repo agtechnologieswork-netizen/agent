@@ -1,0 +1,31 @@
+# Databricks App Configuration
+# This file configures how the app runs in Databricks
+
+# App metadata
+name: "data-apps-template"
+version: "1.0.0"
+description: "A data application template with FastAPI backend and React Admin frontend"
+
+# Runtime configuration
+runtime:
+  # Use Python 3.12 as specified in pyproject.toml
+  python_version: "3.12"
+
+# Environment variables
+env:
+  # Set the port for the FastAPI backend
+  PORT: "8000"
+  # Enable CORS for frontend-backend communication
+  CORS_ORIGINS: "*"
+
+# Custom command to run the application
+# Since package.json is present, Databricks will run npm install, pip install, npm run build, then this command
+# We use npm run start which handles building frontend and starting backend
+command: "npm run start"
+
+# Resources
+resources:
+  # Memory allocation for the app
+  memory: "2Gi"
+  # CPU allocation
+  cpu: "1"
