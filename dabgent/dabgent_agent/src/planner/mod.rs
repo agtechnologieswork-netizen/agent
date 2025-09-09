@@ -11,6 +11,7 @@ pub mod types;
 pub mod llm;
 pub mod cli;
 pub mod mq;
+pub mod runner;
 
 // Re-export planner implementation and types
 pub use handler::{Command, Event, Planner, PlannerError, TaskPlan};
