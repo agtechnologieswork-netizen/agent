@@ -10,12 +10,10 @@ pub mod handler;
 pub mod types;
 pub mod llm;
 pub mod cli;
-
-#[cfg(feature = "mq")]
 pub mod mq;
 
-// Re-export core handler trait and implementation
-pub use handler::{Command, Event, Handler, Planner, PlannerError, TaskPlan};
+// Re-export planner implementation and types
+pub use handler::{Command, Event, Planner, PlannerError, TaskPlan};
 
 // Re-export types
 pub use types::{

@@ -1,8 +1,9 @@
 //! Simple CLI demo for the MVP planner
 
+use crate::handler::Handler;
 use crate::planner::{
     llm::LLMPlanner,
-    handler::{Command, Event, Handler},
+    handler::{Command, Event},
     Planner,
 };
 use crate::llm::LLMClientDyn;
@@ -58,8 +59,7 @@ pub async fn run_cli(llm: Option<Box<dyn LLMClientDyn>>, model: String) -> Resul
         })?
     };
 
-    // Save to DabGent MQ if feature enabled
-    #[cfg(feature = "mq")]
+    // Save to DabGent MQ
     {
         use dabgent_mq::db::{EventStore, Metadata, sqlite::SqliteStore};
         use uuid::Uuid;
@@ -78,11 +78,6 @@ pub async fn run_cli(llm: Option<Box<dyn LLMClientDyn>>, model: String) -> Resul
         }
 
         println!("✅ Events saved to session: {}", session_id);
-    }
-
-    #[cfg(not(feature = "mq"))]
-    {
-        println!("\n⚠️  DabGent MQ not enabled (compile with --features mq)");
     }
 
     println!("\n✨ Done!");

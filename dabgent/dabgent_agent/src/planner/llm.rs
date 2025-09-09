@@ -8,11 +8,22 @@
 use crate::llm::{Completion, LLMClientDyn, CompletionResponse};
 use crate::planner::types::{NodeKind, AttachmentKind, Attachment};
 use crate::planner::handler::{TaskPlan, Event};
-use crate::agent::utils::extract_tag;
 use eyre::Result;
 use rig::message::{Message, AssistantContent};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+
+/// Extract content between XML tags
+fn extract_tag(xml: &str, tag: &str) -> Option<String> {
+    let start_tag = format!("<{}>", tag);
+    let end_tag = format!("</{}>", tag);
+    
+    let start_idx = xml.find(&start_tag)?;
+    let content_start = start_idx + start_tag.len();
+    let end_idx = xml[content_start..].find(&end_tag)?;
+    
+    Some(xml[content_start..content_start + end_idx].trim().to_string())
+}
 
 /// LLM-powered planner that parses natural language into structured tasks
 pub struct LLMPlanner {
@@ -376,9 +387,6 @@ mod tests {
                     })),
                     finish_reason: crate::llm::FinishReason::Stop,
                     output_tokens: 0,
-                    input_tokens: 0,
-                    cache_read_input_tokens: None,
-                    cache_creation_input_tokens: None,
                 })
             })
         }

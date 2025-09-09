@@ -515,6 +515,7 @@ dependencies = [
  "dabgent_sandbox",
  "dagger-sdk",
  "eyre",
+ "regex",
  "rig-core",
  "serde",
  "serde_json",

@@ -1,18 +1,6 @@
+use crate::handler::Handler;
 use crate::planner::types::{ExecutorEvent, PlannerCmd, PlannerState, NodeKind, TaskStatus, Task};
 use serde::{Deserialize, Serialize};
-
-/// Core handler trait for event-sourced components
-pub trait Handler {
-    type Command;
-    type Event;
-    type Error;
-
-    /// Process a command and emit events
-    fn process(&mut self, command: Self::Command) -> Result<Vec<Self::Event>, Self::Error>;
-
-    /// Rebuild state from events
-    fn fold(events: &[Self::Event]) -> Self;
-}
 
 /// Commands that the planner can process
 #[derive(Debug, Clone, Serialize, Deserialize)]
