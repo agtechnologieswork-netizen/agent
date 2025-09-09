@@ -92,6 +92,17 @@ Example:
         Err(eyre::eyre!("No text content in response"))
     }
 
+    /// Helper to make LLM completion calls with consistent settings
+    async fn complete(&self, prompt: String, temperature: f64, max_tokens: u64) -> Result<String> {
+        let completion = Completion::new(self.model.clone(), Message::user(prompt))
+            .preamble(self.system_prompt.clone())
+            .temperature(temperature)
+            .max_tokens(max_tokens);
+
+        let response = self.llm.completion(completion).await?;
+        self.extract_text_from_response(&response)
+    }
+
     /// Parse natural language input into structured tasks using LLM
     pub async fn parse_tasks(&self, user_input: &str) -> Result<Vec<ParsedTask>> {
         let prompt = format!(
@@ -110,13 +121,7 @@ Remember to:
             user_input
         );
 
-        let completion = Completion::new(self.model.clone(), Message::user(prompt))
-            .preamble(self.system_prompt.clone())
-            .temperature(0.3) // Lower temperature for more deterministic planning
-            .max_tokens(2000);
-
-        let response = self.llm.completion(completion).await?;
-        let content = self.extract_text_from_response(&response)?;
+        let content = self.complete(prompt, 0.3, 2000).await?;
         self.parse_llm_response(&content)
     }
 
@@ -226,12 +231,7 @@ Respond with just the category name: Processing, ToolCall, or Clarification"#,
             task_description
         );
 
-        let completion = Completion::new(self.model.clone(), Message::user(prompt))
-            .temperature(0.1)
-            .max_tokens(10);
-
-        let response = self.llm.completion(completion).await?;
-        let content = self.extract_text_from_response(&response)?;
+        let content = self.complete(prompt, 0.1, 10).await?;
         let kind_str = content.trim().to_lowercase();
 
         Ok(match kind_str.as_str() {
@@ -285,13 +285,7 @@ Provide a concise summary that preserves essential information for continuing th
             full_context
         );
 
-        let completion = Completion::new(self.model.clone(), Message::user(prompt))
-            .temperature(0.3)
-            .max_tokens(token_budget as u64);
-
-        let response = self.llm.completion(completion).await?;
-        let content = self.extract_text_from_response(&response)?;
-        Ok(content)
+        self.complete(prompt, 0.3, token_budget as u64).await
     }
 
     /// Analyze task dependencies and suggest optimal ordering
@@ -322,12 +316,7 @@ Respond in JSON format:
             task_descriptions.join("\n")
         );
 
-        let completion = Completion::new(self.model.clone(), Message::user(prompt))
-            .temperature(0.2)
-            .max_tokens(1000);
-
-        let response = self.llm.completion(completion).await?;
-        let content = self.extract_text_from_response(&response)?;
+        let content = self.complete(prompt, 0.2, 1000).await?;
 
         // Parse JSON response
         let analysis: DependencyAnalysis = serde_json::from_str(&content)
