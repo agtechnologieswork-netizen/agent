@@ -9,7 +9,6 @@
 pub mod handler;
 pub mod types;
 pub mod llm;
-pub mod cli;
 pub mod mq;
 pub mod runner;
 

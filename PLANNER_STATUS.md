@@ -12,12 +12,11 @@
 ```
 dabgent_agent/src/
 ├── planner/
-│   ├── handler.rs    # Core planner logic
-│   ├── types.rs      # Type definitions
-│   ├── llm.rs        # LLM integration
-│   ├── mq.rs         # Event persistence
-│   ├── cli.rs        # CLI interface
-│   └── runner.rs     # Minimal runner (81 lines)
+│   ├── handler.rs    # Core planner logic (539 lines)
+│   ├── types.rs      # Type definitions (340 lines)
+│   ├── llm.rs        # LLM integration (430 lines)
+│   ├── mq.rs         # Event persistence (27 lines)
+│   └── runner.rs     # Minimal runner (80 lines)
 └── agent.rs          # Original Worker unchanged
 ```
 
@@ -41,7 +40,8 @@ planner::runner::run_with_timeout(llm, store, preamble, tools, input, 60).await?
   - Attachments handling
 
 ## Design
-- **Minimal**: 81-line runner (down from 107)
+- **Minimal**: 80-line runner (down from 107, CLI removed)
 - **Simple**: Just two functions - `run()` and `run_with_timeout()`
 - **No config objects**: Just a timeout parameter
 - **Event-driven**: Follows dabgent patterns
+- **No duplication**: Removed unused CLI module (97 lines)
