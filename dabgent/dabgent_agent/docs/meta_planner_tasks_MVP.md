@@ -12,10 +12,10 @@
 ## 🚀 Ship MVP (What's Left)
 
 ### Integration Tasks (2-4 hours)
-- [ ] Create simple CLI demo
+- [x] Create simple CLI demo
 - [ ] End-to-end test with real LLM
 - [ ] Basic error handling
-- [ ] Minimal documentation
+- [x] Minimal documentation
 
 ## ❌ CUT from MVP (Do Later)
 
