@@ -4,7 +4,7 @@
   "description": "A data application template with FastAPI backend and React Admin frontend for Databricks Apps",
   "private": true,
   "scripts": {
-    "setup": "cd frontend/reactadmin && npm install",
+    "setup": "npm install && cd frontend/reactadmin && npm install",
     "dev": "concurrently \"npm run dev:frontend\" \"npm run dev:backend\"",
     "dev:frontend": "cd frontend/reactadmin && npm run dev",
     "dev:backend": "cd backend && uv run uvicorn main:app --reload --host 0.0.0.0 --port 8000",
