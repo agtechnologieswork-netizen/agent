@@ -4,15 +4,13 @@
   "description": "A data application template with FastAPI backend and React Admin frontend for Databricks Apps",
   "private": true,
   "scripts": {
-    "install": "npm run install:all",
-    "dev": "cd frontend/reactadmin && npm run dev",
-    "build": "cd frontend/reactadmin && npm run build",
-    "start": "npm run start:backend",
-    "start:backend": "python3 backend/main.py",
-    "start:frontend": "cd frontend/reactadmin && npm run serve",
-    "type-check": "cd frontend/reactadmin && npm run type-check",
-    "lint": "cd frontend/reactadmin && npm run lint",
-    "format": "cd frontend/reactadmin && npm run format",
-    "install:all": "cd frontend/reactadmin && npm install"
+    "setup": "cd frontend/reactadmin && npm install",
+    "dev": "concurrently \"npm run dev:frontend\" \"npm run dev:backend\"",
+    "dev:frontend": "cd frontend/reactadmin && npm run dev",
+    "dev:backend": "cd backend && uv run uvicorn main:app --reload --host 0.0.0.0 --port 8000",
+    "build": "cd frontend/reactadmin && npm install && npm run build"
+  },
+  "devDependencies": {
+    "concurrently": "9.2.1"
   }
 }

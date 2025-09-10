@@ -1,1 +1,1 @@
-command: ['npm', 'run', 'start']
+command: ['python', 'backend/main.py']
