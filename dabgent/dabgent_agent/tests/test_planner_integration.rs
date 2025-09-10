@@ -48,7 +48,16 @@ async fn setup_store() -> SqliteStore {
 #[tokio::test]
 async fn test_planner_timeout() {
     let store = setup_store().await;
-    let llm = MockLLMClient::new(vec![]);
+    // Return valid XML that will parse successfully but then timeout waiting for completion
+    let llm = MockLLMClient::new(vec![
+        r#"<tasks>
+<task>
+  <id>1</id>
+  <description>Test task</description>
+  <kind>Processing</kind>
+</task>
+</tasks>"#.to_string()
+    ]);
     let preamble = "Test".to_string();
     let tools: Vec<Box<dyn ToolDyn>> = vec![];
     
@@ -69,11 +78,17 @@ async fn test_planner_timeout() {
 #[tokio::test]
 async fn test_planner_initialization() {
     use dabgent_agent::handler::Handler;
-    use dabgent_agent::planner::{Planner, Command};
+    use dabgent_agent::planner::{Planner, Command, TaskPlan, NodeKind};
     
     let mut planner = Planner::new();
     let command = Command::Initialize {
-        user_input: "Test task".to_string(),
+        tasks: vec![
+            TaskPlan {
+                id: 1,
+                description: "Test task".to_string(),
+                kind: NodeKind::Processing,
+            },
+        ],
     };
     
     let events = planner.process(command);
@@ -84,14 +99,20 @@ async fn test_planner_initialization() {
 #[tokio::test]
 async fn test_event_persistence() {
     use dabgent_agent::handler::Handler;
-    use dabgent_agent::planner::{Planner, Command, Event};
+    use dabgent_agent::planner::{Planner, Command, Event, TaskPlan, NodeKind};
     use dabgent_mq::db::Query;
     
     let store = setup_store().await;
     let mut planner = Planner::new();
     
     let command = Command::Initialize {
-        user_input: "Test task".to_string(),
+        tasks: vec![
+            TaskPlan {
+                id: 1,
+                description: "Test task".to_string(),
+                kind: NodeKind::Processing,
+            },
+        ],
     };
     let events = planner.process(command).unwrap();
     

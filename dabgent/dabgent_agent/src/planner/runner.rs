@@ -2,8 +2,10 @@
 
 use crate::agent::Worker;
 use crate::handler::Handler;
-use crate::llm::LLMClient;
+use crate::llm::{LLMClient, LLMClientDyn};
 use crate::planner::{Planner, Command, Event};
+use crate::planner::llm::LLMPlanner;
+use crate::planner::handler::TaskPlan;
 use crate::toolbox::ToolDyn;
 use dabgent_mq::EventStore;
 use dabgent_mq::db::Query;
@@ -43,9 +45,21 @@ where
     let fut = async {
         let id = Uuid::new_v4().to_string();
         
-        // Initialize planner
+        // Parse tasks using LLM
+        let llm_planner = LLMPlanner::new(
+            Box::new(llm.clone()) as Box<dyn LLMClientDyn>,
+            "gpt-4".to_string(), // Default model, could be parameterized
+        );
+        let parsed_tasks = llm_planner.parse_tasks(&input).await?;
+        
+        // Convert to TaskPlan
+        let tasks: Vec<TaskPlan> = parsed_tasks.into_iter()
+            .map(|t| t.into())
+            .collect();
+        
+        // Initialize planner with parsed tasks
         let events = Planner::new().process(Command::Initialize {
-            user_input: input,
+            tasks,
         })?;
         
         for event in events {

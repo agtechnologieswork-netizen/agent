@@ -1,7 +1,7 @@
 //! End-to-end test for planner integration
 
 use dabgent_agent::handler::Handler;
-use dabgent_agent::planner::{Planner, Command, Event};
+use dabgent_agent::planner::{Planner, Command, Event, TaskPlan, NodeKind};
 use dabgent_mq::db::{sqlite::SqliteStore, Query};
 use dabgent_mq::EventStore;
 
@@ -21,7 +21,13 @@ async fn test_planner_basic_flow() {
     
     // Initialize with a simple task
     let command = Command::Initialize {
-        user_input: "Write a function to add two numbers".to_string(),
+        tasks: vec![
+            TaskPlan {
+                id: 1,
+                description: "Write a function to add two numbers".to_string(),
+                kind: NodeKind::Processing,
+            },
+        ],
     };
     
     // Process should succeed
@@ -58,7 +64,13 @@ async fn test_planner_continue() {
     
     // Initialize
     let _ = planner.process(Command::Initialize {
-        user_input: "Build a web application".to_string(),
+        tasks: vec![
+            TaskPlan {
+                id: 1,
+                description: "Build a web application".to_string(),
+                kind: NodeKind::Processing,
+            },
+        ],
     }).unwrap();
     
     // Continue command should work

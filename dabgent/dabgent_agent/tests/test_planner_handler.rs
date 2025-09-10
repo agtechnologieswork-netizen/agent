@@ -11,7 +11,23 @@ fn test_initialize_and_plan() {
     let mut planner = Planner::new();
 
     let events = planner.process(Command::Initialize {
-        user_input: "Analyze the code\nRun tests\nDeploy to production".to_string(),
+        tasks: vec![
+            TaskPlan {
+                id: 1,
+                description: "Analyze the code".to_string(),
+                kind: NodeKind::Processing,
+            },
+            TaskPlan {
+                id: 2,
+                description: "Run tests".to_string(),
+                kind: NodeKind::ToolCall,
+            },
+            TaskPlan {
+                id: 3,
+                description: "Deploy to production".to_string(),
+                kind: NodeKind::ToolCall,
+            },
+        ],
     }).unwrap();
 
     // Should plan tasks and dispatch first one
@@ -28,7 +44,13 @@ fn test_task_execution_flow() {
 
     // Initialize with a task
     planner.process(Command::Initialize {
-        user_input: "Test task".to_string(),
+        tasks: vec![
+            TaskPlan {
+                id: 1,
+                description: "Test task".to_string(),
+                kind: NodeKind::Processing,
+            },
+        ],
     }).unwrap();
 
     // Complete the task
@@ -51,7 +73,13 @@ fn test_clarification_flow() {
 
     // Initialize with a clarification task
     planner.process(Command::Initialize {
-        user_input: "What is the project name?".to_string(),
+        tasks: vec![
+            TaskPlan {
+                id: 1,
+                description: "What is the project name?".to_string(),
+                kind: NodeKind::Clarification,
+            },
+        ],
     }).unwrap();
 
     // Request clarification

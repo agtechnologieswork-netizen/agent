@@ -5,9 +5,9 @@ use serde::{Deserialize, Serialize};
 /// Commands that the planner can process
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Command {
-    /// Initialize planner with user input
+    /// Initialize planner with parsed tasks
     Initialize {
-        user_input: String,
+        tasks: Vec<TaskPlan>,
     },
     /// Process an event from the executor
     HandleExecutorEvent(ExecutorEvent),
@@ -156,46 +156,6 @@ impl Planner {
         }
     }
 
-    /// Parse user input and generate task plan (multi-line -> multi-task)
-    fn parse_input(&self, user_input: &str) -> Result<Vec<TaskPlan>, PlannerError> {
-        // Split by newlines into individual tasks, ignore empty lines
-        let lines: Vec<String> = user_input
-            .lines()
-            .map(|l| l.trim())
-            .filter(|l| !l.is_empty())
-            .map(|l| l.to_string())
-            .collect();
-
-        if lines.is_empty() {
-            return Ok(Vec::new());
-        }
-
-        let mut tasks: Vec<TaskPlan> = Vec::with_capacity(lines.len());
-        let mut next_id = self.state.next_id;
-
-        for line in lines {
-            // Very simple heuristic for NodeKind when LLM isn't used
-            let lower = line.to_lowercase();
-            let kind = if line.ends_with('?') {
-                NodeKind::Clarification
-            } else if lower.contains("run ") || lower.contains("test") || lower.contains("deploy") {
-                NodeKind::ToolCall
-            } else {
-                NodeKind::Processing
-            };
-
-            tasks.push(TaskPlan {
-                id: next_id,
-                description: line,
-                kind,
-            });
-
-            next_id += 1;
-        }
-
-        Ok(tasks)
-    }
-
     /// Generate the next command to dispatch
     fn generate_next_command(&self) -> Option<PlannerCmd> {
         // Check if we're waiting for clarification
@@ -254,9 +214,8 @@ impl Handler for Planner {
         let mut events = Vec::new();
 
         match command {
-            Command::Initialize { user_input } => {
-                // Parse input and plan tasks
-                let tasks = self.parse_input(&user_input)?;
+            Command::Initialize { tasks } => {
+                // Tasks are already parsed by LLM
                 events.push(Event::TasksPlanned {
                     tasks,
                 });
