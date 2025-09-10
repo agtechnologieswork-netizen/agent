@@ -514,6 +514,7 @@ dependencies = [
  "dabgent_mq",
  "dabgent_sandbox",
  "dagger-sdk",
+ "dotenvy",
  "eyre",
  "rig-core",
  "serde",
