@@ -16,19 +16,23 @@
 - [x] Removed CLI module (saved 97 lines)
 - [x] Deduplicated LLM calls (saved 12 lines)
 - [x] Extracted tests to separate files (saved 261 lines)
+- [x] Removed attachments feature (simplified)
+- [x] Removed context compaction (saved ~100 lines)
+- [x] Removed dependency analysis (saved ~80 lines)
+- [x] Removed token budget management (saved ~20 lines)
 - [x] Consolidated documentation
 
 ## 📊 Final Metrics
 
 | Component | Lines | 
 |-----------|-------|
-| handler.rs | 421 |
-| llm.rs | 362 |
-| types.rs | 282 |
-| runner.rs | 81 |
-| mq.rs | 27 |
+| handler.rs | 379 |
+| types.rs | 228 |
+| llm.rs | 208 |
+| runner.rs | 80 |
 | mod.rs | 27 |
-| **Total** | **1,200** |
+| mq.rs | 26 |
+| **Total** | **948** |
 
 ## 🚀 How to Use
 

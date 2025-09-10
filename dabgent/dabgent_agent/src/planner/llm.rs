@@ -1,17 +1,13 @@
 //! LLM integration for intelligent task planning
 //! This module provides LLM-powered capabilities for:
 //! - Parsing natural language into structured tasks
-//! - Identifying task dependencies
 //! - Semantic NodeKind classification
-//! - Context compaction and summarization
 
 use crate::llm::{Completion, LLMClientDyn, CompletionResponse};
 use crate::planner::types::NodeKind;
-use crate::planner::handler::{TaskPlan, Event};
+use crate::planner::handler::TaskPlan;
 use eyre::Result;
 use rig::message::{Message, AssistantContent};
-use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 
 /// Extract content between XML tags
 fn extract_tag(xml: &str, tag: &str) -> Option<String> {
@@ -38,10 +34,8 @@ impl LLMPlanner {
 
 Your responsibilities:
 1. Parse natural language into a sequence of clear, actionable tasks
-2. Identify dependencies between tasks
-3. Classify each task type (Processing, ToolCall, or Clarification)
-4. Extract URLs, file references, and other attachments
-5. Preserve the user's intent while making tasks concrete
+2. Classify each task type (Processing, ToolCall, or Clarification)
+3. Preserve the user's intent while making tasks concrete
 
 Task Types:
 - Processing: Analysis, planning, implementation, or general computation tasks
@@ -50,7 +44,7 @@ Task Types:
 
 Output Format:
 Provide your response in structured XML format with tasks inside <tasks> tags.
-Each task should have: id, description, kind, dependencies (comma-separated ids), and attachments (if any).
+Each task should have: id, description, kind.
 
 Example:
 <tasks>
@@ -58,19 +52,16 @@ Example:
   <id>1</id>
   <description>Analyze the existing codebase structure</description>
   <kind>Processing</kind>
-  <dependencies></dependencies>
 </task>
 <task>
   <id>2</id>
   <description>Run existing unit tests to understand current coverage</description>
   <kind>ToolCall</kind>
-  <dependencies>1</dependencies>
 </task>
 <task>
   <id>3</id>
   <description>What testing framework should we use for new tests?</description>
   <kind>Clarification</kind>
-  <dependencies>2</dependencies>
 </task>
 </tasks>"#.to_string();
 
@@ -115,8 +106,7 @@ Example:
 Remember to:
 - Break down complex requests into smaller, manageable tasks
 - Mark ambiguous requirements as Clarification tasks
-- Ensure tasks are in logical execution order
-- Set proper dependencies between tasks"#,
+- Ensure tasks are in logical execution order"#,
             user_input
         );
 
@@ -156,7 +146,6 @@ Remember to:
         let id = extract_tag(task_xml, "id")?.parse::<u64>().ok()?;
         let description = extract_tag(task_xml, "description")?;
         let kind_str = extract_tag(task_xml, "kind")?;
-        let dependencies_str = extract_tag(task_xml, "dependencies").unwrap_or_default();
 
         let kind = match kind_str.to_lowercase().as_str() {
             "processing" => NodeKind::Processing,
@@ -165,20 +154,10 @@ Remember to:
             _ => NodeKind::Processing,
         };
 
-        let dependencies = if dependencies_str.is_empty() {
-            Vec::new()
-        } else {
-            dependencies_str
-                .split(',')
-                .filter_map(|s| s.trim().parse::<u64>().ok())
-                .collect()
-        };
-
         Some(ParsedTask {
             id,
             description,
             kind,
-            dependencies,
         })
     }
 
@@ -207,89 +186,6 @@ Respond with just the category name: Processing, ToolCall, or Clarification"#,
         })
     }
 
-    /// Compact context using LLM to manage token budget
-    pub async fn compact_context(
-        &self,
-        events: &[Event],
-        token_budget: usize,
-    ) -> Result<String> {
-        // Build context from events
-        let mut context_parts = Vec::new();
-        for event in events {
-            match event {
-                Event::TaskStatusUpdated { task_id, status, result } => {
-                    if let Some(result) = result {
-                        context_parts.push(format!("Task {}: {} (Status: {:?})", task_id, result, status));
-                    }
-                }
-                Event::ClarificationReceived { task_id, answer } => {
-                    context_parts.push(format!("Clarification for task {}: {}", task_id, answer));
-                }
-                _ => {}
-            }
-        }
-
-        let full_context = context_parts.join("\n");
-
-        // Estimate tokens (rough approximation: 1 token ≈ 4 chars)
-        let estimated_tokens = full_context.len() / 4;
-        if estimated_tokens <= token_budget {
-            return Ok(full_context);
-        }
-
-        // Use LLM to summarize
-        let prompt = format!(
-            r#"Summarize the following task execution context to fit within {} tokens (approximately {} characters).
-Keep the most important information about completed tasks, decisions made, and key results.
-
-Context:
-{}
-
-Provide a concise summary that preserves essential information for continuing the task sequence."#,
-            token_budget,
-            token_budget * 4,
-            full_context
-        );
-
-        self.complete(prompt, 0.3, token_budget as u64).await
-    }
-
-    /// Analyze task dependencies and suggest optimal ordering
-    pub async fn analyze_dependencies(&self, tasks: &[ParsedTask]) -> Result<DependencyAnalysis> {
-        let task_descriptions: Vec<String> = tasks
-            .iter()
-            .map(|t| format!("{}: {}", t.id, t.description))
-            .collect();
-
-        let prompt = format!(
-            r#"Analyze the dependencies between these tasks and suggest the optimal execution order.
-
-Tasks:
-{}
-
-For each task, identify:
-1. Which tasks it depends on (must complete before)
-2. Which tasks can run in parallel with it
-3. Any potential bottlenecks or critical path issues
-
-Respond in JSON format:
-{{
-  "dependencies": {{"task_id": [dependency_ids], ...}},
-  "parallel_groups": [[task_ids_that_can_run_together], ...],
-  "critical_path": [task_ids_in_order],
-  "bottlenecks": ["description of bottleneck", ...]
-}}"#,
-            task_descriptions.join("\n")
-        );
-
-        let content = self.complete(prompt, 0.2, 1000).await?;
-
-        // Parse JSON response
-        let analysis: DependencyAnalysis = serde_json::from_str(&content)
-            .unwrap_or_else(|_| DependencyAnalysis::default());
-
-        Ok(analysis)
-    }
 }
 
 /// Parsed task from LLM
@@ -298,7 +194,6 @@ pub struct ParsedTask {
     pub id: u64,
     pub description: String,
     pub kind: NodeKind,
-    pub dependencies: Vec<u64>,
 }
 
 impl From<ParsedTask> for TaskPlan {
@@ -309,18 +204,5 @@ impl From<ParsedTask> for TaskPlan {
             kind: parsed.kind,
         }
     }
-}
-
-/// Dependency analysis result
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub struct DependencyAnalysis {
-    /// Map of task ID to its dependencies
-    pub dependencies: HashMap<u64, Vec<u64>>,
-    /// Groups of tasks that can run in parallel
-    pub parallel_groups: Vec<Vec<u64>>,
-    /// Critical path through the task graph
-    pub critical_path: Vec<u64>,
-    /// Identified bottlenecks
-    pub bottlenecks: Vec<String>,
 }
 

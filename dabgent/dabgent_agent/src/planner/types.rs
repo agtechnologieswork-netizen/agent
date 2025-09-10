@@ -134,8 +134,6 @@ pub struct PlannerState {
     pub pending_clarification_for: Option<u64>,
     /// Next available task ID
     pub next_id: u64,
-    /// Compacted context summary
-    pub context_summary: String,
     /// Track which tasks have been dispatched (for idempotency)
     pub dispatched_tasks: HashMap<u64, u64>, // task_id -> timestamp
 }
@@ -148,7 +146,6 @@ impl Default for PlannerState {
             waiting_for_clarification: false,
             pending_clarification_for: None,
             next_id: 1,
-            context_summary: String::new(),
             dispatched_tasks: HashMap::new(),
         }
     }
@@ -227,36 +224,5 @@ impl PlannerState {
         id
     }
 
-    /// Get conversation thread for compaction
-    pub fn get_thread(&self) -> Vec<String> {
-        let mut thread = Vec::new();
-
-        if !self.context_summary.is_empty() {
-            thread.push(format!("Context: {}", self.context_summary));
-        }
-
-        for task in &self.tasks {
-            if task.status == TaskStatus::Completed {
-                thread.push(format!("Task {}: {}", task.id, task.description));
-            }
-        }
-
-        thread
-    }
-}
-
-/// Planner configuration (MVP: minimal config)
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PlannerConfig {
-    /// Maximum tokens for context
-    pub token_budget: usize,
-}
-
-impl Default for PlannerConfig {
-    fn default() -> Self {
-        Self {
-            token_budget: 4000,
-        }
-    }
 }
 

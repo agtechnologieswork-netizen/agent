@@ -20,7 +20,6 @@ impl Event {
             Event::TaskStatusUpdated { .. } => "TaskStatusUpdated",
             Event::ClarificationRequested { .. } => "ClarificationRequested",
             Event::ClarificationReceived { .. } => "ClarificationReceived",
-            Event::ContextCompacted { .. } => "ContextCompacted",
             Event::PlanningCompleted { .. } => "PlanningCompleted",
         }
     }

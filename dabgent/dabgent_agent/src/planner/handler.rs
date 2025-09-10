@@ -13,10 +13,6 @@ pub enum Command {
     HandleExecutorEvent(ExecutorEvent),
     /// Continue planning after a pause
     Continue,
-    /// Compact context to manage token limits
-    CompactContext {
-        max_tokens: usize,
-    },
 }
 
 /// Events emitted by the planner
@@ -46,11 +42,6 @@ pub enum Event {
     ClarificationReceived {
         task_id: u64,
         answer: String,
-    },
-    /// Context was compacted
-    ContextCompacted {
-        summary: String,
-        removed_task_ids: Vec<u64>,
     },
     /// Planning completed
     PlanningCompleted {
@@ -111,7 +102,7 @@ impl Planner {
         match event {
             Event::TasksPlanned { tasks } => {
                 for plan in tasks {
-                    let mut task = Task::new(plan.id, plan.description.clone(), plan.kind);
+                    let task = Task::new(plan.id, plan.description.clone(), plan.kind);
                     self.state.tasks.push(task);
                     if plan.id >= self.state.next_id {
                         self.state.next_id = plan.id + 1;
@@ -152,11 +143,6 @@ impl Planner {
                 if let Some(task) = self.state.get_task_mut(*task_id) {
                     task.update_status(TaskStatus::Planned);
                 }
-            }
-
-            Event::ContextCompacted { summary, removed_task_ids } => {
-                self.state.context_summary = summary.clone();
-                self.state.tasks.retain(|t| !removed_task_ids.contains(&t.id));
             }
 
             Event::PlanningCompleted { .. } => {
@@ -257,12 +243,6 @@ impl Planner {
         None
     }
 
-    /// Compact context (MVP: no-op, real implementation uses LLM)
-    fn compact_context(&self, _max_tokens: usize) -> (String, Vec<u64>) {
-        // MVP: Return existing summary without compaction
-        // Real compaction should be done by LLM
-        (self.state.context_summary.clone(), Vec::new())
-    }
 }
 
 impl Handler for Planner {
@@ -377,17 +357,6 @@ impl Handler for Planner {
                 }
             }
 
-            Command::CompactContext { max_tokens } => {
-                let (summary, removed_ids) = self.compact_context(max_tokens);
-
-                if !removed_ids.is_empty() {
-                    events.push(Event::ContextCompacted {
-                        summary,
-                        removed_task_ids: removed_ids,
-                    });
-                    self.apply_event(&events[0]);
-                }
-            }
         }
 
         // Store events in log

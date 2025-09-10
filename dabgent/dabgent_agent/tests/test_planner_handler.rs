@@ -117,31 +117,3 @@ fn test_fold_reconstructs_state() {
     assert!(planner.state().is_dispatched(1));
 }
 
-#[test]
-fn test_context_compaction() {
-    let mut planner = Planner::new();
-
-    // Initialize with multiple tasks
-    planner.process(Command::Initialize {
-        user_input: "Task 1\nTask 2\nTask 3\nTask 4\nTask 5".to_string(),
-    }).unwrap();
-
-    // Complete some tasks by processing events
-    for i in 1..=3 {
-        planner.process(Command::HandleExecutorEvent(
-            ExecutorEvent::TaskCompleted {
-                node_id: i,
-                result: format!("Task {} done", i),
-            }
-        )).unwrap();
-    }
-
-    // Compact context
-    let events = planner.process(Command::CompactContext {
-        max_tokens: 100, // Small limit to trigger compaction
-    }).unwrap();
-
-    if !events.is_empty() {
-        assert!(matches!(&events[0], Event::ContextCompacted { .. }));
-    }
-}
