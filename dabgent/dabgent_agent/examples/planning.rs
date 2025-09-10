@@ -6,7 +6,7 @@ use dabgent_mq::EventStore;
 use dabgent_mq::db::{Query, sqlite::SqliteStore};
 use dabgent_sandbox::dagger::Sandbox as DaggerSandbox;
 use dabgent_sandbox::{Sandbox, SandboxDyn};
-use eyre::{eyre, Result};
+use eyre::Result;
 
 #[tokio::main]
 async fn main() {
