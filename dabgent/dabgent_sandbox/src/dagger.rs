@@ -1,5 +1,6 @@
 use crate::ExecResult;
 use eyre::Result;
+use std::env;
 
 #[derive(Clone)]
 pub struct Sandbox {
@@ -13,10 +14,23 @@ impl Sandbox {
     }
 }
 
+const DEFAULT_EXEC_TIMEOUT_SECS: u64 = 60;
+
 impl crate::Sandbox for Sandbox {
     async fn exec(&mut self, command: &str) -> Result<ExecResult> {
         let ctr = self.ctr.clone();
-        let command: Vec<String> = command.split_whitespace().map(String::from).collect();
+        let mut command: Vec<String> = command.split_whitespace().map(String::from).collect();
+        let secs: u64 = env::var("DAGGER_EXEC_TIMEOUT_SECS")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(DEFAULT_EXEC_TIMEOUT_SECS);
+        if secs > 0 {
+            command = ["timeout", &format!("{}s", secs)]
+                .into_iter()
+                .map(String::from)
+                .chain(command)
+                .collect();
+        }
         let opts = dagger_sdk::ContainerWithExecOptsBuilder::default()
             .expect(dagger_sdk::ReturnType::Any)
             .build()

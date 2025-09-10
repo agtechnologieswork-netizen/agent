@@ -45,7 +45,10 @@ impl Tool for Bash {
         let result = sandbox.exec(&args.command).await?;
         match result.exit_code {
             0 => Ok(Ok(result.stdout)),
-            _ => Ok(Err(format!("Error:\n{}\n{}", result.stderr, result.stdout))),
+            _ => Ok(Err(format!(
+                "Error:\n{}\n{}",
+                result.stderr, result.stdout
+            ))),
         }
     }
 }

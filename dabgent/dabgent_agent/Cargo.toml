@@ -22,6 +22,7 @@ tokio-stream = "0.1"
 [dev-dependencies]
 dagger-sdk = "0.18.16"
 sqlx = { version = "0.8", features = ["postgres", "sqlite", "runtime-tokio", "tls-native-tls", "json", "chrono", "migrate"] }
+dotenvy = "0.15"
 
 [[example]]
 name = "basic"
