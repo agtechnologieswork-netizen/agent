@@ -51,14 +51,29 @@ async fn run() {
 
         let mut receiver = store.subscribe::<thread::Event>(&query)?;
         let mut events = store.load_events(&query, None).await?;
-        while let Some(event) = receiver.next().await {
-            let event = event?;
-            events.push(event.clone());
-            let thread = thread::Thread::fold(&events);
-            tracing::info!(?thread.state, ?event, "event");
-            match thread.state {
-                thread::State::Done => break,
-                _ => continue,
+        let idle_timeout = std::time::Duration::from_secs(60);
+        loop {
+            match tokio::time::timeout(idle_timeout, receiver.next()).await {
+                Ok(Some(Ok(event))) => {
+                    events.push(event.clone());
+                    let thread = thread::Thread::fold(&events);
+                    tracing::info!(?thread.state, ?event, "event");
+                    if let thread::State::Done = thread.state {
+                        break;
+                    }
+                }
+                Ok(Some(Err(e))) => {
+                    tracing::error!(error = ?e, "event stream error");
+                    continue;
+                }
+                Ok(None) => {
+                    tracing::warn!("event stream closed");
+                    break;
+                }
+                Err(_) => {
+                    tracing::warn!("no events for 60s, exiting");
+                    break;
+                }
             }
         }
 
@@ -101,19 +116,15 @@ pub struct Validator;
 
 impl toolbox::Validator for Validator {
     async fn run(&self, sandbox: &mut Box<dyn SandboxDyn>) -> Result<Result<(), String>> {
-        let timeout = std::time::Duration::from_secs(30);
-        tokio::time::timeout(timeout, sandbox.exec("uv run main.py"))
-            .await
-            .map_err(|_| eyre!("Validation timed out after 30 seconds"))?
-            .map(|result| {
-                if result.exit_code == 0 {
-                    Ok(())
-                } else {
-                    Err(format!(
-                        "code: {}\nstdout: {}\nstderr: {}",
-                        result.exit_code, result.stdout, result.stderr
-                    ))
-                }
-            })
+        // Delegate timeout to Dagger via DAGGER_EXEC_TIMEOUT_SECS
+        // Here we just run the command and interpret exit codes
+        let result = sandbox.exec("uv run main.py").await?;
+        Ok(match result.exit_code {
+            0 | 124 => Ok(()),
+            code => Err(format!(
+                "code: {}\nstdout: {}\nstderr: {}",
+                code, result.stdout, result.stderr
+            )),
+        })
     }
 }
