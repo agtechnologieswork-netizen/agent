@@ -15,7 +15,6 @@ fn test_task_status_update() {
     let mut task = Task::new(1, "Test task".to_string(), NodeKind::Processing);
     task.update_status(TaskStatus::Running);
     assert_eq!(task.status, TaskStatus::Running);
-    assert!(task.updated_at >= task.created_at);
 }
 
 #[test]

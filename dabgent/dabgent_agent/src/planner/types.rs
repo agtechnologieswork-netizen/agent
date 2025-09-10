@@ -1,228 +1,107 @@
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 
-/// Classification for routing & tooling (v1 minimal set)
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum NodeKind {
-    /// Explicit user Q/A
-    Clarification,
-    /// External tool execution
-    ToolCall,
-    /// Generic planning/analysis/implementation
-    Processing,
-}
+pub enum NodeKind { Clarification, ToolCall, Processing }
 
-/// Task execution status
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum TaskStatus {
-    /// Task is planned but not yet started
-    Planned,
-    /// Task is currently being executed
-    Running,
-    /// Task has completed successfully
-    Completed,
-    /// Task needs user clarification
-    NeedsClarification,
-    /// Task has failed
-    Failed,
-}
+pub enum TaskStatus { Planned, Running, Completed, Failed, NeedsClarification }
 
-/// Commands emitted by the planner to the executor (published to bus)
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum PlannerCmd {
-    /// Execute a specific task
-    ExecuteTask {
-        node_id: u64,
-        kind: NodeKind,
-        parameters: String,
-    },
-    /// Request clarification from user
-    RequestClarification {
-        node_id: u64,
-        question: String,
-    },
-    /// Signal completion of all tasks
-    Complete {
-        summary: String,
-    },
-}
-
-/// Events received by the planner from the executor/UI (consumed from bus)
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum ExecutorEvent {
-    /// Task completed successfully
-    TaskCompleted {
-        node_id: u64,
-        result: String,
-    },
-    /// Task failed with error
-    TaskFailed {
-        node_id: u64,
-        error: String,
-    },
-    /// Task needs clarification
-    NeedsClarification {
-        node_id: u64,
-        question: String,
-    },
-    /// User provided clarification
-    ClarificationProvided {
-        node_id: u64,
-        answer: String,
-    },
-}
-
-// Attachments dropped for MVP simplicity
-
-/// Individual task in the execution plan
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Task {
-    /// Unique task identifier
     pub id: u64,
-    /// Human-readable task description
     pub description: String,
-    /// Task classification for routing
     pub kind: NodeKind,
-    /// Current execution status
     pub status: TaskStatus,
-    /// Timestamp when task was created
-    pub created_at: u64,
-    /// Timestamp when task was last updated
-    pub updated_at: u64,
 }
 
 impl Task {
-    /// Create a new task with the given parameters
     pub fn new(id: u64, description: String, kind: NodeKind) -> Self {
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_secs();
-
-        Self {
-            id,
-            description,
-            kind,
-            status: TaskStatus::Planned,
-            created_at: now,
-            updated_at: now,
-        }
+        Self { id, description, kind, status: TaskStatus::Planned }
     }
-
-    /// Update task status and timestamp
+    
     pub fn update_status(&mut self, status: TaskStatus) {
         self.status = status;
-        self.updated_at = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_secs();
     }
-
-    // Attachments removed
 }
 
-/// Planner state that can be rebuilt from events
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct PlannerState {
-    /// All tasks in the execution plan
     pub tasks: Vec<Task>,
-    /// Current position in task sequence
-    pub cursor: usize,
-    /// Whether planner is waiting for clarification
-    pub waiting_for_clarification: bool,
-    /// Task ID waiting for clarification
-    pub pending_clarification_for: Option<u64>,
-    /// Next available task ID
     pub next_id: u64,
-    /// Track which tasks have been dispatched (for idempotency)
-    pub dispatched_tasks: HashMap<u64, u64>, // task_id -> timestamp
+    pub waiting_for_clarification: bool,
+    pub pending_clarification_for: Option<u64>,
+    pub cursor: usize,
+    pub dispatched_tasks: std::collections::HashMap<u64, u64>,
 }
 
 impl Default for PlannerState {
     fn default() -> Self {
         Self {
             tasks: Vec::new(),
-            cursor: 0,
+            next_id: 1,  // Start IDs at 1
             waiting_for_clarification: false,
             pending_clarification_for: None,
-            next_id: 1,
-            dispatched_tasks: HashMap::new(),
+            cursor: 0,
+            dispatched_tasks: std::collections::HashMap::new(),
         }
     }
 }
 
 impl PlannerState {
-    /// Get a task by ID
     pub fn get_task(&self, id: u64) -> Option<&Task> {
         self.tasks.iter().find(|t| t.id == id)
     }
-
-    /// Get a mutable task by ID
+    
     pub fn get_task_mut(&mut self, id: u64) -> Option<&mut Task> {
         self.tasks.iter_mut().find(|t| t.id == id)
     }
-
-    /// Get the next undispatched task
-    pub fn get_next_undispatched_task(&self) -> Option<u64> {
-        if self.cursor >= self.tasks.len() {
-            return None;
-        }
-
-        let task = &self.tasks[self.cursor];
-        if task.status == TaskStatus::Planned && !self.dispatched_tasks.contains_key(&task.id) {
-            Some(task.id)
-        } else {
-            None
-        }
+    
+    pub fn next_planned_index(&self) -> Option<usize> {
+        self.tasks.iter().position(|t| matches!(t.status, TaskStatus::Planned))
     }
-
-    /// Check if a task has been dispatched
-    pub fn is_dispatched(&self, task_id: u64) -> bool {
-        self.dispatched_tasks.contains_key(&task_id)
+    
+    pub fn set_clarification(&mut self, id: u64) {
+        self.waiting_for_clarification = true;
+        self.pending_clarification_for = Some(id);
     }
-
-    /// Mark a task as dispatched
-    pub fn mark_dispatched(&mut self, task_id: u64) {
-        let timestamp = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_secs();
-        self.dispatched_tasks.insert(task_id, timestamp);
-    }
-
-    /// Advance to the next task
-    pub fn advance_cursor(&mut self) {
-        if self.cursor < self.tasks.len() {
-            self.cursor += 1;
-        }
-    }
-
-    /// Reset clarification state
+    
     pub fn clear_clarification(&mut self) {
         self.waiting_for_clarification = false;
         self.pending_clarification_for = None;
     }
-
-    /// Set clarification state
-    pub fn set_clarification(&mut self, task_id: u64) {
-        self.waiting_for_clarification = true;
-        self.pending_clarification_for = Some(task_id);
+    
+    pub fn is_dispatched(&self, task_id: u64) -> bool {
+        self.dispatched_tasks.contains_key(&task_id)
     }
-
-    /// Allocate a new task ID
-    pub fn alloc_id(&mut self) -> u64 {
+    
+    pub fn mark_dispatched(&mut self, task_id: u64) {
+        self.dispatched_tasks.insert(task_id, 0);
+    }
+    
+    pub fn get_next_undispatched_task(&self) -> Option<u64> {
+        self.tasks.iter()
+            .find(|t| t.status == TaskStatus::Planned && !self.is_dispatched(t.id))
+            .map(|t| t.id)
+    }
+    
+    pub fn add_task(&mut self, description: String, kind: NodeKind) -> u64 {
         let id = self.next_id;
         self.next_id += 1;
-        id
-    }
-
-    /// Add a new task to the plan
-    pub fn add_task(&mut self, description: String, kind: NodeKind) -> u64 {
-        let id = self.alloc_id();
         let task = Task::new(id, description, kind);
         self.tasks.push(task);
         id
     }
-
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub enum PlannerCmd {
+    ExecuteTask { node_id: u64, kind: NodeKind, parameters: String },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub enum ExecutorEvent {
+    TaskCompleted { node_id: u64, result: String },
+    TaskFailed { node_id: u64, error: String },
+    NeedsClarification { node_id: u64, question: String },
+    ClarificationProvided { node_id: u64, answer: String },
+}
