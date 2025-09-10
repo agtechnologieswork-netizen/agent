@@ -6,7 +6,7 @@ use dabgent_mq::EventStore;
 use dabgent_mq::db::{Query, sqlite::SqliteStore};
 use dabgent_sandbox::dagger::Sandbox as DaggerSandbox;
 use dabgent_sandbox::{Sandbox, SandboxDyn};
-use eyre::Result;
+use eyre::{eyre, Result};
 
 #[tokio::main]
 async fn main() {
@@ -101,15 +101,19 @@ pub struct Validator;
 
 impl toolbox::Validator for Validator {
     async fn run(&self, sandbox: &mut Box<dyn SandboxDyn>) -> Result<Result<(), String>> {
-        sandbox.exec("uv run main.py").await.map(|result| {
-            if result.exit_code == 0 {
-                Ok(())
-            } else {
-                Err(format!(
-                    "code: {}\nstdout: {}\nstderr: {}",
-                    result.exit_code, result.stdout, result.stderr
-                ))
-            }
-        })
+        let timeout = std::time::Duration::from_secs(30);
+        tokio::time::timeout(timeout, sandbox.exec("uv run main.py"))
+            .await
+            .map_err(|_| eyre!("Validation timed out after 30 seconds"))?
+            .map(|result| {
+                if result.exit_code == 0 {
+                    Ok(())
+                } else {
+                    Err(format!(
+                        "code: {}\nstdout: {}\nstderr: {}",
+                        result.exit_code, result.stdout, result.stderr
+                    ))
+                }
+            })
     }
 }
