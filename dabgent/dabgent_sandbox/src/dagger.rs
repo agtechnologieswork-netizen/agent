@@ -20,18 +20,16 @@ impl crate::Sandbox for Sandbox {
     async fn exec(&mut self, command: &str) -> Result<ExecResult> {
         let ctr = self.ctr.clone();
         let mut command: Vec<String> = command.split_whitespace().map(String::from).collect();
-
-        
         let secs: u64 = env::var("DAGGER_EXEC_TIMEOUT_SECS")
             .ok()
-            .and_then(|v| v.parse::<u64>().ok())
+            .and_then(|v| v.parse().ok())
             .unwrap_or(DEFAULT_EXEC_TIMEOUT_SECS);
         if secs > 0 {
-            let mut wrapped: Vec<String> = Vec::with_capacity(command.len() + 2);
-            wrapped.push("timeout".to_string());
-            wrapped.push(format!("{}s", secs));
-            wrapped.extend(command.into_iter());
-            command = wrapped;
+            command = ["timeout", &format!("{}s", secs)]
+                .into_iter()
+                .map(String::from)
+                .chain(command)
+                .collect();
         }
         let opts = dagger_sdk::ContainerWithExecOptsBuilder::default()
             .expect(dagger_sdk::ReturnType::Any)
