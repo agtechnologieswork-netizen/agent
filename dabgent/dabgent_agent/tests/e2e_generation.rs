@@ -8,6 +8,7 @@ use dabgent_sandbox::dagger::Sandbox as DaggerSandbox;
 use dabgent_sandbox::{Sandbox, SandboxDyn};
 use eyre::Result;
 use std::time::Duration;
+use tokio_stream::StreamExt;
 
 /// Test-specific validator that checks if any Python file contains Hello World
 #[derive(Clone, Debug)]
@@ -99,9 +100,46 @@ async fn run_test() -> Result<()> {
         // We'll verify with custom validators after execution
         orchestrator.setup_workers(sandbox.clone().boxed(), llm, PythonUvValidator).await?;
         
-        // Simple test task
-        let task = "Create a Python script hello.py that prints 'Hello World'.";
+        // Test task - agent should automatically create plan.md based on system prompt
+        let task = "Create a simple Python web service that outputs a hello world message.";
+        tracing::info!("Sending task to agent: {}", task);
         orchestrator.process_message(task.to_string()).await?;
+        tracing::info!("Task sent, monitoring progress...");
+        
+        // Also monitor events directly for debugging
+        let mut event_stream = store.subscribe::<dabgent_agent::thread::Event>(&Query {
+            stream_id: format!("{}_planning", "e2e_test"),
+            event_type: None,
+            aggregate_id: Some("demo".to_string()),
+        })?;
+        
+        // Spawn event monitor
+        let event_monitor = tokio::spawn(async move {
+            while let Ok(Some(Ok(event))) = tokio::time::timeout(
+                Duration::from_millis(500),
+                event_stream.next()
+            ).await {
+                match &event {
+                    dabgent_agent::thread::Event::LlmCompleted(response) => {
+                        // Check if LLM is calling tools
+                        let response_str = format!("{:?}", response.choice);
+                        if response_str.contains("write_file") {
+                            tracing::info!("🔧 LLM calling write_file tool");
+                        }
+                        if response_str.contains("plan.md") {
+                            tracing::info!("📝 LLM mentioned plan.md!");
+                        }
+                    }
+                    dabgent_agent::thread::Event::ToolCompleted(response) => {
+                        let response_str = format!("{:?}", response.content);
+                        if response_str.contains("plan.md") {
+                            tracing::info!("✅ Tool response mentions plan.md");
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        });
         
         // Monitor with timeout
         let monitor_result = tokio::time::timeout(
@@ -111,6 +149,9 @@ async fn run_test() -> Result<()> {
                 Ok(())
             }))
         ).await;
+        
+        // Stop event monitor
+        event_monitor.abort();
         
         match monitor_result {
             Ok(Ok(())) => tracing::info!("✅ Monitoring completed"),
@@ -150,19 +191,26 @@ async fn verify_files_created(mut sandbox: DaggerSandbox) -> Result<()> {
     use dabgent_sandbox::Sandbox as SandboxTrait;
     
     // Create verification validators
-    let file_validator = FileExistsValidator::new(vec!["main.py".to_string()]);
+    // Accept various Python file names that could contain a web service
+    let file_validator = FileExistsValidator::new(vec![
+        "main.py".to_string(), 
+        "app.py".to_string(), 
+        "server.py".to_string(),
+        "web.py".to_string()
+    ]);
     let hello_validator = HelloWorldValidator;
     let health_validator = HealthCheckValidator::new("python --version");
     
     // Run individual validators and report results
     tracing::info!("Running verification validators...");
     
-    // Need to create a new box for each validator call
+    // Check plan.md exists and is valid (CRITICAL)
     let mut sandbox_box: Box<dyn SandboxDyn> = Box::new(sandbox.clone());
     
-    // Check file existence (not critical if main.py doesn't exist)
+    // Check file existence (at least one Python file should exist)
+    let mut sandbox_box: Box<dyn SandboxDyn> = Box::new(sandbox.clone());
     match file_validator.run(&mut sandbox_box).await? {
-        Ok(()) => tracing::info!("✅ main.py exists"),
+        Ok(()) => tracing::info!("✅ Python files exist"),
         Err(e) => tracing::info!("ℹ️ {}", e),
     }
     

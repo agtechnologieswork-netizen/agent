@@ -5,23 +5,23 @@ use dabgent_sandbox::SandboxDyn;
 use eyre::Result;
 use std::future::Future;
 use std::pin::Pin;
+use tokio_stream::StreamExt;
 
-/// Default system prompt for the planning agent
-const DEFAULT_SYSTEM_PROMPT: &str = r#"
-You are a python software engineer.
+/// System prompt for the execution agent
+/// This agent focuses on implementing Python solutions
+const EXECUTION_PROMPT: &str = r#"
+You are a Python software engineer.
 Workspace is already set up using uv init.
 Use uv package manager if you need to add extra libraries.
 Program will be run using uv run main.py command.
 
-You MUST manage your planning in a plan.md file:
-1. Create plan.md when starting a new task
-2. Update plan.md as you make progress
-3. Use markdown checkboxes: [ ] pending, [~] in progress, [x] completed, [!] failed
-4. Add notes and context as needed
-5. Keep the plan organized and up-to-date
+Your task is to implement Python solutions.
+Focus on creating working, well-structured code.
+Test your implementation to ensure it works correctly.
 "#;
 
-/// Simplified PlanningOrchestrator using the reusable WorkerOrchestrator
+/// Orchestrator that coordinates task execution
+/// This is a thin layer that wires together the worker sandwich pattern
 pub struct PlanningOrchestrator<S: EventStore> {
     store: S,
     stream_id: String,
@@ -37,42 +37,58 @@ impl<S: EventStore> PlanningOrchestrator<S> {
         }
     }
 
-    /// Setup workers using the reusable orchestrator
+    /// Setup workers using the WorkerOrchestrator pattern
+    /// This creates the "sandwich" of LLM Worker + Sandbox Worker
     pub async fn setup_workers<V>(
         &self,
         sandbox: Box<dyn SandboxDyn>,
-        llm: rig::providers::anthropic::Client,
+        llm: impl crate::llm::LLMClient + 'static,
         validator: V,
     ) -> Result<()>
     where
         V: crate::toolbox::Validator + Clone + Send + Sync + 'static,
     {
+        tracing::info!("Setting up orchestrator with worker sandwich pattern");
+        
+        // Use WorkerOrchestrator to create the worker sandwich
         let orchestrator = WorkerOrchestrator::<S, V>::new(
             self.store.clone(),
             self.stream_id.clone(),
             self.aggregate_id.clone(),
         );
 
-        let system_prompt = DEFAULT_SYSTEM_PROMPT.to_string();
+        // Spawn workers with execution-focused prompt
+        let handles = orchestrator.spawn_workers(
+            llm,
+            sandbox,
+            EXECUTION_PROMPT.to_string(),
+            validator
+        ).await?;
         
-        tracing::debug!("System prompt being used: {}", system_prompt);
-
-        orchestrator.spawn_workers(llm, sandbox, system_prompt, validator).await?;
+        // Workers run independently
+        drop(handles);
+        
+        tracing::info!("✅ Orchestrator setup complete");
         Ok(())
     }
 
-    /// Process a message
+    /// Process a user message by sending it to the workers
     pub async fn process_message(&self, content: String) -> Result<()> {
+        tracing::info!("Processing message: {}", content);
+        
+        // Send task directly to workers
         let orchestrator = WorkerOrchestrator::<S, crate::validator::NoOpValidator>::new(
             self.store.clone(),
             self.stream_id.clone(),
             self.aggregate_id.clone(),
         );
         
-        orchestrator.send_prompt(content).await
+        orchestrator.send_prompt(content).await?;
+        
+        Ok(())
     }
 
-    /// Monitor progress
+    /// Monitor progress by subscribing to thread events
     pub async fn monitor_progress<F>(&self, mut on_status: F) -> Result<()>
     where
         F: FnMut(String) -> Pin<Box<dyn Future<Output = Result<()>> + Send>> + Send + 'static,
@@ -88,10 +104,11 @@ impl<S: EventStore> PlanningOrchestrator<S> {
         loop {
             match tokio::time::timeout(timeout, receiver.next()).await {
                 Ok(Some(Ok(event))) => {
-                    let status = self.format_event_status(&event).await;
+                    let status = self.format_event_status(&event);
                     on_status(status).await?;
                     
-                    if matches!(event, thread::Event::ToolCompleted(ref resp) if self.is_done(resp)) {
+                    // Check if task is complete
+                    if self.is_task_complete(&event) {
                         on_status("✅ Task completed successfully!".to_string()).await?;
                         break;
                     }
@@ -110,49 +127,67 @@ impl<S: EventStore> PlanningOrchestrator<S> {
                 }
             }
         }
+        
         Ok(())
     }
 
-    async fn format_event_status(&self, event: &thread::Event) -> String {
+    fn format_event_status(&self, event: &thread::Event) -> String {
         match event {
             thread::Event::Prompted(task) => {
-                format!("🎯 Starting task: {}", task.lines().next().unwrap_or(task))
+                let first_line = task.lines().next().unwrap_or(task);
+                format!("🎯 Starting: {}", first_line)
             }
             thread::Event::LlmCompleted(_) => {
-                if let Ok(content) = tokio::fs::read_to_string("plan.md").await {
-                    format!("📋 Current plan:\n```markdown\n{}\n```", content)
-                } else {
-                    "🤔 Planning next steps...".to_string()
-                }
+                "🤔 Processing...".to_string()
             }
             thread::Event::ToolCompleted(_) => {
-                "🔧 Executing tools...".to_string()
+                "🔧 Executing...".to_string()
             }
             thread::Event::UserResponded(response) => {
-                format!("💬 User responded: {}", response.content)
+                format!("💬 User: {}", response.content)
             }
         }
     }
 
-    fn is_done(&self, _response: &thread::ToolResponse) -> bool {
-        // Check if the response indicates completion
-        // This is a simplified check - implement proper logic based on your needs
-        false
+    fn is_task_complete(&self, event: &thread::Event) -> bool {
+        // Simple heuristic - check if the tool response indicates completion
+        match event {
+            thread::Event::ToolCompleted(response) => {
+                let response_str = format!("{:?}", response);
+                response_str.contains("complete") || 
+                response_str.contains("done") ||
+                response_str.contains("successfully")
+            }
+            _ => false
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use dabgent_mq::db::sqlite::SqliteStore;
 
     #[test]
-    fn test_system_prompt_contains_plan_instructions() {
-        // Use the constant system prompt
-        let system_prompt = DEFAULT_SYSTEM_PROMPT;
+    fn test_execution_prompt() {
+        assert!(EXECUTION_PROMPT.contains("Python"));
+        assert!(EXECUTION_PROMPT.contains("uv"));
+        assert!(!EXECUTION_PROMPT.contains("plan.md")); // Should not mention planning
+    }
 
-        // Verify it contains plan.md instructions
-        assert!(system_prompt.contains("plan.md"), "System prompt should mention plan.md");
-        assert!(system_prompt.contains("Create plan.md"), "System prompt should instruct to create plan.md");
-        assert!(system_prompt.contains("MUST manage your planning"), "System prompt should require planning");
+    #[tokio::test]
+    async fn test_orchestrator_creation() {
+        let pool = sqlx::SqlitePool::connect(":memory:").await.unwrap();
+        let store = SqliteStore::new(pool);
+        store.migrate().await;
+        
+        let orchestrator = PlanningOrchestrator::new(
+            store,
+            "test".to_string(),
+            "demo".to_string()
+        );
+        
+        assert_eq!(orchestrator.stream_id, "test_planning");
+        assert_eq!(orchestrator.aggregate_id, "demo");
     }
 }
