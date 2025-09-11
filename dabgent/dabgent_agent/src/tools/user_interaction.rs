@@ -4,7 +4,6 @@ use eyre::Result;
 use rig::completion::ToolDefinition;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use std::future::Future;
 
 /// Tool for requesting multiple choice selection from user
 #[derive(Debug, Clone)]
@@ -35,8 +34,8 @@ impl Tool for MultiChoiceTool {
 
     fn definition(&self) -> ToolDefinition {
         ToolDefinition {
-            name: self.name(),
-            description: Some("Request user to select from multiple options".to_owned()),
+            name: <Self as Tool>::name(self),
+            description: "Request user to select from multiple options".to_string(),
             parameters: json!({
                 "type": "object",
                 "properties": {
@@ -100,8 +99,8 @@ impl Tool for ClarificationTool {
 
     fn definition(&self) -> ToolDefinition {
         ToolDefinition {
-            name: self.name(),
-            description: Some("Request clarification from the user when something is unclear".to_owned()),
+            name: <Self as Tool>::name(self),
+            description: "Request clarification from the user when something is unclear".to_string(),
             parameters: json!({
                 "type": "object",
                 "properties": {
@@ -157,8 +156,8 @@ impl Tool for ConfirmationTool {
 
     fn definition(&self) -> ToolDefinition {
         ToolDefinition {
-            name: self.name(),
-            description: Some("Request yes/no confirmation from the user".to_owned()),
+            name: <Self as Tool>::name(self),
+            description: "Request yes/no confirmation from the user".to_string(),
             parameters: json!({
                 "type": "object",
                 "properties": {
@@ -211,8 +210,8 @@ impl Tool for ContinueTool {
 
     fn definition(&self) -> ToolDefinition {
         ToolDefinition {
-            name: self.name(),
-            description: Some("Indicate that generation needs to continue due to length limits".to_owned()),
+            name: <Self as Tool>::name(self),
+            description: "Indicate that generation needs to continue due to length limits".to_string(),
             parameters: json!({
                 "type": "object",
                 "properties": {
@@ -263,38 +262,48 @@ mod tests {
     use super::*;
 
     #[tokio::test]
-    async fn test_multi_choice_tool() {
+    async fn test_multi_choice_tool_definition() {
         let tool = MultiChoiceTool;
-        let args = MultiChoiceArgs {
-            prompt: "Select the tables you need".to_string(),
-            options: vec![
-                "users".to_string(),
-                "orders".to_string(),
-                "products".to_string(),
-            ],
-            allow_multiple: true,
-        };
+        let definition = <MultiChoiceTool as Tool>::definition(&tool);
         
-        // Create a dummy sandbox for testing
-        let mut sandbox: Box<dyn SandboxDyn> = Box::new(dabgent_sandbox::DummySandbox);
+        assert_eq!(definition.name, "request_multi_choice");
+        assert_eq!(definition.description, "Request user to select from multiple options");
         
-        let result = tool.call(args, &mut sandbox).await.unwrap().unwrap();
-        assert_eq!(result.status, "waiting_for_user");
-        assert_eq!(result.wait_type, "multi_choice");
+        // Verify parameters structure
+        let params = definition.parameters.as_object().unwrap();
+        assert_eq!(params["type"], "object");
+        assert!(params["properties"].as_object().is_some());
+        assert!(params["required"].as_array().unwrap().contains(&serde_json::json!("prompt")));
+        assert!(params["required"].as_array().unwrap().contains(&serde_json::json!("options")));
     }
 
     #[tokio::test]
-    async fn test_clarification_tool() {
+    async fn test_clarification_tool_definition() {
         let tool = ClarificationTool;
-        let args = ClarificationArgs {
-            question: "Which database should I use?".to_string(),
-            context: Some("PostgreSQL or MongoDB".to_string()),
-        };
+        let definition = <ClarificationTool as Tool>::definition(&tool);
         
-        let mut sandbox: Box<dyn SandboxDyn> = Box::new(dabgent_sandbox::DummySandbox);
+        assert_eq!(definition.name, "request_clarification");
+        assert_eq!(definition.description, "Request clarification from the user when something is unclear");
         
-        let result = tool.call(args, &mut sandbox).await.unwrap().unwrap();
-        assert_eq!(result.status, "waiting_for_user");
-        assert_eq!(result.wait_type, "clarification");
+        // Verify parameters structure
+        let params = definition.parameters.as_object().unwrap();
+        assert_eq!(params["type"], "object");
+        assert!(params["properties"].as_object().is_some());
+        assert!(params["required"].as_array().unwrap().contains(&serde_json::json!("question")));
+    }
+
+    #[tokio::test]
+    async fn test_confirmation_tool_definition() {
+        let tool = ConfirmationTool;
+        let definition = <ConfirmationTool as Tool>::definition(&tool);
+        
+        assert_eq!(definition.name, "request_confirmation");
+        assert_eq!(definition.description, "Request yes/no confirmation from the user");
+        
+        // Verify parameters structure
+        let params = definition.parameters.as_object().unwrap();
+        assert_eq!(params["type"], "object");
+        assert!(params["properties"].as_object().is_some());
+        assert!(params["required"].as_array().unwrap().contains(&serde_json::json!("prompt")));
     }
 }

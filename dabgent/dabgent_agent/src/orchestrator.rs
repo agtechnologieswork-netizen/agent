@@ -126,6 +126,9 @@ You MUST manage your planning in a plan.md file:
             thread::Event::ToolCompleted(_) => {
                 "🔧 Executing tools...".to_string()
             }
+            thread::Event::UserResponded(response) => {
+                format!("💬 User responded: {}", response.content)
+            }
         }
     }
 
