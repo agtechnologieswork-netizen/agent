@@ -63,8 +63,8 @@ impl<S: EventStore> App<S> {
                         ChatEvent::AgentMessage { .. } => "↩ 🤖",
                     };
                     let summary = match chat_event {
-                        ChatEvent::UserMessage { content, .. } => content),
-                        ChatEvent::AgentMessage { content, .. } => content),
+                        ChatEvent::UserMessage { content, .. } => content.clone(),
+                        ChatEvent::AgentMessage { content, .. } => content.clone(),
                     };
                     self.log_event("chat", self.chat_seq, icons, summary);
                     self.fold_session().await?;

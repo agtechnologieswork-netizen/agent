@@ -87,7 +87,7 @@ impl<S: EventStore> App<S> {
                     let message = parts[2];
                     
                     ListItem::new(Line::from(vec![
-                        Span::styled(format!("{} {} ", topic_seq, icons)),
+                        Span::styled(format!("{} {} ", topic_seq, icons), Style::default()),
                         Span::raw(message),
                     ]))
                 } else {
