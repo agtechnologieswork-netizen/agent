@@ -35,9 +35,45 @@ impl toolbox::Validator for HelloWorldValidator {
     }
 }
 
+/// Test-specific validator that checks for plan.md file and its content
+#[derive(Clone, Debug)]
+struct PlanFileValidator;
+
+impl toolbox::Validator for PlanFileValidator {
+    async fn run(&self, sandbox: &mut Box<dyn SandboxDyn>) -> Result<Result<(), String>> {
+        let files = sandbox.list_directory("/app").await?;
+        
+        // Check if plan.md exists
+        if !files.contains(&"plan.md".to_string()) {
+            return Ok(Err("plan.md file not found".to_string()));
+        }
+        
+        // Read and validate plan.md content
+        let content = sandbox.read_file("/app/plan.md").await?;
+        
+        // Check that plan has some structure (basic validation)
+        if content.is_empty() {
+            return Ok(Err("plan.md is empty".to_string()));
+        }
+        
+        // Check for expected plan elements
+        let has_task_marker = content.contains("Task:") || content.contains("##") || content.contains("- [ ]");
+        let has_content = content.len() > 50; // At least 50 chars of planning
+        
+        if !has_task_marker {
+            return Ok(Err("plan.md doesn't contain task markers or structure".to_string()));
+        }
+        
+        if !has_content {
+            return Ok(Err("plan.md is too short to be a valid plan".to_string()));
+        }
+        
+        Ok(Ok(()))
+    }
+}
+
 /// End-to-end test that mirrors examples/planning.rs setup
 #[tokio::test]
-#[ignore = "requires Docker and Dagger runtime"]
 async fn test_e2e_application_generation() -> Result<()> {
     // Initialize just like the example
     tracing_subscriber::fmt::init();
@@ -181,12 +217,5 @@ mod integration_tests {
         assert_eq!(thread.messages.len(), 1);
         
         Ok(())
-    }
-    
-    #[test]
-    fn test_validators_construction() {
-        // Test that validators can be constructed
-        let _file_validator = FileExistsValidator::new(vec!["test.py".to_string()]);
-        let _health_validator = HealthCheckValidator::new("echo test");
     }
 }

@@ -155,3 +155,24 @@ impl toolbox::Validator for HealthCheckValidator {
         Ok(Ok(()))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_validators_construction() {
+        // Test that validators can be constructed
+        let _python_validator = PythonUvValidator;
+        let _custom_validator = CustomValidator::new("echo test");
+        let _noop_validator = NoOpValidator;
+        let _file_validator = FileExistsValidator::new(vec!["test.py".to_string()]);
+        let _health_validator = HealthCheckValidator::new("echo test")
+            .with_expected_output("test")
+            .timeout_is_failure();
+        
+        // Test file validator with custom working dir
+        let _file_validator_custom = FileExistsValidator::new(vec!["main.py".to_string()])
+            .with_working_dir("/custom/dir");
+    }
+}
