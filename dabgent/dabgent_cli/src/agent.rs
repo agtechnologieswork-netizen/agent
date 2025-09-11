@@ -97,7 +97,15 @@ fn create_llm() -> color_eyre::Result<rig::providers::anthropic::Client> {
 
 async fn create_sandbox(client: &dagger_sdk::DaggerConn) -> color_eyre::Result<DaggerSandbox> {
     let dockerfile = env::var("SANDBOX_DOCKERFILE").unwrap_or_else(|_| "Dockerfile".to_owned());
-    let context_dir = env::var("SANDBOX_CONTEXT_DIR").unwrap_or_else(|_| "./examples".to_owned());
+    let context_dir = env::var("SANDBOX_CONTEXT_DIR")
+        .unwrap_or_else(|_| {
+            let mut path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+            path.push("../dabgent_agent/examples");
+            path.canonicalize()
+                .unwrap_or_else(|_| std::path::PathBuf::from("./dabgent_agent/examples"))
+                .to_string_lossy()
+                .to_string()
+        });
     
     let ctr = client.container().build_opts(
         client.host().directory(&context_dir),
