@@ -14,7 +14,7 @@ The template includes the following files for Databricks Apps deployment:
 
 - `app.yaml` - Databricks App configuration
 - `package.json` - Node.js dependencies and scripts (includes start command)
-- `requirements.txt` - Python dependencies
+- `pyproject.toml` - Python dependencies and project configuration
 - `Dockerfile` - Container configuration
 - `.gitignore` - Files to exclude during deployment
 
@@ -26,7 +26,7 @@ The template is already configured with the necessary files. The deployment will
 
 1. **Detect Node.js**: Since `package.json` is present at root, Databricks detects this as a hybrid app
 2. **Install Node.js dependencies**: `npm install` (runs `cd frontend/reactadmin && npm install`)
-3. **Install Python dependencies**: `pip install -r requirements.txt` (from root)
+3. **Install Python dependencies**: `uv sync` (from root)
 4. **Build frontend**: `npm run build` (installs frontend deps and builds from `frontend/reactadmin/`)
 5. **Start application**: `npm run start` (installs frontend deps, builds frontend, starts backend)
 
@@ -68,7 +68,7 @@ The template is already configured with the necessary files. The deployment will
 - `npm run start` handles everything:
   - Installs frontend dependencies (`cd frontend/reactadmin && npm install`)
   - Builds frontend (`npm run build`)
-  - Starts backend (`python backend/main.py`)
+  - Starts backend (`uv run python backend/main.py`)
 - Backend serves API at `/api` and frontend static files at `/`
 - Handles CORS for cross-origin requests
 - No duplicate dependencies - all frontend deps are in `frontend/reactadmin/package.json`
@@ -107,7 +107,7 @@ Modify `app.yaml` to:
 
 1. **Frontend not loading**: Ensure `npm run build` completed successfully
 2. **API not accessible**: Check CORS configuration and port settings
-3. **Build failures**: Verify all dependencies are in `requirements.txt` and `package.json`
+3. **Build failures**: Verify all dependencies are in `pyproject.toml` and `package.json`
 
 ### Logs
 View application logs in the Databricks Apps interface under the **Logs** tab.
@@ -138,7 +138,7 @@ npm run install:all
 dataapps/template/
 ├── app.yaml                 # Databricks App configuration
 ├── package.json             # Node.js dependencies and start script
-├── requirements.txt         # Python dependencies
+├── pyproject.toml           # Python dependencies and project configuration
 ├── Dockerfile              # Container configuration
 ├── .gitignore              # Deployment exclusions
 ├── backend/                # Python FastAPI backend

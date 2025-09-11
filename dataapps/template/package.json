@@ -8,13 +8,13 @@
     "dev": "cd frontend/reactadmin && npm run dev",
     "build": "cd frontend/reactadmin && npm install && npm run build",
     "serve": "cd frontend/reactadmin && npm run serve",
-    "start": "cd frontend/reactadmin && npm run build && cd ../.. && python3 backend/main.py",
-    "start:backend": "python3 backend/main.py",
+    "start": "cd frontend/reactadmin && npm run build && cd ../.. && uv run python backend/main.py",
+    "start:backend": "uv run python backend/main.py",
     "start:frontend": "cd frontend/reactadmin && npm run serve",
     "type-check": "cd frontend/reactadmin && npm run type-check",
     "lint": "cd frontend/reactadmin && npm run lint",
     "format": "cd frontend/reactadmin && npm run format",
-    "install:all": "cd frontend/reactadmin && npm install && cd ../.. && pip3 install -r requirements.txt"
+    "install:all": "cd frontend/reactadmin && npm install && cd ../.. && uv sync"
   },
   "devDependencies": {
     "concurrently": "^9.2.1"

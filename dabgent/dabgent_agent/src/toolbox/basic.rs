@@ -84,7 +84,7 @@ impl Tool for WriteFile {
                         "description": "Content to write to the file",
                     }
                 },
-                "required": ["path", "content"],
+                "required": ["path", "contents"],
             }),
         }
     }
@@ -345,6 +345,68 @@ impl Tool for DoneTool {
     }
 }
 
+#[derive(Clone)]
+pub struct UvAdd;
+
+#[derive(Serialize, Deserialize)]
+pub struct UvAddArgs {
+    pub package: String,
+    #[serde(default)]
+    pub dev: bool,
+}
+
+impl Tool for UvAdd {
+    type Args = UvAddArgs;
+    type Output = String;
+    type Error = String;
+
+    fn name(&self) -> String {
+        "uv_add".to_string()
+    }
+
+    fn definition(&self) -> rig::completion::ToolDefinition {
+        rig::completion::ToolDefinition {
+            name: self.name(),
+            description: "Add a Python dependency using uv".to_string(),
+            parameters: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "package": {
+                        "type": "string",
+                        "description": "Package name to add (e.g., 'fastapi', 'requests==2.28.0')",
+                    },
+                    "dev": {
+                        "type": "boolean",
+                        "description": "Add as development dependency",
+                        "default": false
+                    }
+                },
+                "required": ["package"],
+            }),
+        }
+    }
+
+    async fn call(
+        &self,
+        args: Self::Args,
+        sandbox: &mut Box<dyn SandboxDyn>,
+    ) -> Result<Result<Self::Output, Self::Error>> {
+        let UvAddArgs { package, dev } = args;
+        
+        let mut command = format!("uv add {}", package);
+        
+        if dev {
+            command.push_str(" --dev");
+        }
+        
+        let result = sandbox.exec(&command).await?;
+        match result.exit_code {
+            0 => Ok(Ok(format!("Added {}: {}", package, result.stdout))),
+            _ => Ok(Err(format!("Failed to add {}: {}\n{}", package, result.stderr, result.stdout))),
+        }
+    }
+}
+
 pub fn toolset<T: Validator + Send + Sync + 'static>(validator: T) -> Vec<Box<dyn super::ToolDyn>> {
     vec![
         Box::new(Bash),
@@ -353,6 +415,7 @@ pub fn toolset<T: Validator + Send + Sync + 'static>(validator: T) -> Vec<Box<dy
         Box::new(LsDir),
         Box::new(RmFile),
         Box::new(EditFile),
+        Box::new(UvAdd),
         Box::new(DoneTool::new(validator)),
     ]
 }

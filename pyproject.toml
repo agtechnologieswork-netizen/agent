@@ -72,4 +72,5 @@ dev = [
     "ruff>=0.11.5",
     "pytest-xdist>=3.6.1",
     "streamlit>=1.45.1",
+    "pyright>=1.1.401",
 ]

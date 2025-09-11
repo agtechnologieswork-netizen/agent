@@ -19,7 +19,7 @@ env:
   CORS_ORIGINS: "*"
 
 # Custom command to run the application
-# Since package.json is present, Databricks will run npm install, pip install, npm run build, then this command
+# Since package.json is present, Databricks will run npm install, uv sync, npm run build, then this command
 # We use npm run start which handles building frontend and starting backend
 command: "npm run start"
 
