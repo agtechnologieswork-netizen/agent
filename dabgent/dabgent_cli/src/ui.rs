@@ -13,13 +13,19 @@ impl<S: EventStore> Widget for &App<S> {
     where
         Self: Sized,
     {
-        let chunks = Layout::default()
+        let main_chunks = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([Constraint::Percentage(70), Constraint::Percentage(30)])
+            .split(area);
+
+        let content_chunks = Layout::default()
             .direction(Direction::Vertical)
             .constraints([Constraint::Min(3), Constraint::Length(3)])
-            .split(area.clone());
+            .split(main_chunks[0]);
 
-        self.draw_messages(chunks[0], buf);
-        self.draw_input(chunks[1], buf);
+        self.draw_messages(content_chunks[0], buf);
+        self.draw_input(content_chunks[1], buf);
+        self.draw_event_log(main_chunks[1], buf);
     }
 }
 
@@ -63,5 +69,42 @@ impl<S: EventStore> App<S> {
             );
 
         input.render(area, buf);
+    }
+
+    fn draw_event_log(&self, area: Rect, buf: &mut Buffer) {
+        let events: Vec<ListItem> = self
+            .event_log
+            .iter()
+            .rev()
+            .take(area.height as usize - 2)
+            .map(|entry| {
+                // Parse the formatted string to apply colors
+                let parts: Vec<&str> = entry.formatted.splitn(3, ' ').collect();
+                if parts.len() >= 3 {
+                    // Format: "chat:1 👤💬 message"
+                    let topic_seq = parts[0];
+                    let icons = parts[1];
+                    let message = parts[2];
+                    
+                    ListItem::new(Line::from(vec![
+                        Span::styled(format!("{} {} ", topic_seq, icons)),
+                        Span::raw(message),
+                    ]))
+                } else {
+                    ListItem::new(Line::from(entry.formatted.as_str()))
+                }
+            })
+            .collect();
+
+        let event_list = List::new(events)
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .title("Events")
+                    .border_style(Style::default().fg(Color::Magenta)),
+            )
+            .style(Style::default().fg(Color::White));
+
+        event_list.render(area, buf);
     }
 }

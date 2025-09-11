@@ -3,6 +3,7 @@ use crate::session::{ChatCommand, ChatEvent, ChatSession};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use dabgent_agent::handler::Handler;
 use dabgent_mq::db::{EventStore, Metadata, Query};
+use std::collections::VecDeque;
 
 pub struct App<S: EventStore> {
     store: S,
@@ -11,6 +12,13 @@ pub struct App<S: EventStore> {
     pub input_buffer: String,
     pub running: bool,
     pub events: EventHandler,
+    pub event_log: VecDeque<EventLogEntry>,
+    chat_seq: i64,
+}
+
+#[derive(Clone, Debug)]
+pub struct EventLogEntry {
+    pub formatted: String,
 }
 
 impl<S: EventStore> App<S> {
@@ -24,7 +32,7 @@ impl<S: EventStore> App<S> {
         let event_stream = store.subscribe::<ChatEvent>(&query)?;
         let events = EventHandler::new(event_stream);
         let session = ChatSession::new();
-
+        
         Ok(Self {
             store,
             query,
@@ -32,6 +40,8 @@ impl<S: EventStore> App<S> {
             input_buffer: String::new(),
             running: true,
             events,
+            event_log: VecDeque::with_capacity(100),
+            chat_seq: 0,
         })
     }
 
@@ -45,7 +55,18 @@ impl<S: EventStore> App<S> {
                     crossterm::event::Event::Key(key_event) => self.handle_key_events(key_event)?,
                     _ => {}
                 },
-                Event::Chat(..) => {
+                Event::Chat(ref chat_event) => {
+                    // Log the actual event from the topic
+                    self.chat_seq += 1;
+                    let icons = match chat_event {
+                        ChatEvent::UserMessage { .. } => "💬 👤",
+                        ChatEvent::AgentMessage { .. } => "↩ 🤖",
+                    };
+                    let summary = match chat_event {
+                        ChatEvent::UserMessage { content, .. } => content),
+                        ChatEvent::AgentMessage { content, .. } => content),
+                    };
+                    self.log_event("chat", self.chat_seq, icons, summary);
                     self.fold_session().await?;
                 }
                 Event::App(app_event) => match app_event {
@@ -120,5 +141,16 @@ impl<S: EventStore> App<S> {
 
     pub fn input(&mut self, input: char) {
         self.input_buffer.push(input);
+    }
+    
+    
+    fn log_event(&mut self, stream: &str, seq: i64, icons: &str, summary: String) {
+        let entry = EventLogEntry {
+            formatted: format!("{}:{:<2} {} {}", stream, seq, icons, summary),
+        };
+        self.event_log.push_back(entry);
+        if self.event_log.len() > 50 {
+            self.event_log.pop_front();
+        }
     }
 }
