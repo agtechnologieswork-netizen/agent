@@ -66,6 +66,83 @@ jobs:
         working-directory: ./dabgent
         run: cargo clippy -- -D warnings
 
+  rust-tests:
+    name: Rust Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo dependencies
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            dabgent/target/
+          key: ${{ runner.os }}-cargo-test-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Run unit tests
+        working-directory: ./dabgent
+        run: cargo test --lib --all-packages
+
+      - name: Run integration tests (excluding e2e)
+        working-directory: ./dabgent
+        run: cargo test --all-packages --test '*' -- --skip e2e_generation
+        continue-on-error: true
+
+  rust-e2e-tests:
+    name: Rust E2E Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    env:
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install Docker
+        run: |
+          curl -fsSL https://get.docker.com -o get-docker.sh
+          sudo sh get-docker.sh
+
+      - name: Install Dagger CLI
+        run: |
+          cd /tmp
+          curl -L https://dl.dagger.io/dagger/install.sh | sudo sh
+          dagger version
+
+      - name: Cache cargo dependencies
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            dabgent/target/
+          key: ${{ runner.os }}-cargo-e2e-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Run E2E tests
+        working-directory: ./dabgent
+        run: |
+          if [ -n "$ANTHROPIC_API_KEY" ]; then
+            cargo test --test e2e_generation -- --nocapture
+          else
+            echo "Skipping E2E tests - ANTHROPIC_API_KEY not set"
+          fi
+        continue-on-error: true
+
   build-template:
     name: Build Template
     runs-on: ubuntu-latest
