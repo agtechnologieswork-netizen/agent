@@ -38,7 +38,7 @@ impl<S: EventStore> Agent<S> {
             })?;
             
             while let Some(Ok(ChatEvent::UserMessage { content, .. })) = event_stream.next().await {
-                tracing::info!("CLI Agent received user message: {}", content);
+                tracing::info!("CLI Agent received user message: {}", content);           
                 orchestrator.process_message(content.clone()).await?;
                 tracing::info!("Message forwarded to Orchestrator");
                 
@@ -46,15 +46,28 @@ impl<S: EventStore> Agent<S> {
                 let stream_id = self.stream_id.clone();
                 let aggregate_id = self.aggregate_id.clone();
                 
-                orchestrator.monitor_progress(move |status| {
-                    let store = store.clone();
-                    let stream_id = stream_id.clone();
-                    let aggregate_id = aggregate_id.clone();
-                    Box::pin(async move {
-                        send_agent_message(&store, &stream_id, &aggregate_id, status).await
-                            .map_err(|e| eyre::eyre!(e))
-                    })
-                }).await?;
+                let monitor_orchestrator = PlanningOrchestrator::new(
+                    store.clone(),
+                    stream_id.clone(),
+                    aggregate_id.clone()
+                );
+                
+                tokio::spawn(async move {
+                    let result = monitor_orchestrator.monitor_progress(move |status| {
+                        let store = store.clone();
+                        let stream_id = stream_id.clone();
+                        let aggregate_id = aggregate_id.clone();
+                        Box::pin(async move {
+                            tracing::info!("Forwarding status to CLI: {}", status);
+                            send_agent_message(&store, &stream_id, &aggregate_id, status).await
+                                .map_err(|e| eyre::eyre!(e))
+                        })
+                    }).await;
+                    
+                    if let Err(e) = result {
+                        tracing::error!("Error monitoring progress: {}", e);
+                    }
+                });
             }
             Ok(())
         }).await?;

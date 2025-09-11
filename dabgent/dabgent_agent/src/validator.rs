@@ -55,3 +55,103 @@ impl toolbox::Validator for NoOpValidator {
         Ok(Ok(()))
     }
 }
+
+/// Validator that checks if specific files exist
+#[derive(Clone, Debug)]
+pub struct FileExistsValidator {
+    files: Vec<String>,
+    working_dir: String,
+}
+
+impl FileExistsValidator {
+    pub fn new(files: Vec<String>) -> Self {
+        Self {
+            files,
+            working_dir: "/app".to_string(),
+        }
+    }
+
+    pub fn with_working_dir(mut self, dir: impl Into<String>) -> Self {
+        self.working_dir = dir.into();
+        self
+    }
+}
+
+impl toolbox::Validator for FileExistsValidator {
+    async fn run(&self, sandbox: &mut Box<dyn SandboxDyn>) -> Result<Result<(), String>> {
+        let files = sandbox.list_directory(&self.working_dir).await?;
+        
+        let mut missing_files = Vec::new();
+        for required_file in &self.files {
+            if !files.contains(required_file) {
+                missing_files.push(required_file.clone());
+            }
+        }
+        
+        Ok(if missing_files.is_empty() {
+            Ok(())
+        } else {
+            Err(format!("Missing required files: {:?}", missing_files))
+        })
+    }
+}
+
+/// Validator that runs a health check command
+#[derive(Clone, Debug)]
+pub struct HealthCheckValidator {
+    command: String,
+    expected_output: Option<String>,
+    timeout_ok: bool,
+}
+
+impl HealthCheckValidator {
+    pub fn new(command: impl Into<String>) -> Self {
+        Self {
+            command: command.into(),
+            expected_output: None,
+            timeout_ok: true,
+        }
+    }
+
+    pub fn with_expected_output(mut self, output: impl Into<String>) -> Self {
+        self.expected_output = Some(output.into());
+        self
+    }
+
+    pub fn timeout_is_failure(mut self) -> Self {
+        self.timeout_ok = false;
+        self
+    }
+}
+
+impl toolbox::Validator for HealthCheckValidator {
+    async fn run(&self, sandbox: &mut Box<dyn SandboxDyn>) -> Result<Result<(), String>> {
+        let result = sandbox.exec(&self.command).await?;
+        
+        // Check exit code
+        let exit_ok = match result.exit_code {
+            0 => true,
+            124 if self.timeout_ok => true, // Timeout might be ok for long-running services
+            _ => false,
+        };
+        
+        if !exit_ok {
+            return Ok(Err(format!(
+                "Health check '{}' failed with exit code: {}\nstdout: {}\nstderr: {}",
+                self.command, result.exit_code, result.stdout, result.stderr
+            )));
+        }
+        
+        // Check expected output if specified
+        if let Some(expected) = &self.expected_output {
+            if !result.stdout.contains(expected) {
+                return Ok(Err(format!(
+                    "Health check '{}' output doesn't contain expected text '{}'\nActual stdout: {}",
+                    self.command, expected, result.stdout
+                )));
+            }
+        }
+        
+        Ok(Ok(()))
+    }
+}
