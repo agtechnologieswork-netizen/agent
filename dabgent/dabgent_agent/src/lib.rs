@@ -4,7 +4,6 @@ pub mod llm;
 pub mod orchestrator;
 pub mod planner;
 pub mod planning;
-pub mod planning_orchestrator;
 pub mod thread;
 pub mod toolbox;
 pub mod tools;

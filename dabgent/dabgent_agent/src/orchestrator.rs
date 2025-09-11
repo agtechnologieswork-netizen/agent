@@ -5,7 +5,6 @@ use dabgent_sandbox::SandboxDyn;
 use eyre::Result;
 use std::future::Future;
 use std::pin::Pin;
-use tokio_stream::StreamExt;
 
 /// System prompt for the execution agent
 /// This agent focuses on implementing Python solutions
