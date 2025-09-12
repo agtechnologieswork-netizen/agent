@@ -301,6 +301,7 @@ impl Tool for EditFile {
     }
 }
 
+#[derive(Clone)]
 pub struct DoneTool {
     validator: Box<dyn ValidatorDyn>,
 }

@@ -3,14 +3,16 @@ FastAPI backend with React Admin SimpleRestProvider compatibility.
 Uses helper types and sub-routers for flexible resource management.
 """
 
+from pathlib import Path
+
 import polars as pl
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from pathlib import Path
 
 from react_admin_helpers import ResourceConfig
-from routes.customers.routes import router as customers_router, set_resource_config
+from routes.customers.routes import router as customers_router
+from routes.customers.routes import set_resource_config
 from routes.customers.schema import Customer
 
 app = FastAPI(title="React Admin Compatible API")

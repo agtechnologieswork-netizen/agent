@@ -1,4 +1,5 @@
 from typing import Optional
+
 from pydantic import BaseModel, Field
 
 
@@ -40,6 +41,6 @@ class CustomerUpdate(BaseModel):
 class Customer(CustomerBase):
     """Customer model with ID (for responses)"""
     id: int = Field(description="Internal database ID")
-    
+
     class Config:
         from_attributes = True

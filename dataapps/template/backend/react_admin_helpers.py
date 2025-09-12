@@ -4,11 +4,12 @@ Provides typed request/response models and helper functions.
 """
 
 import json
-from typing import Dict, List, Any, Optional, Callable, Type, Generic, TypeVar
-from fastapi import Request, HTTPException, Query
+from typing import Any, Callable, Dict, Generic, List, Optional, Type, TypeVar
+
+import polars as pl
+from fastapi import HTTPException, Query, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
-import polars as pl
 
 T = TypeVar("T", bound=BaseModel)
 

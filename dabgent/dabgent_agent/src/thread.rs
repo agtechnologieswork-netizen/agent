@@ -16,6 +16,7 @@ impl Handler for Thread {
                 Ok(vec![Event::LlmCompleted(response)])
             }
             (State::Agent, Command::Tool(response)) => Ok(vec![Event::ToolCompleted(response)]),
+            // FixMe: handle large error with compact somewhere here
             (state, command) => Err(Error::Other(format!(
                 "Invalid command {command:?} for state {state:?}"
             ))),
@@ -96,6 +97,7 @@ pub enum Event {
     Prompted(String),
     LlmCompleted(CompletionResponse),
     ToolCompleted(ToolResponse),
+    // ToolCompletedAndNeedsCompaction(String), // tool response is too large, needs compaction
 }
 
 impl dabgent_mq::Event for Event {

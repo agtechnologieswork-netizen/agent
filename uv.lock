@@ -5,7 +5,7 @@ requires-python = ">=3.12"
 [manifest]
 members = [
     "appdotbuild-server",
-    "backend",
+    "dataapps-template",
     "fullstack-agent",
 ]
 
@@ -199,27 +199,6 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/5a/b0/1367933a8532ee6ff8d63537de4f1177af4bff9f3e829baf7331f595bb24/attrs-25.3.0.tar.gz", hash = "sha256:75d7cefc7fb576747b2c81b4442d4d4a1ce0900973527c011d1030fd3bf4af1b", size = 812032, upload-time = "2025-03-13T11:10:22.779Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/77/06/bb80f5f86020c4551da315d78b3ab75e8228f89f0162f2c3a819e407941a/attrs-25.3.0-py3-none-any.whl", hash = "sha256:427318ce031701fea540783410126f03899a97ffc6f61596ad581ac2e40e3bc3", size = 63815, upload-time = "2025-03-13T11:10:21.14Z" },
-]
-
-[[package]]
-name = "backend"
-version = "0.1.0"
-source = { virtual = "dataapps/template/backend" }
-dependencies = [
-    { name = "fastapi" },
-    { name = "polars" },
-    { name = "pydantic" },
-    { name = "python-multipart" },
-    { name = "uvicorn", extra = ["standard"] },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "fastapi", specifier = ">=0.115.12" },
-    { name = "polars", specifier = ">=1.31.0" },
-    { name = "pydantic", specifier = ">=2.11.3" },
-    { name = "python-multipart", specifier = ">=0.0.6" },
-    { name = "uvicorn", extras = ["standard"], specifier = ">=0.34.0" },
 ]
 
 [[package]]
@@ -447,6 +426,43 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/81/67/03fbc8198b37aa9cae5f9bef69ecd4188a8214278ebfc9f241d35f594950/dagger_io-0.18.16.tar.gz", hash = "sha256:c487364f27b44202428bbcbe9bbd9a1a94cbdc2f19b5a043362ffe5f8a2debf3", size = 97865, upload-time = "2025-08-19T14:00:53.985Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/64/4d/7e3a7be7c4c61cfdcae14f9edc49b457e0df09198520b2bb00dd766c0039/dagger_io-0.18.16-py3-none-any.whl", hash = "sha256:138f8910427e7bdc4c2658faea0c633175713c5e8a512714fefd2f04cb04633e", size = 89093, upload-time = "2025-08-19T14:00:52.945Z" },
+]
+
+[[package]]
+name = "dataapps-template"
+version = "0.1.0"
+source = { editable = "dataapps/template/backend" }
+dependencies = [
+    { name = "fastapi" },
+    { name = "polars" },
+    { name = "pydantic" },
+    { name = "python-multipart" },
+    { name = "uvicorn", extra = ["standard"] },
+]
+
+[package.dev-dependencies]
+dev = [
+    { name = "pyright" },
+    { name = "pytest" },
+    { name = "pytest-asyncio" },
+    { name = "ruff" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "fastapi", specifier = ">=0.115.12" },
+    { name = "polars", specifier = ">=1.31.0" },
+    { name = "pydantic", specifier = ">=2.11.3" },
+    { name = "python-multipart", specifier = ">=0.0.6" },
+    { name = "uvicorn", extras = ["standard"], specifier = ">=0.34.0" },
+]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "pyright", specifier = ">=1.1.400" },
+    { name = "pytest", specifier = ">=8.3.5" },
+    { name = "pytest-asyncio" },
+    { name = "ruff", specifier = ">=0.11.5" },
 ]
 
 [[package]]
@@ -1829,6 +1845,19 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/ae/3c/c9d525a414d506893f0cd8a8d0de7706446213181570cdbd766691164e40/pytest-8.3.5.tar.gz", hash = "sha256:f4efe70cc14e511565ac476b57c279e12a855b11f48f212af1080ef2263d3845", size = 1450891, upload-time = "2025-03-02T12:54:54.503Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/30/3d/64ad57c803f1fa1e963a7946b6e0fea4a70df53c1a7fed304586539c2bac/pytest-8.3.5-py3-none-any.whl", hash = "sha256:c69214aa47deac29fad6c2a4f590b9c4a9fdb16a403176fe154b79c0b4d4d820", size = 343634, upload-time = "2025-03-02T12:54:52.069Z" },
+]
+
+[[package]]
+name = "pytest-asyncio"
+version = "1.2.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "pytest" },
+    { name = "typing-extensions", marker = "python_full_version < '3.13'" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/42/86/9e3c5f48f7b7b638b216e4b9e645f54d199d7abbbab7a64a13b4e12ba10f/pytest_asyncio-1.2.0.tar.gz", hash = "sha256:c609a64a2a8768462d0c99811ddb8bd2583c33fd33cf7f21af1c142e824ffb57", size = 50119, upload-time = "2025-09-12T07:33:53.816Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/04/93/2fa34714b7a4ae72f2f8dad66ba17dd9a2c793220719e736dda28b7aec27/pytest_asyncio-1.2.0-py3-none-any.whl", hash = "sha256:8e17ae5e46d8e7efe51ab6494dd2010f4ca8dae51652aa3c8d55acf50bfb2e99", size = 15095, upload-time = "2025-09-12T07:33:52.639Z" },
 ]
 
 [[package]]

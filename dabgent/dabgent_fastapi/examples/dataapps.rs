@@ -4,8 +4,8 @@ use dabgent_agent::thread::{self};
 use dabgent_fastapi::{validator::DataAppsValidator, toolset::dataapps_toolset};
 use dabgent_mq::EventStore;
 use dabgent_mq::db::{Query, sqlite::SqliteStore};
-use dabgent_sandbox::dagger::Sandbox as DaggerSandbox;
-use dabgent_sandbox::Sandbox;
+use dabgent_sandbox::dagger::{ConnectOpts, Sandbox as DaggerSandbox};
+use dabgent_sandbox::{Sandbox, SandboxDyn};
 use eyre::Result;
 use rig::client::ProviderClient;
 use std::path::Path;
@@ -21,7 +21,7 @@ async fn main() {
 }
 
 async fn run() {
-    dagger_sdk::connect(|client| async move {
+    ConnectOpts::default().connect(|client| async move {
         run_main_logic(client).await
     })
     .await
@@ -30,7 +30,7 @@ async fn run() {
 
 async fn run_main_logic(client: dagger_sdk::DaggerConn) -> Result<()> {
         tracing::info!("Connected to Dagger, creating sandbox...");
-        let llm = rig::providers::anthropic::Client::from_env();
+
         let mut sandbox_instance = sandbox(&client).await?;
         tracing::info!("Sandbox created successfully");
         let store = store().await;
@@ -41,15 +41,15 @@ async fn run_main_logic(client: dagger_sdk::DaggerConn) -> Result<()> {
         seed_dataapps_template(&mut sandbox_instance).await?;
         tracing::info!("Template seeding completed successfully");
 
-        let validator = DataAppsValidator::new()
-            .with_llm_client(Arc::new(llm.clone()), "claude-3-5-haiku-20241022".to_string());
-        let tools = dataapps_toolset(validator.clone());
-        let llm_worker = agent::Worker::new(llm.clone(), store.clone(), DATAAPPS_SYSTEM_PROMPT.to_owned(), tools);
+        let gemini_client = rig::providers::gemini::Client::from_env();
+        let anthropic_client = rig::providers::anthropic::Client::from_env();
 
-        let validator = DataAppsValidator::new()
-            .with_llm_client(Arc::new(llm.clone()), "claude-3-5-haiku-20241022".to_string());
-        let tools = dataapps_toolset(validator);
-        let mut sandbox_worker = agent::ToolWorker::new(sandbox_instance.boxed(), store.clone(), tools);
+        let validator = DataAppsValidator::new().with_llm_client(Arc::new(gemini_client), "gemini-2.5-flash".to_string());
+        let tools = dataapps_toolset(validator.clone());
+        let llm_worker = agent::Worker::new(anthropic_client, store.clone(), DATAAPPS_SYSTEM_PROMPT.to_owned(), tools.clone());
+
+        let sandbox_boxed = sandbox_instance.boxed();
+        let mut sandbox_worker = agent::ToolWorker::new(sandbox_boxed, store.clone(), tools);
 
         tokio::spawn(async move {
             let _ = llm_worker.run("dataapps", "thread").await;
@@ -80,9 +80,8 @@ async fn run_main_logic(client: dagger_sdk::DaggerConn) -> Result<()> {
             tracing::info!(?thread.state, ?event, "event");
             match thread.state {
                 thread::State::Done => {
-                    // Create a new sandbox instance for export
-                    let mut export_sandbox = sandbox(&client).await?;
-                    export_artifacts(&mut export_sandbox).await?;
+                    // Use the boxed sandbox for export
+                    export_artifacts(&mut sandbox_boxed).await?;
                     break;
                 },
                 _ => continue,
@@ -99,7 +98,7 @@ async fn sandbox(client: &dagger_sdk::DaggerConn) -> Result<DaggerSandbox> {
         .build()?;
     let ctr = client
         .container()
-        .build_opts(client.host().directory("./dabgent_fastapi"), opts);
+        .build_opts(client.host().directory("dabgent_fastapi"), opts);
     tracing::info!("Syncing container...");
     ctr.sync().await?;
     tracing::info!("Container sync completed");
@@ -118,23 +117,23 @@ async fn store() -> SqliteStore {
 
 async fn seed_dataapps_template(sandbox: &mut DaggerSandbox) -> Result<()> {
     let template_path = Path::new("../dataapps/template");
-    
+
     // Verify template path exists
     if !template_path.exists() {
         return Err(eyre::eyre!("Template path does not exist: {:?}", template_path.canonicalize()));
     }
-    
+
     tracing::info!("Seeding template from: {:?}", template_path.canonicalize());
-    
+
     // Collect all files first, then write them in bulk
     let mut files = Vec::new();
     collect_files_recursive(template_path, "/app", &mut files)?;
-    
+
     tracing::info!("Collected {} files for bulk write", files.len());
-    
-    // Use bulk write for efficiency
+
     sandbox.write_files_bulk(files).await?;
-    
+    tracing::info!("Template files written");
+
     Ok(())
 }
 
@@ -148,16 +147,19 @@ fn collect_files_recursive(
             let entry = entry?;
             let file_name = entry.file_name();
             let file_name = file_name.to_string_lossy();
-            
+
             let host_file_path = entry.path();
             let sandbox_file_path = format!("{}/{}", sandbox_base_path, file_name);
-            
+
+            let bad_patterns = ["node_modules", ".git", ".venv", "__pycache__"];
+            if bad_patterns.iter().any(|pattern| file_name.contains(pattern)) {
+                continue; // Skip unwanted directories
+            }
+
             if host_file_path.is_dir() {
                 // Recursively collect files from subdirectories
                 collect_files_recursive(&host_file_path, &sandbox_file_path, files)?;
             } else {
-                tracing::debug!("Collecting file: {} -> {}", host_file_path.display(), sandbox_file_path);
-                
                 // Read file as bytes first, then check if it's valid UTF-8
                 match fs::read(&host_file_path) {
                     Ok(bytes) => {
@@ -182,38 +184,44 @@ fn collect_files_recursive(
     Ok(())
 }
 
-async fn export_artifacts(sandbox: &mut DaggerSandbox) -> Result<()> {
+async fn export_artifacts(sandbox: &mut Box<dyn SandboxDyn>) -> Result<()> {
     let output_dir = "/tmp/fastapi_output";
     fs::create_dir_all(output_dir)?;
-    
+
     // Export known paths
     export_directory(sandbox, "/app", output_dir).await?;
-    
+
     tracing::info!("Exported artifacts to {}", output_dir);
     Ok(())
 }
 
 fn export_directory<'a>(
-    sandbox: &'a mut DaggerSandbox,
+    sandbox: &'a mut Box<dyn SandboxDyn>,
     sandbox_path: &'a str,
     host_path: &'a str,
 ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<()>> + Send + 'a>> {
     Box::pin(async move {
-        let entries = dabgent_sandbox::Sandbox::list_directory(sandbox, sandbox_path).await?;
-        
+        let entries = sandbox.list_directory(sandbox_path).await?;
+
         for entry in entries {
+            // Skip unwanted directories
+            let skip_patterns = [".venv", "node_modules", "__pycache__", ".git", ".pytest_cache"];
+            if skip_patterns.iter().any(|pattern| entry.contains(pattern)) {
+                continue;
+            }
+
             let sandbox_file_path = format!("{}/{}", sandbox_path, entry);
             let host_file_path = format!("{}/{}", host_path, entry);
-            
+
             // Try to read as file first
-            match dabgent_sandbox::Sandbox::read_file(sandbox, &sandbox_file_path).await {
+            match sandbox.read_file(&sandbox_file_path).await {
                 Ok(content) => {
                     // It's a file
                     fs::write(&host_file_path, content)?;
                 }
                 Err(_) => {
                     // It might be a directory
-                    if let Ok(_) = dabgent_sandbox::Sandbox::list_directory(sandbox, &sandbox_file_path).await {
+                    if let Ok(_) = sandbox.list_directory(&sandbox_file_path).await {
                         fs::create_dir_all(&host_file_path)?;
                         export_directory(sandbox, &sandbox_file_path, &host_file_path).await?;
                     }
@@ -239,7 +247,7 @@ CRITICAL CONSTRAINTS:
 1. **React Admin Compatibility**: ALL list endpoints MUST return proper headers:
    - Content-Range: "items {start}-{end}/{total}"
    - X-Total-Count: {total_count}
-   
+
 2. **Data Models**: Use Pydantic models with proper typing. Follow existing patterns in backend/models.py
 
 3. **Routers**: Use structured FastAPI routers in backend/routers/. Keep customer router as reference.
@@ -268,4 +276,3 @@ DEVELOPMENT APPROACH:
 
 Remember: Small, working changes that pass validation are better than large changes that fail.
 "#;
-

@@ -1,10 +1,9 @@
 from typing import List, Optional
-from fastapi import APIRouter, Request, HTTPException, Query
-from fastapi.responses import JSONResponse, RedirectResponse
 
+from fastapi import APIRouter, HTTPException, Query, Request
+
+from react_admin_helpers import ReactAdminHelper, ResourceConfig
 from routes.customers.schema import Customer, CustomerCreate, CustomerUpdate
-from react_admin_helpers import ReactAdminHelper, ResourceConfig, ReactAdminParams
-
 
 router = APIRouter(tags=["customers"])
 

@@ -4,7 +4,7 @@ use eyre::Result;
 use serde::{Deserialize, Serialize};
 use std::pin::Pin;
 
-pub trait Tool: Send + Sync {
+pub trait Tool: Send + Sync + Clone {
     type Args: for<'a> Deserialize<'a> + Serialize + Send + Sync;
     type Output: Serialize + Send + Sync;
     type Error: Serialize + Send + Sync;
@@ -20,6 +20,7 @@ pub trait Tool: Send + Sync {
 type ToolDynResult = Result<Result<serde_json::Value, serde_json::Value>>;
 
 pub trait ToolDyn: Send + Sync {
+    fn clone_box(&self) -> Box<dyn ToolDyn>;
     fn name(&self) -> String;
     fn definition(&self) -> rig::completion::ToolDefinition;
     fn call<'a>(
@@ -29,7 +30,11 @@ pub trait ToolDyn: Send + Sync {
     ) -> Pin<Box<dyn Future<Output = ToolDynResult> + Send + 'a>>;
 }
 
-impl<T: Tool> ToolDyn for T {
+impl<T: Tool + 'static> ToolDyn for T {
+    fn clone_box(&self) -> Box<dyn ToolDyn> {
+        Box::new(self.clone())
+    }
+
     fn name(&self) -> String {
         Tool::name(self)
     }
@@ -59,7 +64,7 @@ impl<T: Tool> ToolDyn for T {
     }
 }
 
-pub trait Validator {
+pub trait Validator: Clone {
     fn run(
         &self,
         sandbox: &mut Box<dyn SandboxDyn>,
@@ -74,13 +79,18 @@ pub trait Validator {
 }
 
 pub trait ValidatorDyn: Send + Sync {
+    fn clone_box(&self) -> Box<dyn ValidatorDyn>;
     fn run<'a>(
         &'a self,
         sandbox: &'a mut Box<dyn SandboxDyn>,
     ) -> Pin<Box<dyn Future<Output = Result<Result<(), String>>> + Send + 'a>>;
 }
 
-impl<T: Validator + Send + Sync> ValidatorDyn for T {
+impl<T: Validator + Send + Sync + 'static> ValidatorDyn for T {
+    fn clone_box(&self) -> Box<dyn ValidatorDyn> {
+        Box::new(self.clone())
+    }
+
     fn run<'a>(
         &'a self,
         sandbox: &'a mut Box<dyn SandboxDyn>,
@@ -112,5 +122,17 @@ impl ToolCallExt for rig::message::ToolCall {
             call_id: self.call_id.clone(),
             content: rig::OneOrMany::one(ToolResultContent::Text(inner.into())),
         }
+    }
+}
+
+impl Clone for Box<dyn ToolDyn> {
+    fn clone(&self) -> Self {
+        self.clone_box()
+    }
+}
+
+impl Clone for Box<dyn ValidatorDyn> {
+    fn clone(&self) -> Self {
+        self.clone_box()
     }
 }

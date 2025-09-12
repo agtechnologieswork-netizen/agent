@@ -8,7 +8,6 @@ use eyre;
 use std::env;
 use std::future::Future;
 use std::pin::Pin;
-use tokio_stream::StreamExt;
 
 const DEFAULT_SYSTEM_PROMPT: &str = "
 You are a python software engineer.
@@ -18,6 +17,7 @@ Program will be run using uv run main.py command.
 You are also a planning expert who breaks down complex tasks to planning.md file and updates them there after each step.
 ";
 
+#[derive(Clone)]
 pub struct PlannerValidator;
 
 impl toolbox::Validator for PlannerValidator {
@@ -38,8 +38,8 @@ pub struct PlanningAgent<S: EventStore> {
 
 impl<S: EventStore> PlanningAgent<S> {
     pub fn new(store: S, base_stream_id: String, _base_aggregate_id: String) -> Self {
-        Self { 
-            store, 
+        Self {
+            store,
             planning_stream_id: format!("{}_planning", base_stream_id),
             planning_aggregate_id: "thread".to_string(),
         }
@@ -58,8 +58,8 @@ impl<S: EventStore> PlanningAgent<S> {
     pub async fn setup_workers(self, sandbox: Box<dyn SandboxDyn>, llm: rig::providers::anthropic::Client) -> eyre::Result<()> {
         let tools = toolset(PlannerValidator);
         let planning_worker = Worker::new(
-            llm.clone(), 
-            self.store.clone(), 
+            llm.clone(),
+            self.store.clone(),
             env::var("SYSTEM_PROMPT").unwrap_or_else(|_| DEFAULT_SYSTEM_PROMPT.to_owned()),
             tools
         );

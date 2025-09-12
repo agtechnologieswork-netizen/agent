@@ -7,9 +7,6 @@ use std::sync::Arc;
 
 #[derive(Clone)]
 pub struct DataAppsValidator {
-    pub check_backend: bool,
-    pub check_frontend: bool,
-    pub check_tests: bool,
     pub llm_client: Option<Arc<dyn LLMClientDyn>>,
     pub model: Option<String>,
 }
@@ -17,9 +14,6 @@ pub struct DataAppsValidator {
 impl Default for DataAppsValidator {
     fn default() -> Self {
         Self {
-            check_backend: true,
-            check_frontend: false, // Disable for MVP 
-            check_tests: true,     // Enable smoke tests instead of manual import
             llm_client: None,
             model: None,
         }
@@ -31,21 +25,6 @@ impl DataAppsValidator {
         Self::default()
     }
 
-    pub fn with_backend_check(mut self, enabled: bool) -> Self {
-        self.check_backend = enabled;
-        self
-    }
-
-    pub fn with_frontend_check(mut self, enabled: bool) -> Self {
-        self.check_frontend = enabled;
-        self
-    }
-
-    pub fn with_tests_check(mut self, enabled: bool) -> Self {
-        self.check_tests = enabled;
-        self
-    }
-
     pub fn with_llm_client(mut self, llm_client: Arc<dyn LLMClientDyn>, model: String) -> Self {
         self.llm_client = Some(llm_client);
         self.model = Some(model);
@@ -54,7 +33,10 @@ impl DataAppsValidator {
 
     async fn compact_error_if_needed(&self, error: &str) -> String {
         const MAX_ERROR_LENGTH: usize = 4096;
-        
+
+        dbg!(error);
+        tracing::warn!("Original error: {}", error);
+
         if error.len() <= MAX_ERROR_LENGTH {
             return error.to_string();
         }
@@ -68,30 +50,25 @@ impl DataAppsValidator {
                 Err(e) => {
                     tracing::warn!("Failed to compact error message: {}", e);
                     // Fallback to truncation
-                    format!("{}...\n[Error compaction failed, truncated from {} characters]", 
-                        &error[..MAX_ERROR_LENGTH.saturating_sub(100)], 
+                    format!("{}...\n[Error compaction failed, truncated from {} characters]",
+                        &error[..MAX_ERROR_LENGTH.saturating_sub(100)],
                         error.len())
                 }
             }
         } else {
             // No LLM client configured, fallback to truncation
-            format!("{}...\n[Truncated from {} characters]", 
-                &error[..MAX_ERROR_LENGTH.saturating_sub(50)], 
+            format!("{}...\n[Truncated from {} characters]",
+                &error[..MAX_ERROR_LENGTH.saturating_sub(50)],
                 error.len())
         }
     }
 
     async fn check_python_dependencies(&self, sandbox: &mut Box<dyn SandboxDyn>) -> Result<(), String> {
-        // Check if requirements.txt exists
-        let requirements_check = sandbox.read_file("/app/requirements.txt").await;
-        if requirements_check.is_err() {
-            return Err("requirements.txt not found in project root".to_string());
-        }
-
         // Try to install dependencies - need to be in backend directory for uv sync
-        sandbox.set_workdir("/app/backend").await.map_err(|e| format!("Failed to set workdir: {}", e))?;
-        let result = sandbox.exec("uv sync")
+        let result = sandbox.exec("uv sync --dev")
             .await.map_err(|e| format!("Failed to run uv sync: {}", e))?;
+
+        tracing::info!("uv sync result: exit_code={}, stdout={}, stderr={}", result.exit_code, result.stdout, result.stderr);
 
         if result.exit_code != 0 {
             let error_msg = format!(
@@ -169,7 +146,6 @@ impl DataAppsValidator {
     }
 
     async fn check_tests(&self, sandbox: &mut Box<dyn SandboxDyn>) -> Result<(), String> {
-        sandbox.set_workdir("/app/backend").await.map_err(|e| format!("Failed to set workdir: {}", e))?;
         let result = sandbox.exec("uv run pytest . -v")
             .await.map_err(|e| format!("Failed to run tests: {}", e))?;
 
@@ -186,36 +162,64 @@ impl DataAppsValidator {
 
         Ok(())
     }
+
+    async fn export_requirements(&self, sandbox: &mut Box<dyn SandboxDyn>) -> Result<(), String> {
+        let result = sandbox.exec("uv export --no-hashes --format requirements-txt --output-file requirements.txt --no-dev")
+            .await.map_err(|e| format!("Failed to run uv export: {}", e))?;
+
+        if result.exit_code != 0 {
+            let error_msg = format!(
+                "uv export command failed (exit code {}): stderr: {} stdout: {}",
+                result.exit_code,
+                result.stderr,
+                result.stdout
+            );
+            let compacted_error = self.compact_error_if_needed(&error_msg).await;
+            return Err(compacted_error);
+        }
+
+        Ok(())
+    }
 }
 
 impl Validator for DataAppsValidator {
     async fn run(&self, sandbox: &mut Box<dyn SandboxDyn>) -> Result<Result<(), String>> {
+
+        // Initial setup: ensure we're in the backend directory and sync dependencies
+        match sandbox.set_workdir("/app/backend").await {
+            Ok(_) => (),
+            Err(e) => return Ok(Err(format!("Failed to set workdir: {}", e))),
+        };
+        match sandbox.exec("uv sync --dev").await {
+            Ok(_) => (),
+            Err(e) => return Ok(Err(format!("Failed to run uv sync: {}", e))),
+        }
+        tracing::info!("Sandbox is ready. Starting validation steps...");
+
         // 1. Check Python dependencies
         if let Err(e) = self.check_python_dependencies(sandbox).await {
             return Ok(Err(format!("Dependency check failed: {}", e)));
         }
 
         // 2. Run smoke tests (includes import validation)
-        if self.check_tests {
-            if let Err(e) = self.check_tests(sandbox).await {
-                return Ok(Err(format!("Smoke tests failed: {}", e)));
-            }
+        if let Err(e) = self.check_tests(sandbox).await {
+            return Ok(Err(format!("Smoke tests failed: {}", e)));
         }
 
         // 3. Check linting
-        if self.check_backend {
-            if let Err(e) = self.check_linting(sandbox).await {
-                return Ok(Err(format!("Linting failed: {}", e)));
-            }
+        if let Err(e) = self.check_linting(sandbox).await {
+            return Ok(Err(format!("Linting failed: {}", e)));
         }
 
-        // 4. Check frontend build (if enabled)
-        if self.check_frontend {
-            if let Err(e) = self.check_frontend_build(sandbox).await {
-                return Ok(Err(format!("Frontend build failed: {}", e)));
-            }
-        }
+        // 4. Check frontend build
+        // if let Err(e) = self.check_frontend_build(sandbox).await {
+        //     return Ok(Err(format!("Frontend build failed: {}", e)));
+        // }
 
+        // 5. Export requirements.txt for old-style projects if needed
+        if self.export_requirements(sandbox).await.is_err() {
+            return Ok(Err("Failed to export requirements.txt".to_string()));
+        }
         Ok(Ok(()))
     }
 }
