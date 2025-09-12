@@ -164,6 +164,19 @@ impl LLMClient for rig::providers::gemini::Client {
     async fn completion(&self, completion: Completion) -> eyre::Result<CompletionResponse> {
         use rig::providers::gemini::completion::gemini_api_types::{self};
         let model = self.completion_model(&completion.model);
+        let generation_config = gemini_api_types::GenerationConfig {
+            temperature: completion.temperature,
+            max_output_tokens: completion.max_tokens,
+            ..Default::default()
+        };
+        let cfg = gemini_api_types::AdditionalParameters {
+            generation_config,
+            additional_params: completion.additional_params.clone(),
+        };
+        let completion = Completion {
+            additional_params: Some(serde_json::to_value(cfg).unwrap()),
+            ..completion
+        };
         let result = model.completion(completion.into()).await.map(|response| {
             let finish_reason = response.raw_response.candidates[0].finish_reason.as_ref();
             let finish_reason = finish_reason.map_or(FinishReason::None, |reason| match reason {
