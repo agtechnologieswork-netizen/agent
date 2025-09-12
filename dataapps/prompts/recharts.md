@@ -82,8 +82,8 @@ useEffect(() => {
 
 ### ✅ BEST PRACTICE: Line Chart with useGetList Hook
 ```tsx
-import { useGetList, useTheme } from 'react-admin';
-import { Card, CardContent, Typography } from '@mui/material';
+import { useGetList } from 'react-admin';
+import { useTheme, Card, CardContent, Typography } from '@mui/material';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 
 interface OrderData {
@@ -99,7 +99,7 @@ interface ChartData {
   orders: number;
 }
 
-const OrdersChart = () => {
+export const OrdersChart = () => {
   const theme = useTheme();
   const { data, isPending, error } = useGetList<OrderData>('orders', {
     pagination: { page: 1, perPage: 50 },
@@ -119,7 +119,7 @@ const OrdersChart = () => {
     <Card>
       <CardContent>
         <Typography variant="h6" gutterBottom>Orders Over Time</Typography>
-        <ResponsiveContainer width="100%" height={300}>
+        <ResponsiveContainer width="100%" height={400}>
           <LineChart data={chartData}>
             <CartesianGrid strokeDasharray="3 3" stroke={theme.palette.divider} />
             <XAxis 
@@ -148,14 +148,12 @@ const OrdersChart = () => {
     </Card>
   );
 };
-
-export { OrdersChart };
 ```
 
 ### ✅ BEST PRACTICE: Bar Chart with Data Aggregation
 ```tsx
-import { useGetList, useTheme } from 'react-admin';
-import { Card, CardContent, CardHeader, Typography } from '@mui/material';
+import { useGetList } from 'react-admin';
+import { Card, CardContent, CardHeader, Typography, useTheme } from '@mui/material';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 
 interface ProductData {
@@ -172,7 +170,7 @@ interface CategorySalesData {
   count: number;
 }
 
-const CategorySalesChart = () => {
+export const CategorySalesChart = () => {
   const theme = useTheme();
   const { data, isPending, error } = useGetList<ProductData>('products', {
     pagination: { page: 1, perPage: 100 }
@@ -203,7 +201,7 @@ const CategorySalesChart = () => {
     <Card>
       <CardHeader title="Sales by Category" />
       <CardContent>
-        <ResponsiveContainer width="100%" height={300}>
+        <ResponsiveContainer width="100%" height={400}>
           <BarChart data={chartData}>
             <CartesianGrid 
               strokeDasharray="3 3" 
@@ -235,14 +233,13 @@ const CategorySalesChart = () => {
     </Card>
   );
 };
-
-export { CategorySalesChart };
 ```
 
 ### ✅ BEST PRACTICE: Pie Chart with useGetList (Replacing useDataProvider + useEffect)
+## For Pie Chart, need to set itemStyle to the theme.palette.text.primary
 ```tsx
-import { useGetList, useTheme } from 'react-admin';
-import { Card, CardContent, Typography } from '@mui/material';
+import { useGetList } from 'react-admin';
+import { Card, CardContent, Typography, useTheme } from '@mui/material';
 import { PieChart, Pie, Cell, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 
 interface UserData {
@@ -257,7 +254,7 @@ interface StatusData {
   value: number;
 }
 
-const UserStatusChart = () => {
+export const UserStatusChart = () => {
   const theme = useTheme();
   const { data, isPending, error } = useGetList<UserData>('users', {
     pagination: { page: 1, perPage: 1000 },
@@ -289,7 +286,7 @@ const UserStatusChart = () => {
     <Card>
       <CardContent>
         <Typography variant="h6" gutterBottom>User Status Distribution</Typography>
-        <ResponsiveContainer width="100%" height={300}>
+        <ResponsiveContainer width="100%" height={400}>
           <PieChart>
             <Pie
               data={statusData}
@@ -315,6 +312,9 @@ const UserStatusChart = () => {
                 border: `1px solid ${theme.palette.divider}`,
                 borderRadius: theme.shape.borderRadius
               }}
+              itemStyle={{
+                color: theme.palette.text.primary,
+              }}
             />
             <Legend />
           </PieChart>
@@ -323,14 +323,12 @@ const UserStatusChart = () => {
     </Card>
   );
 };
-
-export { UserStatusChart };
 ```
 
 ### ✅ BEST PRACTICE: Area Chart with Stacked Data
 ```tsx
-import { useGetList, useTheme } from 'react-admin';
-import { Card, CardContent, Typography } from '@mui/material';
+import { useGetList } from 'react-admin';
+import { Card, CardContent, Typography, useTheme } from '@mui/material';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 
 interface OrderData {
@@ -346,7 +344,7 @@ interface RevenueData {
   profit: number;
 }
 
-const RevenueChart = () => {
+export const RevenueChart = () => {
   const theme = useTheme();
   const { data, isPending, error } = useGetList<OrderData>('orders', {
     pagination: { page: 1, perPage: 100 },
@@ -367,7 +365,7 @@ const RevenueChart = () => {
     <Card>
       <CardContent>
         <Typography variant="h6" gutterBottom>Revenue & Profit Trends</Typography>
-        <ResponsiveContainer width="100%" height={300}>
+        <ResponsiveContainer width="100%" height={400}>
           <AreaChart data={chartData} margin={{ top: 20, right: 30, left: 0, bottom: 0 }}>
             <CartesianGrid 
               strokeDasharray="3 3" 
@@ -417,14 +415,12 @@ const RevenueChart = () => {
     </Card>
   );
 };
-
-export { RevenueChart };
 ```
 
 ### ✅ ADVANCED: ComposedChart with Multiple Data Sources
 ```tsx
-import { useGetList, useGetManyReference, useTheme } from 'react-admin';
-import { Card, CardContent, Typography } from '@mui/material';
+import { useGetList, useGetManyReference } from 'react-admin';
+import { Card, CardContent, Typography, useTheme } from '@mui/material';
 import { ComposedChart, Line, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 
 interface OrderData {
@@ -434,7 +430,7 @@ interface OrderData {
   customer_id: string;
 }
 
-const SalesAnalyticsChart = () => {
+export const SalesAnalyticsChart = () => {
   const theme = useTheme();
   const { data: orders, isPending: ordersLoading, error: ordersError } = useGetList<OrderData>('orders', {
     pagination: { page: 1, perPage: 30 },
@@ -512,14 +508,12 @@ const SalesAnalyticsChart = () => {
     </Card>
   );
 };
-
-export { SalesAnalyticsChart };
 ```
 
 ### ✅ PERFORMANCE TIP: Using useGetManyReference for Related Data
 ```tsx
-import { useGetManyReference, useRecordContext, useTheme } from 'react-admin';
-import { Card, CardContent, Typography } from '@mui/material';
+import { useGetManyReference, useRecordContext } from 'react-admin';
+import { Card, CardContent, Typography, useTheme } from '@mui/material';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 
 interface CommentData {
@@ -529,7 +523,7 @@ interface CommentData {
   content: string;
 }
 
-const PostCommentsChart = () => {
+export const PostCommentsChart = () => {
   const record = useRecordContext(); // Gets the current post record
   const theme = useTheme();
   
@@ -584,8 +578,6 @@ const PostCommentsChart = () => {
     </Card>
   );
 };
-
-export { PostCommentsChart };
 ```
 
 ### ✅ DASHBOARD INTEGRATION: Adding Charts to Dashboard
@@ -618,16 +610,16 @@ export const Dashboard = () => (
       Analytics Dashboard
     </Typography>
     <Grid container spacing={3}>
-      <Grid item xs={12} md={8}>
+      <Grid size={{ xs: 12, md: 8 }}>
         <RevenueChart />
       </Grid>
-      <Grid item xs={12} md={4}>
+      <Grid size={{ xs: 12, md: 4 }}>
         <UserStatusChart />
       </Grid>
-      <Grid item xs={12} md={6}>
+      <Grid size={{ xs: 12, md: 6 }}>
         <OrdersChart />
       </Grid>
-      <Grid item xs={12} md={6}>
+      <Grid size={{ xs: 12, md: 6 }}>
         <CategorySalesChart />
       </Grid>
     </Grid>
@@ -666,7 +658,7 @@ const ChartWithErrorBoundary = ({ children }: { children: React.ReactNode }) => 
 );
 
 // Usage in Dashboard
-<Grid item xs={12} md={6}>
+<Grid size={{ xs: 12, md: 6 }}>
   <ChartWithErrorBoundary>
     <OrdersChart />
   </ChartWithErrorBoundary>

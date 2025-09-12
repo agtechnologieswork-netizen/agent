@@ -32,7 +32,7 @@ import {
 } from "react-admin";
 import { Layout } from "./Layout";
 import simpleRestProvider from "ra-data-simple-rest";
-import CreateGuesser from "./components/create-guesser";
+import { CreateGuesser } from "./components/create-guesser";
 
 const dataProvider = simpleRestProvider("/api");
 
@@ -177,7 +177,7 @@ import {
 
 // Local components
 import { Layout } from "./Layout";
-import CreateGuesser from "./components/create-guesser";
+import { CreateGuesser } from "./components/create-guesser";
 
 // Data providers
 import simpleRestProvider from "ra-data-simple-rest";
