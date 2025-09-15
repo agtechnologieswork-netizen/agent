@@ -411,6 +411,64 @@ impl Tool for UvAdd {
     }
 }
 
+// Internal function for exporting artifacts - not exposed to LLM
+pub async fn export_artifacts(
+    sandbox: &mut Box<dyn SandboxDyn>,
+    host_path: &str,
+) -> Result<String> {
+    use std::fs;
+    
+    // Create output directory
+    fs::create_dir_all(host_path)?;
+    
+    // Export from /app in sandbox to host
+    export_directory_recursive(sandbox, "/app", host_path).await?;
+    
+    Ok(format!("Exported artifacts to {}", host_path))
+}
+
+async fn export_directory_recursive(
+    sandbox: &mut Box<dyn SandboxDyn>,
+    sandbox_path: &str,
+    host_path: &str,
+) -> Result<()> {
+    use std::fs;
+    
+    let entries = sandbox.list_directory(sandbox_path).await?;
+    
+    for entry in entries {
+        // Skip unwanted directories
+        let skip_patterns = [".venv", "node_modules", "__pycache__", ".git", ".pytest_cache"];
+        if skip_patterns.iter().any(|pattern| entry.contains(pattern)) {
+            continue;
+        }
+        
+        let sandbox_file_path = format!("{}/{}", sandbox_path, entry);
+        let host_file_path = format!("{}/{}", host_path, entry);
+        
+        // Try to read as file first
+        match sandbox.read_file(&sandbox_file_path).await {
+            Ok(content) => {
+                // It's a file
+                fs::write(&host_file_path, content)?;
+            }
+            Err(_) => {
+                // It might be a directory
+                if let Ok(_) = sandbox.list_directory(&sandbox_file_path).await {
+                    fs::create_dir_all(&host_file_path)?;
+                    Box::pin(export_directory_recursive(
+                        sandbox,
+                        &sandbox_file_path,
+                        &host_file_path,
+                    ))
+                    .await?;
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
 pub fn toolset<T: Validator + Send + Sync + 'static>(validator: T) -> Vec<Box<dyn super::ToolDyn>> {
     vec![
         Box::new(Bash),

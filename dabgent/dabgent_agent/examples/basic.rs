@@ -95,6 +95,7 @@ Use uv package manager if you need to add extra libraries.
 Program will be run using uv run main.py command.
 ";
 
+#[derive(Clone)]
 pub struct Validator;
 
 impl toolbox::Validator for Validator {

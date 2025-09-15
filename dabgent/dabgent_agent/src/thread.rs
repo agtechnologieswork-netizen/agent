@@ -39,6 +39,10 @@ impl Handler for Thread {
                     thread.update_done_call(response);
                     thread.messages.push(response.message());
                 }
+                Event::ToolCompletedRaw(_) => {
+                    // Raw tool results don't update the thread state directly
+                    // They will be processed by CompactWorker and converted to ToolCompleted
+                }
                 Event::ToolCompleted(response) => {
                     thread.state = match thread.is_done(response) {
                         true => State::Done,
@@ -96,8 +100,8 @@ pub enum Command {
 pub enum Event {
     Prompted(String),
     LlmCompleted(CompletionResponse),
+    ToolCompletedRaw(ToolResponse),
     ToolCompleted(ToolResponse),
-    // ToolCompletedAndNeedsCompaction(String), // tool response is too large, needs compaction
 }
 
 impl dabgent_mq::Event for Event {
@@ -107,6 +111,7 @@ impl dabgent_mq::Event for Event {
         match self {
             Event::Prompted(..) => "prompted",
             Event::LlmCompleted(..) => "llm_completed",
+            Event::ToolCompletedRaw(..) => "tool_completed_raw",
             Event::ToolCompleted(..) => "tool_completed",
         }
     }
@@ -165,4 +170,59 @@ impl ToolResponse {
 pub enum Error {
     #[error("Agent error: {0}")]
     Other(String),
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use dabgent_mq::Event as EventTrait;
+
+    #[test]
+    fn test_thread_fold_with_raw_events() {
+        // Create a ToolResponse for testing
+        let tool_response = ToolResponse {
+            content: rig::OneOrMany::one(rig::message::UserContent::text("test result".to_string())),
+        };
+
+        // Create events including ToolCompletedRaw
+        let events = vec![
+            Event::Prompted("Test prompt".to_string()),
+            Event::ToolCompletedRaw(tool_response.clone()),
+            Event::ToolCompleted(tool_response),
+        ];
+
+        // Test that Thread::fold handles the events correctly
+        let thread = Thread::fold(&events);
+        
+        // After folding, thread should be in Tool state (from ToolCompleted)
+        // and should have 2 messages (Prompted + ToolCompleted, ToolCompletedRaw is ignored)
+        assert!(matches!(thread.state, State::Tool));
+        assert_eq!(thread.messages.len(), 2);
+    }
+
+    #[test]
+    fn test_event_type_mapping() {
+        let events = [
+            Event::Prompted("test".to_string()),
+            Event::LlmCompleted(crate::llm::CompletionResponse { 
+                choice: rig::OneOrMany::one(rig::message::AssistantContent::Text(
+                    rig::message::Text { text: "response".to_string() }
+                )),
+                finish_reason: crate::llm::FinishReason::Stop,
+                output_tokens: 10,
+            }),
+            Event::ToolCompletedRaw(ToolResponse {
+                content: rig::OneOrMany::one(rig::message::UserContent::text("raw".to_string())),
+            }),
+            Event::ToolCompleted(ToolResponse {
+                content: rig::OneOrMany::one(rig::message::UserContent::text("processed".to_string())),
+            }),
+        ];
+
+        // Test that event types map correctly
+        assert_eq!(events[0].event_type(), "prompted");
+        assert_eq!(events[1].event_type(), "llm_completed");
+        assert_eq!(events[2].event_type(), "tool_completed_raw");
+        assert_eq!(events[3].event_type(), "tool_completed");
+    }
 }

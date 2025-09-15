@@ -5,12 +5,11 @@ use dabgent_fastapi::{validator::DataAppsValidator, toolset::dataapps_toolset};
 use dabgent_mq::EventStore;
 use dabgent_mq::db::{Query, sqlite::SqliteStore};
 use dabgent_sandbox::dagger::{ConnectOpts, Sandbox as DaggerSandbox};
-use dabgent_sandbox::{Sandbox, SandboxDyn};
+use dabgent_sandbox::Sandbox;
 use eyre::Result;
 use rig::client::ProviderClient;
 use std::path::Path;
 use std::fs;
-use std::sync::Arc;
 
 #[tokio::main]
 async fn main() {
@@ -41,21 +40,28 @@ async fn run_main_logic(client: dagger_sdk::DaggerConn) -> Result<()> {
         seed_dataapps_template(&mut sandbox_instance).await?;
         tracing::info!("Template seeding completed successfully");
 
-        let gemini_client = rig::providers::gemini::Client::from_env();
         let anthropic_client = rig::providers::anthropic::Client::from_env();
 
-        let validator = DataAppsValidator::new().with_llm_client(Arc::new(gemini_client), "gemini-2.5-flash".to_string());
+        let validator = DataAppsValidator::new();
         let tools = dataapps_toolset(validator.clone());
         let llm_worker = agent::Worker::new(anthropic_client, store.clone(), DATAAPPS_SYSTEM_PROMPT.to_owned(), tools.clone());
 
         let sandbox_boxed = sandbox_instance.boxed();
         let mut sandbox_worker = agent::ToolWorker::new(sandbox_boxed, store.clone(), tools);
+        
+        // No need for a separate export sandbox anymore - ToolWorker will handle it
 
         tokio::spawn(async move {
             let _ = llm_worker.run("dataapps", "thread").await;
         });
         tokio::spawn(async move {
             let _ = sandbox_worker.run("dataapps", "thread").await;
+        });
+        
+        // Start the CompactWorker to process ToolCompletedRaw events
+        let mut compact_worker = agent::CompactWorker::new(store.clone());
+        tokio::spawn(async move {
+            let _ = compact_worker.run("dataapps", "thread").await;
         });
 
         let event = thread::Event::Prompted(
@@ -80,8 +86,46 @@ async fn run_main_logic(client: dagger_sdk::DaggerConn) -> Result<()> {
             tracing::info!(?thread.state, ?event, "event");
             match thread.state {
                 thread::State::Done => {
-                    // Use the boxed sandbox for export
-                    export_artifacts(&mut sandbox_boxed).await?;
+                    // Trigger export via synthetic tool call event
+                    let export_call = rig::message::ToolCall {
+                        id: "export_task".to_string(),
+                        call_id: None,
+                        function: rig::message::ToolFunction {
+                            name: "export_artifacts".to_string(),
+                            arguments: serde_json::json!({
+                                "path": "/tmp/fastapi_output"
+                            }),
+                        },
+                    };
+                    
+                    let export_event = thread::Event::LlmCompleted(dabgent_agent::llm::CompletionResponse {
+                        choice: rig::OneOrMany::one(rig::message::AssistantContent::ToolCall(export_call)),
+                        finish_reason: dabgent_agent::llm::FinishReason::ToolUse,
+                        output_tokens: 0,
+                    });
+                    
+                    store
+                        .push_event("dataapps", "thread", &export_event, &Default::default())
+                        .await?;
+                    
+                    // Wait for export to complete before exiting
+                    tracing::info!("Waiting for export to complete...");
+                },
+                thread::State::Tool if thread.messages.last().map(|m| {
+                    if let rig::message::Message::User { content } = m {
+                        content.iter().any(|c| {
+                            if let rig::message::UserContent::ToolResult(tr) = c {
+                                tr.id == "export_task"
+                            } else {
+                                false
+                            }
+                        })
+                    } else {
+                        false
+                    }
+                }).unwrap_or(false) => {
+                    // Export completed, we can exit
+                    tracing::info!("Export completed successfully");
                     break;
                 },
                 _ => continue,
@@ -184,53 +228,8 @@ fn collect_files_recursive(
     Ok(())
 }
 
-async fn export_artifacts(sandbox: &mut Box<dyn SandboxDyn>) -> Result<()> {
-    let output_dir = "/tmp/fastapi_output";
-    fs::create_dir_all(output_dir)?;
-
-    // Export known paths
-    export_directory(sandbox, "/app", output_dir).await?;
-
-    tracing::info!("Exported artifacts to {}", output_dir);
-    Ok(())
-}
-
-fn export_directory<'a>(
-    sandbox: &'a mut Box<dyn SandboxDyn>,
-    sandbox_path: &'a str,
-    host_path: &'a str,
-) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<()>> + Send + 'a>> {
-    Box::pin(async move {
-        let entries = sandbox.list_directory(sandbox_path).await?;
-
-        for entry in entries {
-            // Skip unwanted directories
-            let skip_patterns = [".venv", "node_modules", "__pycache__", ".git", ".pytest_cache"];
-            if skip_patterns.iter().any(|pattern| entry.contains(pattern)) {
-                continue;
-            }
-
-            let sandbox_file_path = format!("{}/{}", sandbox_path, entry);
-            let host_file_path = format!("{}/{}", host_path, entry);
-
-            // Try to read as file first
-            match sandbox.read_file(&sandbox_file_path).await {
-                Ok(content) => {
-                    // It's a file
-                    fs::write(&host_file_path, content)?;
-                }
-                Err(_) => {
-                    // It might be a directory
-                    if let Ok(_) = sandbox.list_directory(&sandbox_file_path).await {
-                        fs::create_dir_all(&host_file_path)?;
-                        export_directory(sandbox, &sandbox_file_path, &host_file_path).await?;
-                    }
-                }
-            }
-        }
-        Ok(())
-    })
-}
+// Export functionality moved to toolbox::basic::export_artifacts
+// and is now triggered via events
 
 const DATAAPPS_SYSTEM_PROMPT: &str = r#"
 You are a senior FastAPI + React Admin application engineer with expertise in Polars, Pydantic, and modern Python practices.

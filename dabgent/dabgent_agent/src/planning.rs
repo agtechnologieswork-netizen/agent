@@ -96,6 +96,7 @@ impl<S: EventStore> PlanningAgent<S> {
                     let status = match &event {
                         thread::Event::Prompted(p) => format!("🎯 Starting task: {}", p),
                         thread::Event::LlmCompleted(_) => "🤔 Planning next steps...".to_string(),
+                        thread::Event::ToolCompletedRaw(_) => "⚙️ Processing tool results...".to_string(),
                         thread::Event::ToolCompleted(_) => "🔧 Executing tools...".to_string(),
                     };
                     on_status(status).await?;
