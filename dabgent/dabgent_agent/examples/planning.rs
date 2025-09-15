@@ -1,51 +1,101 @@
-use dabgent_agent::planning::PlanningAgent;
-use dabgent_mq::db::sqlite::SqliteStore;
-use dabgent_sandbox::dagger::Sandbox as DaggerSandbox;
+use dabgent_agent::execution::run_execution_worker;
+use dabgent_agent::orchestrator::Orchestrator;
+use dabgent_agent::planner_events::PlannerEvent;
+use dabgent_mq::db::{EventStore, Metadata, Query};
 use dabgent_sandbox::Sandbox;
+use dabgent_sandbox::utils::create_sandbox;
 use eyre::Result;
+use std::sync::Arc;
+use tokio::sync::Mutex;
 
 #[tokio::main]
 async fn main() {
     tracing_subscriber::fmt::init();
-    run().await;
+    run().await.unwrap();
 }
 
-async fn run() {
-    dagger_sdk::connect(|client| async move {
-        dotenvy::dotenv().ok();
-        let api_key = std::env::var("ANTHROPIC_API_KEY")
-            .expect("ANTHROPIC_API_KEY must be set in environment or .env file");
-        let llm = rig::providers::anthropic::Client::new(api_key.as_str());
-        let sandbox = sandbox(&client).await?;
-        let store = store().await;
-        
-        let planning_agent = PlanningAgent::new(store.clone(), "example".to_string(), "demo".to_string());
-        planning_agent.setup_workers(sandbox.boxed(), llm).await?;
-        
-        let agent = PlanningAgent::new(store.clone(), "example".to_string(), "demo".to_string());
-        let task = "Implement a service that takes CSV file as input and produces Hypermedia API as output. Make sure to run it in such a way it does not block the agent while running (it will be run by uv run main.py command)";
-        agent.process_message(task.to_string()).await?;
-        agent.monitor_progress(|status| Box::pin(async move {
-            tracing::info!("Status: {}", status);
-            Ok(())
-        })).await?;
+async fn run() -> Result<()> {
+    let result = dagger_sdk::connect(|client| async move {
+        let sandbox = create_sandbox(&client, "./examples", "Dockerfile").await?;
+        let sandbox = Arc::new(Mutex::new(sandbox.boxed()));
+        let store = dabgent_mq::test_utils::create_memory_store().await;
+
+        // Start persistent execution worker
+        let execution_stream = "example_execution".to_string();
+        let worker_sandbox = sandbox.clone();
+        let worker_store = store.clone();
+
+        tokio::spawn(async move {
+            let _ = run_execution_worker(
+                worker_store,
+                execution_stream,
+                "demo".to_string(),
+                worker_sandbox
+            ).await;
+        });
+
+        // Create orchestrator
+        let mut orchestrator = Orchestrator::new(
+            store.clone(),
+            "example".to_string(),
+            "demo".to_string()
+        );
+
+        // Task to execute
+        let task = "Create a simple Python script that fetches weather data from an API and saves it to a CSV file";
+
+        println!("📝 Creating plan for task: {}", task);
+
+        // Phase 1: Create and present plan
+        orchestrator.create_plan(task.to_string()).await?;
+
+        // Display the plan
+        let planning_stream = "example_planning".to_string();
+        let events = store.load_events::<PlannerEvent>(&Query {
+            stream_id: planning_stream.clone(),
+            event_type: Some("plan_presented".to_string()),
+            aggregate_id: Some("demo".to_string()),
+        }, None).await?;
+
+        if let Some(PlannerEvent::PlanPresented { tasks }) = events.last() {
+            println!("\n📋 Proposed Plan:");
+            for task in tasks {
+                println!("  {}. {}", task.id + 1, task.description);
+            }
+        }
+
+        // Phase 2: Simulate user approval
+        println!("\n✅ Simulating user approval...");
+        store.push_event(
+            &planning_stream,
+            "demo",
+            &PlannerEvent::PlanApproved,
+            &Metadata::default()
+        ).await?;
+
+        // Wait for approval to be processed
+        let approved = orchestrator.wait_for_approval().await?;
+        if !approved {
+            println!("❌ Plan was rejected");
+            return Ok(());
+        }
+
+        println!("✅ Plan approved! Starting execution...\n");
+
+        // Phase 3: Queue execution to the persistent worker
+        orchestrator.queue_execution().await?;
+
+        // Monitor progress
+        orchestrator.monitor_execution(|status| {
+            Box::pin(async move {
+                println!("{}", status);
+                Ok(())
+            })
+        }).await?;
+
+        println!("\n🎉 Example completed successfully!");
         Ok(())
-    }).await.unwrap();
-}
+    }).await;
 
-async fn sandbox(client: &dagger_sdk::DaggerConn) -> Result<DaggerSandbox> {
-    let opts = dagger_sdk::ContainerBuildOptsBuilder::default()
-        .dockerfile("Dockerfile")
-        .build()?;
-    let ctr = client.container().build_opts(client.host().directory("./examples"), opts);
-    ctr.sync().await?;
-    Ok(DaggerSandbox::from_container(ctr))
-}
-
-async fn store() -> SqliteStore {
-    let pool = sqlx::SqlitePool::connect(":memory:").await
-        .expect("Failed to create in-memory SQLite pool");
-    let store = SqliteStore::new(pool);
-    store.migrate().await;
-    store
+    result.map_err(|e| eyre::eyre!("Dagger connection error: {}", e))
 }
