@@ -2,12 +2,11 @@ use dabgent_agent::agent::{self};
 use dabgent_agent::handler::Handler;
 use dabgent_agent::thread::{self};
 use dabgent_agent::toolbox::{self, basic::toolset};
+use dabgent_agent::utils;
 use dabgent_mq::EventStore;
-use dabgent_mq::db::{Query, sqlite::SqliteStore};
-use dabgent_sandbox::dagger::{ConnectOpts, Sandbox as DaggerSandbox};
+use dabgent_mq::db::Query;
+use dabgent_sandbox::dagger::ConnectOpts;
 use dabgent_sandbox::{Sandbox, SandboxDyn};
-use eyre::Result;
-use rig::client::ProviderClient;
 
 #[tokio::main]
 async fn main() {
@@ -18,9 +17,9 @@ async fn main() {
 async fn run() {
     let opts = ConnectOpts::default();
     opts.connect(|client| async move {
-        let llm = rig::providers::anthropic::Client::from_env();
-        let sandbox = sandbox(&client).await?;
-        let store = store().await;
+        let llm = utils::create_llm_client()?;
+        let sandbox = dabgent_sandbox::utils::create_sandbox(&client, "./examples", "Dockerfile").await?;
+        let store = dabgent_mq::test_utils::create_memory_store().await;
 
         let tools = toolset(Validator);
         let llm_worker = agent::Worker::new(
@@ -73,26 +72,6 @@ async fn run() {
     .unwrap();
 }
 
-async fn sandbox(client: &dagger_sdk::DaggerConn) -> Result<DaggerSandbox> {
-    let opts = dagger_sdk::ContainerBuildOptsBuilder::default()
-        .dockerfile("Dockerfile")
-        .build()?;
-    let ctr = client
-        .container()
-        .build_opts(client.host().directory("./examples"), opts);
-    ctr.sync().await?;
-    let sandbox = DaggerSandbox::from_container(ctr);
-    Ok(sandbox)
-}
-
-async fn store() -> SqliteStore {
-    let pool = sqlx::SqlitePool::connect(":memory:")
-        .await
-        .expect("Failed to create in-memory SQLite pool");
-    let store = SqliteStore::new(pool);
-    store.migrate().await;
-    store
-}
 
 const SYSTEM_PROMPT: &str = "
 You are a python software engineer.
@@ -104,7 +83,7 @@ Program will be run using uv run main.py command.
 pub struct Validator;
 
 impl toolbox::Validator for Validator {
-    async fn run(&self, sandbox: &mut Box<dyn SandboxDyn>) -> Result<Result<(), String>> {
+    async fn run(&self, sandbox: &mut Box<dyn SandboxDyn>) -> eyre::Result<Result<(), String>> {
         sandbox.exec("uv run main.py").await.map(|result| {
             if result.exit_code == 0 {
                 Ok(())
