@@ -22,7 +22,7 @@ interface CreateGuesserProps {
  * Automatically generates input fields for creating new records by inferring from existing data.
  * Similar to EditGuesser and ShowGuesser but for create operations.
  */
-const CreateGuesser = (props: CreateGuesserProps) => {
+export const CreateGuesser = (props: CreateGuesserProps) => {
   const resource = useResourceContext(props);
   const getResourceLabel = useGetResourceLabel();
   const resourceLabel = getResourceLabel(resource || "Resource", 1);
@@ -283,5 +283,3 @@ const isDateField = (name: string): boolean => {
     name.toLowerCase().includes(pattern.toLowerCase()),
   );
 };
-
-export default CreateGuesser;
