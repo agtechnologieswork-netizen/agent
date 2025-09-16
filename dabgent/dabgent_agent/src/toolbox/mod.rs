@@ -59,7 +59,7 @@ impl<T: Tool> ToolDyn for T {
     }
 }
 
-pub trait Validator: Clone {
+pub trait Validator {
     fn run(
         &self,
         sandbox: &mut Box<dyn SandboxDyn>,
@@ -74,7 +74,6 @@ pub trait Validator: Clone {
 }
 
 pub trait ValidatorDyn: Send + Sync {
-    fn clone_box(&self) -> Box<dyn ValidatorDyn>;
     fn run<'a>(
         &'a self,
         sandbox: &'a mut Box<dyn SandboxDyn>,
@@ -82,10 +81,6 @@ pub trait ValidatorDyn: Send + Sync {
 }
 
 impl<T: Validator + Send + Sync + 'static> ValidatorDyn for T {
-    fn clone_box(&self) -> Box<dyn ValidatorDyn> {
-        Box::new(self.clone())
-    }
-
     fn run<'a>(
         &'a self,
         sandbox: &'a mut Box<dyn SandboxDyn>,
@@ -120,8 +115,3 @@ impl ToolCallExt for rig::message::ToolCall {
     }
 }
 
-impl Clone for Box<dyn ValidatorDyn> {
-    fn clone(&self) -> Self {
-        self.clone_box()
-    }
-}

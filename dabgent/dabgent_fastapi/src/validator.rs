@@ -2,7 +2,6 @@ use dabgent_agent::toolbox::Validator;
 use dabgent_sandbox::SandboxDyn;
 use eyre::Result;
 
-#[derive(Clone)]
 pub struct DataAppsValidator;
 
 impl Default for DataAppsValidator {
@@ -18,7 +17,7 @@ impl DataAppsValidator {
 
     async fn check_python_dependencies(&self, sandbox: &mut Box<dyn SandboxDyn>) -> Result<(), String> {
         // Try to install dependencies - need to be in backend directory for uv sync
-        let result = sandbox.exec("uv sync --dev")
+        let result = sandbox.exec("cd /app/backend && uv sync --dev")
             .await.map_err(|e| format!("Failed to run uv sync: {}", e))?;
 
         tracing::info!("uv sync result: exit_code={}, stdout={}, stderr={}", result.exit_code, result.stdout, result.stderr);
@@ -38,8 +37,7 @@ impl DataAppsValidator {
 
 
     async fn check_linting(&self, sandbox: &mut Box<dyn SandboxDyn>) -> Result<(), String> {
-        sandbox.set_workdir("/app/backend").await.map_err(|e| format!("Failed to set workdir: {}", e))?;
-        let result = sandbox.exec("uv run ruff check . --select E,W,F")
+        let result = sandbox.exec("cd /app/backend && uv run ruff check . --select E,W,F")
             .await.map_err(|e| format!("Failed to run linter: {}", e))?;
 
         if result.exit_code != 0 {
@@ -63,8 +61,7 @@ impl DataAppsValidator {
         }
 
         // Install npm dependencies
-        sandbox.set_workdir("/app").await.map_err(|e| format!("Failed to set workdir: {}", e))?;
-        let install_result = sandbox.exec("npm ci")
+        let install_result = sandbox.exec("cd /app && npm ci")
             .await.map_err(|e| format!("Failed to install npm dependencies: {}", e))?;
 
         if install_result.exit_code != 0 {
@@ -78,7 +75,7 @@ impl DataAppsValidator {
         }
 
         // Build frontend
-        let build_result = sandbox.exec("npm run build")
+        let build_result = sandbox.exec("cd /app && npm run build")
             .await.map_err(|e| format!("Failed to build frontend: {}", e))?;
 
         if build_result.exit_code != 0 {
@@ -95,7 +92,7 @@ impl DataAppsValidator {
     }
 
     async fn check_tests(&self, sandbox: &mut Box<dyn SandboxDyn>) -> Result<(), String> {
-        let result = sandbox.exec("uv run pytest . -v")
+        let result = sandbox.exec("cd /app/backend && uv run pytest . -v")
             .await.map_err(|e| format!("Failed to run tests: {}", e))?;
 
         if result.exit_code != 0 {
@@ -112,7 +109,7 @@ impl DataAppsValidator {
     }
 
     async fn export_requirements(&self, sandbox: &mut Box<dyn SandboxDyn>) -> Result<(), String> {
-        let result = sandbox.exec("uv export --no-hashes --format requirements-txt --output-file requirements.txt --no-dev")
+        let result = sandbox.exec("cd /app/backend && uv export --no-hashes --format requirements-txt --output-file requirements.txt --no-dev")
             .await.map_err(|e| format!("Failed to run uv export: {}", e))?;
 
         if result.exit_code != 0 {
@@ -133,11 +130,7 @@ impl Validator for DataAppsValidator {
     async fn run(&self, sandbox: &mut Box<dyn SandboxDyn>) -> Result<Result<(), String>> {
 
         // Initial setup: ensure we're in the backend directory and sync dependencies
-        match sandbox.set_workdir("/app/backend").await {
-            Ok(_) => (),
-            Err(e) => return Ok(Err(format!("Failed to set workdir: {}", e))),
-        };
-        match sandbox.exec("uv sync --dev").await {
+        match sandbox.exec("cd /app/backend && uv sync --dev").await {
             Ok(_) => (),
             Err(e) => return Ok(Err(format!("Failed to run uv sync: {}", e))),
         }
@@ -159,9 +152,9 @@ impl Validator for DataAppsValidator {
         }
 
         // 4. Check frontend build
-        // if let Err(e) = self.check_frontend_build(sandbox).await {
-        //     return Ok(Err(format!("Frontend build failed: {}", e)));
-        // }
+        if let Err(e) = self.check_frontend_build(sandbox).await {
+            return Ok(Err(format!("Frontend build failed: {}", e)));
+        }
 
         // 5. Export requirements.txt for old-style projects if needed
         if self.export_requirements(sandbox).await.is_err() {
