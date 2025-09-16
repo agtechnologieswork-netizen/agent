@@ -1,0 +1,60 @@
+{
+  "name": "dataapps-minimal-template",
+  "version": "1.0.0",
+  "description": "Minimal DataApps template with FastAPI backend",
+  "private": true,
+  
+  "scripts": {
+    "_comment_dev": "Development scripts - customize these for your project",
+    "dev:backend": "cd backend && uv run uvicorn main:app --reload --host 0.0.0.0 --port 8000",
+    "dev": "npm run dev:backend",
+    
+    "_comment_production": "Production scripts - used by Databricks Apps",
+    "start": "npm run start:backend",
+    "start:backend": "cd backend && uv run python main.py",
+    
+    "_comment_setup": "Setup and dependency management",
+    "setup": "cd backend && uv sync",
+    "install": "npm run setup",
+    
+    "_comment_quality": "Code quality and testing (add when you need them)",
+    "lint": "cd backend && uv run ruff check .",
+    "lint:fix": "cd backend && uv run ruff check . --fix",
+    "typecheck": "cd backend && uv run pyright .",
+    "test": "cd backend && uv run pytest"
+  },
+  
+  "_comment_dependencies": "Add frontend dependencies when you create a frontend",
+  "devDependencies": {
+    "_comment": "No frontend dependencies in minimal template - add as needed"
+  },
+  
+  "_examples": {
+    "_comment": "Examples of what you might add for different frontend frameworks",
+    
+    "react_admin_setup": {
+      "scripts": {
+        "dev:frontend": "cd frontend/reactadmin && npm run dev",
+        "build:frontend": "cd frontend/reactadmin && npm run build",
+        "dev": "concurrently \"npm run dev:backend\" \"npm run dev:frontend\""
+      },
+      "devDependencies": {
+        "concurrently": "^8.2.0"
+      }
+    },
+    
+    "react_setup": {
+      "scripts": {
+        "dev:frontend": "cd frontend && npm start",
+        "build:frontend": "cd frontend && npm run build"
+      }
+    },
+    
+    "vue_setup": {
+      "scripts": {
+        "dev:frontend": "cd frontend && npm run serve",
+        "build:frontend": "cd frontend && npm run build"
+      }
+    }
+  }
+}

@@ -48,7 +48,7 @@ async fn run_main_logic(client: dagger_sdk::DaggerConn) -> Result<()> {
 
         let sandbox_boxed = sandbox_instance.boxed();
         let mut sandbox_worker = agent::ToolWorker::new(sandbox_boxed, store.clone(), tools);
-        
+
         // No need for a separate export sandbox anymore - ToolWorker will handle it
 
         tokio::spawn(async move {
@@ -57,7 +57,7 @@ async fn run_main_logic(client: dagger_sdk::DaggerConn) -> Result<()> {
         tokio::spawn(async move {
             let _ = sandbox_worker.run("dataapps", "thread").await;
         });
-        
+
         // Start the CompactWorker to process ToolCompletedRaw events
         let mut compact_worker = agent::CompactWorker::new(store.clone());
         tokio::spawn(async move {
@@ -65,7 +65,7 @@ async fn run_main_logic(client: dagger_sdk::DaggerConn) -> Result<()> {
         });
 
         let event = thread::Event::Prompted(
-            "Add a /health endpoint that returns {'status': 'ok'}".to_owned(),
+            "Build a simple counter web app where users can create, increment, and decrement a single global counter".to_owned(),
         );
         store
             .push_event("dataapps", "thread", &event, &Default::default())
@@ -85,7 +85,7 @@ async fn run_main_logic(client: dagger_sdk::DaggerConn) -> Result<()> {
             let thread = thread::Thread::fold(&events);
             tracing::info!(?thread.state, ?event, "event");
             match thread.state {
-                thread::State::Done => {
+                thread::State::Done | thread::State::UserWait => {
                     // Trigger export via synthetic tool call event
                     let export_call = rig::message::ToolCall {
                         id: "export_task".to_string(),
@@ -97,17 +97,17 @@ async fn run_main_logic(client: dagger_sdk::DaggerConn) -> Result<()> {
                             }),
                         },
                     };
-                    
+
                     let export_event = thread::Event::LlmCompleted(dabgent_agent::llm::CompletionResponse {
                         choice: rig::OneOrMany::one(rig::message::AssistantContent::ToolCall(export_call)),
                         finish_reason: dabgent_agent::llm::FinishReason::ToolUse,
                         output_tokens: 0,
                     });
-                    
+
                     store
                         .push_event("dataapps", "thread", &export_event, &Default::default())
                         .await?;
-                    
+
                     // Wait for export to complete before exiting
                     tracing::info!("Waiting for export to complete...");
                 },
@@ -160,7 +160,7 @@ async fn store() -> SqliteStore {
 }
 
 async fn seed_dataapps_template(sandbox: &mut DaggerSandbox) -> Result<()> {
-    let template_path = Path::new("../dataapps/template");
+    let template_path = Path::new("../dataapps/template_minimal");
 
     // Verify template path exists
     if !template_path.exists() {

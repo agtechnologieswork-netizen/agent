@@ -210,7 +210,7 @@ impl<E: EventStore> CompactWorker<E> {
         let query = dabgent_mq::db::Query {
             stream_id: stream_id.to_owned(),
             event_type: None, // Subscribe to all event types
-            aggregate_id: None, // All aggregates
+            aggregate_id: Some(aggregate_id.to_owned()), // Subscribe to specific aggregate
         };
 
         let mut receiver = self.event_store.subscribe::<Event>(&query)?;
