@@ -14,10 +14,30 @@ impl Sandbox {
     pub fn from_container(ctr: dagger_sdk::Container) -> Self {
         Self { ctr }
     }
+}
+
+impl crate::Sandbox for Sandbox {
+    async fn exec(&mut self, command: &str) -> Result<ExecResult> {
+        let ctr = self.ctr.clone();
+        let command: Vec<String> = command.split_whitespace().map(String::from).collect();
+        let opts = dagger_sdk::ContainerWithExecOptsBuilder::default()
+            .expect(dagger_sdk::ReturnType::Any)
+            .build()
+            .unwrap();
+        let ctr = ctr.with_exec_opts(command, opts);
+        let res = ExecResult::get_output(&ctr).await?;
+        self.ctr = ctr;
+        Ok(res)
+    }
+
+    async fn write_file(&mut self, path: &str, content: &str) -> Result<()> {
+        self.ctr = self.ctr.with_new_file(path, content);
+        Ok(())
+    }
 
     /// Write multiple files to the container in a single operation to prevent deep query chains.
     /// This is much more efficient than individual write_file calls for bulk operations.
-    pub async fn write_files_bulk(&mut self, files: Vec<(String, String)>) -> Result<()> {
+    async fn write_files(&mut self, files: Vec<(&str, &str)>) -> Result<()> {
         if files.is_empty() {
             return Ok(());
         }
@@ -42,32 +62,12 @@ impl Sandbox {
         // We need to use a Dagger client reference, but we don't have direct access to it
         // For now, let's use multiple with_new_file calls but batch them
         for (file_path, contents) in files {
-            self.ctr = self.ctr.with_new_file(&file_path, &contents);
+            self.ctr = self.ctr.with_new_file(file_path, contents);
         }
 
         // Force evaluation to ensure files are written
         let _ = self.ctr.sync().await?;
 
-        Ok(())
-    }
-}
-
-impl crate::Sandbox for Sandbox {
-    async fn exec(&mut self, command: &str) -> Result<ExecResult> {
-        let ctr = self.ctr.clone();
-        let command: Vec<String> = command.split_whitespace().map(String::from).collect();
-        let opts = dagger_sdk::ContainerWithExecOptsBuilder::default()
-            .expect(dagger_sdk::ReturnType::Any)
-            .build()
-            .unwrap();
-        let ctr = ctr.with_exec_opts(command, opts);
-        let res = ExecResult::get_output(&ctr).await?;
-        self.ctr = ctr;
-        Ok(res)
-    }
-
-    async fn write_file(&mut self, path: &str, content: &str) -> Result<()> {
-        self.ctr = self.ctr.with_new_file(path, content);
         Ok(())
     }
 

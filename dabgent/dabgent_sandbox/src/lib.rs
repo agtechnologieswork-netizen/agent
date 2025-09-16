@@ -13,6 +13,10 @@ pub struct ExecResult {
 pub trait Sandbox {
     fn exec(&mut self, command: &str) -> impl Future<Output = Result<ExecResult>> + Send;
     fn write_file(&mut self, path: &str, content: &str) -> impl Future<Output = Result<()>> + Send;
+    fn write_files(
+        &mut self,
+        files: Vec<(&str, &str)>,
+    ) -> impl Future<Output = Result<()>> + Send;
     fn read_file(&self, path: &str) -> impl Future<Output = Result<String>> + Send;
     fn delete_file(&mut self, path: &str) -> impl Future<Output = Result<()>> + Send;
     fn list_directory(&self, path: &str) -> impl Future<Output = Result<Vec<String>>> + Send;
@@ -35,6 +39,10 @@ pub trait SandboxDyn: Send + Sync {
         &'a mut self,
         path: &'a str,
         content: &'a str,
+    ) -> Pin<Box<dyn Future<Output = Result<()>> + Send + 'a>>;
+    fn write_files<'a>(
+        &'a mut self,
+        files: Vec<(&'a str, &'a str)>,
     ) -> Pin<Box<dyn Future<Output = Result<()>> + Send + 'a>>;
     fn read_file<'a>(
         &'a self,
@@ -68,6 +76,13 @@ impl<T: Sandbox + Send + Sync> SandboxDyn for T {
         content: &'a str,
     ) -> Pin<Box<dyn Future<Output = Result<()>> + Send + 'a>> {
         Box::pin(self.write_file(path, content))
+    }
+
+    fn write_files<'a>(
+        &'a mut self,
+        files: Vec<(&'a str, &'a str)>,
+    ) -> Pin<Box<dyn Future<Output = Result<()>> + Send + 'a>> {
+        Box::pin(self.write_files(files))
     }
 
     fn read_file<'a>(
