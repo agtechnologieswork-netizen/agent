@@ -2,10 +2,13 @@ use crate::handler::Handler;
 use crate::llm::{Completion, CompletionResponse, LLMClient};
 use crate::thread::{Command, Event, Thread, ToolResponse};
 use crate::toolbox::{ToolCallExt, ToolDyn};
+use crate::utils::extract_tag;
 use dabgent_mq::EventStore;
 use dabgent_sandbox::SandboxDyn;
 use eyre::Result;
 use rig::completion::ToolDefinition;
+use std::collections::HashMap;
+use uuid;
 
 pub struct Worker<T: LLMClient, E: EventStore> {
     llm: T,
@@ -114,20 +117,36 @@ impl<E: EventStore> ToolWorker<E> {
         while let Some(event) = receiver.next().await {
             match event {
                 Ok(Event::LlmCompleted(response)) if Thread::has_tool_calls(&response) => {
-                    let events = self.event_store.load_events::<Event>(&query, None).await?;
-                    let mut thread = Thread::fold(&events);
-                    let tools = self.run_tools(&response).await?;
-                    let command = {
-                        let tools = tools.into_iter().map(rig::message::UserContent::ToolResult);
-                        ToolResponse {
-                            content: rig::OneOrMany::many(tools)?,
+                    let _events = self.event_store.load_events::<Event>(&query, None).await?;
+                    match self.run_tools(&response).await {
+                        Ok(tools) => {
+                            if tools.is_empty() {
+                                tracing::error!("CRITICAL: Tool execution returned empty results despite has_tool_calls=true. This indicates a serious bug.");
+                                tracing::error!("Response choices: {:?}", response.choice);
+                                return Err(eyre::eyre!("Tool execution returned empty results"));
+                            }
+                            
+                            let command = {
+                                let tools = tools.into_iter().map(rig::message::UserContent::ToolResult);
+                                ToolResponse {
+                                    content: rig::OneOrMany::many(tools).map_err(|e| eyre::eyre!("Failed to create ToolResponse: {:?}", e))?,
+                                }
+                            };
+                            
+                            // Load the current thread state and process the tool response
+                            let events = self.event_store.load_events::<Event>(&query, None).await?;
+                            let mut thread = Thread::fold(&events);
+                            let new_events = thread.process(Command::Tool(command))?;
+                            for event in new_events.iter() {
+                                self.event_store
+                                    .push_event(stream_id, aggregate_id, event, &Default::default())
+                                    .await?;
+                            }
                         }
-                    };
-                    let new_events = thread.process(Command::Tool(command))?;
-                    for event in new_events.iter() {
-                        self.event_store
-                            .push_event(stream_id, aggregate_id, event, &Default::default())
-                            .await?;
+                        Err(e) => {
+                            tracing::error!("Tool execution failed: {:?}", e);
+                            return Err(e);
+                        }
                     }
                 }
                 Err(error) => {
@@ -146,20 +165,34 @@ impl<E: EventStore> ToolWorker<E> {
         let mut results = Vec::new();
         for content in response.choice.iter() {
             if let rig::message::AssistantContent::ToolCall(call) = content {
+                tracing::info!("Executing tool: {} with args: {:?}", call.function.name, call.function.arguments);
+                
                 let tool = self.tools.iter().find(|t| t.name() == call.function.name);
                 let result = match tool {
                     Some(tool) => {
                         let args = call.function.arguments.clone();
-                        tool.call(args, &mut self.sandbox).await?
+                        match tool.call(args, &mut self.sandbox).await {
+                            Ok(result) => {
+                                tracing::info!("Tool {} executed successfully", call.function.name);
+                                result
+                            }
+                            Err(e) => {
+                                tracing::error!("Tool {} failed: {:?}", call.function.name, e);
+                                // Convert the error to a JSON value for the tool result
+                                Err(serde_json::json!({"error": format!("Tool execution failed: {:?}", e)}))
+                            }
+                        }
                     }
                     None => {
                         let error = format!("{} not found", call.function.name);
-                        Err(serde_json::json!(error))
+                        tracing::error!("Tool not found: {}", call.function.name);
+                        Err(serde_json::json!({"error": error}))
                     }
                 };
                 results.push(call.to_result(result));
             }
         }
+        tracing::info!("Tool execution completed, {} results", results.len());
         Ok(results)
     }
 }
