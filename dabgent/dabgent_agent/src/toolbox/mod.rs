@@ -119,3 +119,9 @@ impl ToolCallExt for rig::message::ToolCall {
         }
     }
 }
+
+impl Clone for Box<dyn ValidatorDyn> {
+    fn clone(&self) -> Self {
+        self.clone_box()
+    }
+}
