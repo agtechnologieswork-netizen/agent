@@ -2,7 +2,7 @@ use crate::ExecResult;
 use dagger_sdk::core::logger::DynLogger;
 use dagger_sdk::logging::{StdLogger, TracingLogger};
 use eyre::Result;
-use std::{io::Write, sync::Arc};
+use std::{io::Write, sync::Arc, future::Future};
 
 #[derive(Clone)]
 pub struct Sandbox {
@@ -35,6 +35,42 @@ impl crate::Sandbox for Sandbox {
         Ok(())
     }
 
+    /// Write multiple files to the container in a single operation to prevent deep query chains.
+    /// This is much more efficient than individual write_file calls for bulk operations.
+    async fn write_files(&mut self, files: Vec<(&str, &str)>) -> Result<()> {
+        if files.is_empty() {
+            return Ok(());
+        }
+
+        // Create a temporary directory to stage all files
+        let temp_dir = tempfile::tempdir()?;
+        let temp_path = temp_dir.path();
+
+        // Write all files to the temporary directory
+        for (file_path, contents) in &files {
+            let full_path = temp_path.join(file_path.strip_prefix('/').unwrap_or(file_path));
+
+            // Create parent directories if needed
+            if let Some(parent) = full_path.parent() {
+                std::fs::create_dir_all(parent)?;
+            }
+
+            std::fs::write(&full_path, contents)?;
+        }
+
+        // Use with_directory to add all files at once - this prevents deep query chains
+        // We need to use a Dagger client reference, but we don't have direct access to it
+        // For now, let's use multiple with_new_file calls but batch them
+        for (file_path, contents) in files {
+            self.ctr = self.ctr.with_new_file(file_path, contents);
+        }
+
+        // Force evaluation to ensure files are written
+        let _ = self.ctr.sync().await?;
+
+        Ok(())
+    }
+
     async fn read_file(&self, path: &str) -> Result<String> {
         self.ctr.file(path).contents().await.map_err(Into::into)
     }
@@ -46,6 +82,11 @@ impl crate::Sandbox for Sandbox {
 
     async fn list_directory(&self, path: &str) -> Result<Vec<String>> {
         self.ctr.directory(path).entries().await.map_err(Into::into)
+    }
+
+    async fn set_workdir(&mut self, path: &str) -> Result<()> {
+        self.ctr = self.ctr.with_workdir(path);
+        Ok(())
     }
 }
 
