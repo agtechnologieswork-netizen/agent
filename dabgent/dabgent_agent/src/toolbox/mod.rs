@@ -59,7 +59,7 @@ impl<T: Tool> ToolDyn for T {
     }
 }
 
-pub trait Validator {
+pub trait Validator: Clone {
     fn run(
         &self,
         sandbox: &mut Box<dyn SandboxDyn>,
@@ -74,13 +74,18 @@ pub trait Validator {
 }
 
 pub trait ValidatorDyn: Send + Sync {
+    fn clone_box(&self) -> Box<dyn ValidatorDyn>;
     fn run<'a>(
         &'a self,
         sandbox: &'a mut Box<dyn SandboxDyn>,
     ) -> Pin<Box<dyn Future<Output = Result<Result<(), String>>> + Send + 'a>>;
 }
 
-impl<T: Validator + Send + Sync> ValidatorDyn for T {
+impl<T: Validator + Send + Sync + 'static> ValidatorDyn for T {
+    fn clone_box(&self) -> Box<dyn ValidatorDyn> {
+        Box::new(self.clone())
+    }
+
     fn run<'a>(
         &'a self,
         sandbox: &'a mut Box<dyn SandboxDyn>,
