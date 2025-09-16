@@ -506,24 +506,13 @@ class FSMApplication:
                 ["git", "commit", "-m", "'initial'", "--allow-empty"]
             )
 
-        tree_snapshot = await start.with_exec(["tree"]).stdout()
-        logger.error(f"[ctr tree] [snapshot]\n{tree_snapshot}")
-
         # Add template files (they will appear in diff if not in snapshot)
         template_dir = self.client.host().directory("./nicegui_agent/template")
         start = start.with_directory(".", template_dir)
         logger.info("SERVER get_diff_with: Added template directory to workspace")
 
-        tree_snapshot = await start.with_exec(["tree"]).stdout()
-        logger.error(f"[ctr tree] [template]\n{tree_snapshot}")
-
         # Add FSM context files on top
         start = await write_files_bulk(start, self.fsm.context.files, self.client)
-
-        tree_snapshot = await start.with_exec(["tree"]).stdout()
-        logger.error(f"[ctr tree] [fsm_context]\n{tree_snapshot}")
-        fsm_file_keys = list(self.fsm.context.files.keys())
-        logger.error(f"[fsm context] [files] {fsm_file_keys}")
 
         logger.info(
             "SERVER get_diff_with: Calling workspace.diff() to generate final diff."
