@@ -15,11 +15,6 @@ impl Sandbox {
         Self { ctr }
     }
 
-    /// Get a reference to the internal container
-    pub fn container(&self) -> &dagger_sdk::Container {
-        &self.ctr
-    }
-
     /// Write multiple files to the container in a single operation to prevent deep query chains.
     /// This is much more efficient than individual write_file calls for bulk operations.
     pub async fn write_files_bulk(&mut self, files: Vec<(String, String)>) -> Result<()> {
