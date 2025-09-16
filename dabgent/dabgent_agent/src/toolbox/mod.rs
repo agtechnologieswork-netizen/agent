@@ -80,7 +80,7 @@ pub trait ValidatorDyn: Send + Sync {
     ) -> Pin<Box<dyn Future<Output = Result<Result<(), String>>> + Send + 'a>>;
 }
 
-impl<T: Validator + Send + Sync> ValidatorDyn for T {
+impl<T: Validator + Send + Sync + 'static> ValidatorDyn for T {
     fn run<'a>(
         &'a self,
         sandbox: &'a mut Box<dyn SandboxDyn>,
@@ -114,3 +114,4 @@ impl ToolCallExt for rig::message::ToolCall {
         }
     }
 }
+
