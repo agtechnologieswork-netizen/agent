@@ -140,13 +140,69 @@ where
         };
         let mut receiver = store.subscribe::<Event>(&query)?;
         let mut events = store.load_events(&query, None).await?;
+
+        // Track tasks created by planner and their completion status
+        let mut pending_tasks: Vec<String> = Vec::new();
+        let mut completed_tasks: Vec<String> = Vec::new();
+
         while let Some(event) = receiver.next().await {
             let event = event?;
             events.push(event.clone());
             let thread = Thread::fold(&events);
-            tracing::info!(?thread.state, ?event, "event");
+
+            // Track task creation and completion
+            match &event {
+                Event::LlmCompleted(response) => {
+                    // Check if planner created new tasks
+                    for item in response.choice.iter() {
+                        if let rig::message::AssistantContent::ToolCall(tool_call) = item {
+                            if tool_call.function.name == "update_task_list" {
+                                // Task list was updated, track it
+                                if let Some(instruction) = tool_call.function.arguments.get("instruction") {
+                                    if let Some(inst_str) = instruction.as_str() {
+                                        if inst_str.contains("add") || inst_str.contains("create") {
+                                            pending_tasks.push(inst_str.to_string());
+                                            tracing::info!("Planner created task: {}", inst_str);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                Event::ToolCompleted(response) => {
+                    // Check if a task was completed
+                    for item in response.content.iter() {
+                        if let rig::message::UserContent::ToolResult(result) = item {
+                            for result_content in result.content.iter() {
+                                if let rig::message::ToolResultContent::Text(text) = result_content {
+                                    let text_str = text.text.as_str();
+                                    if text_str.contains("success") || text_str.contains("completed") {
+                                        // Move task from pending to completed
+                                        if let Some(task) = pending_tasks.pop() {
+                                            completed_tasks.push(task.clone());
+                                            tracing::info!("Worker completed task: {}", task);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                _ => {}
+            }
+
+            tracing::info!(?thread.state, ?event, pending_tasks = ?pending_tasks.len(), completed_tasks = ?completed_tasks.len(), "event");
+
             match thread.state {
-                thread::State::Done => break,
+                thread::State::Done => {
+                    tracing::info!("Pipeline completed. Total tasks completed: {}", completed_tasks.len());
+                    break;
+                }
+                thread::State::UserWait if pending_tasks.is_empty() && !completed_tasks.is_empty() => {
+                    // All tasks completed, but not marked as done yet
+                    tracing::info!("All {} tasks completed, waiting for done signal", completed_tasks.len());
+                }
                 _ => continue,
             }
         }
@@ -300,12 +356,14 @@ mod tests {
     #[derive(Clone)]
     struct MockTaskList {
         updated: Arc<Mutex<bool>>,
+        updates: Arc<Mutex<Vec<String>>>,
     }
 
     impl MockTaskList {
         fn new() -> Self {
             Self {
                 updated: Arc::new(Mutex::new(false)),
+                updates: Arc::new(Mutex::new(Vec::new())),
             }
         }
 
@@ -315,12 +373,31 @@ mod tests {
     }
 
     impl TaskList for MockTaskList {
-        fn update(&self, _current_content: String) -> Result<String> {
+        fn update(&self, current_content: String) -> Result<String> {
             let updated = self.updated.clone();
+            let updates = self.updates.clone();
+            let content_clone = current_content.clone();
+
+            // Track that an update happened
             tokio::spawn(async move {
                 *updated.lock().await = true;
+                updates.lock().await.push(content_clone);
             });
-            Ok("# Task List\n- [x] Task completed\n- [ ] New task".to_string())
+
+            // Simulate task list management
+            if current_content.is_empty() {
+                // First call - create initial task list
+                Ok("# Task List\n- [ ] Complete test".to_string())
+            } else if current_content.contains("- [ ] Complete test") {
+                // Second call - mark task as completed
+                Ok("# Task List\n- [x] Complete test".to_string())
+            } else if current_content.contains("- [ ] New task") {
+                // Mark all tasks as completed
+                Ok("# Task List\n- [x] Task completed\n- [x] New task".to_string())
+            } else {
+                // Default: mark all incomplete tasks as completed
+                Ok(current_content.replace("- [ ]", "- [x]"))
+            }
         }
     }
 
@@ -345,7 +422,7 @@ mod tests {
         // Push initial prompt that will trigger task list usage and done tool
         let event = Event::Prompted(
             "Create a simple task list with one item 'Complete test' using the update_task_list tool, \
-             then immediately call the done tool to complete this task.".to_owned()
+             mark that task as completed, then call the done tool.".to_owned()
         );
         store
             .push_event(STREAM_ID, AGGREGATE_ID, &event, &Default::default())
@@ -361,8 +438,12 @@ mod tests {
             .preamble(
                 "You are a helpful assistant. You have access to the following tools: \
                  update_task_list (to update task lists) and done (to mark completion). \
-                 When asked to create a task list and complete, first call update_task_list, \
-                 then call done to signal completion.".to_owned()
+                 When working with tasks:\n\
+                 1. Use update_task_list to create and manage tasks in planning.md\n\
+                 2. Mark all tasks as completed (with [x]) before calling done\n\
+                 3. The done tool validates that all tasks are completed before success\n\
+                 The MockTaskList returns tasks with both completed [x] and incomplete [ ] items.\n\
+                 You need to mark all tasks as completed before calling done.".to_owned()
             )
             .tools(tools)
             .build()
