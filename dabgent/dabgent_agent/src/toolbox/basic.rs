@@ -362,7 +362,7 @@ impl Tool for DoneTool {
 }
 
 pub trait TaskList: Send + Sync {
-    fn update(&self, current_content: String) -> Result<String>;
+    fn update(&self, current_content: String, instruction: String) -> Result<String>;
 }
 
 pub struct TaskListTool<T: TaskList> {
@@ -428,7 +428,7 @@ impl<T: TaskList> Tool for TaskListTool<T> {
         };
 
         // Update content through TaskList trait
-        let updated_content = match self.task_list.update(current_content) {
+        let updated_content = match self.task_list.update(current_content, args.instruction.clone()) {
             Ok(content) => content,
             Err(e) => return Ok(Err(format!("Failed to update task list: {}", e))),
         };
@@ -533,7 +533,7 @@ mod tests {
     }
 
     impl TaskList for MockTaskList {
-        fn update(&self, current_content: String) -> Result<String> {
+        fn update(&self, current_content: String, _instruction: String) -> Result<String> {
             let mut f = self.update_fn.lock().unwrap();
             Ok(f(current_content))
         }
