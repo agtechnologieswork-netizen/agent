@@ -37,6 +37,7 @@ impl<'a> EventWidget<'a> {
             Event::Prompted(prompt) => self.render_prompted(prompt),
             Event::LlmCompleted(response) => self.render_llm_completed(response),
             Event::ToolCompleted(response) => self.render_tool_completed(response),
+            Event::ArtifactsCollected(files) => self.render_artifacts_collected(files),
         }
     }
 
@@ -207,6 +208,34 @@ impl<'a> EventWidget<'a> {
         }
 
         parts.join(" | ")
+    }
+
+    fn render_artifacts_collected(&self, files: &std::collections::HashMap<String, String>) -> Text<'static> {
+        let mut lines = vec![Line::from(vec![Span::styled(
+            "[ARTIFACTS]",
+            Style::default()
+                .fg(Color::Green)
+                .add_modifier(Modifier::BOLD),
+        )])];
+
+        if self.expanded {
+            for (path, content) in files {
+                lines.push(Line::from(vec![
+                    Span::styled("File: ", Style::default().fg(Color::Cyan)),
+                    Span::raw(path.clone()),
+                ]));
+                lines.push(Line::from(vec![
+                    Span::styled("Size: ", Style::default().fg(Color::Yellow)),
+                    Span::raw(format!("{} chars", content.len())),
+                ]));
+            }
+        } else {
+            lines.push(Line::from(vec![
+                Span::raw(format!("Collected {} files", files.len())),
+            ]));
+        }
+
+        Text::from(lines)
     }
 }
 

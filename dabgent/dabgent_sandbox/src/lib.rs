@@ -21,6 +21,7 @@ pub trait Sandbox {
     fn delete_file(&mut self, path: &str) -> impl Future<Output = Result<()>> + Send;
     fn list_directory(&self, path: &str) -> impl Future<Output = Result<Vec<String>>> + Send;
     fn set_workdir(&mut self, path: &str) -> impl Future<Output = Result<()>> + Send;
+    fn export_directory(&self, container_path: &str, host_path: &str) -> impl Future<Output = Result<String>> + Send;
 
     fn boxed(self) -> Box<dyn SandboxDyn>
     where
@@ -60,6 +61,11 @@ pub trait SandboxDyn: Send + Sync {
         &'a mut self,
         path: &'a str,
     ) -> Pin<Box<dyn Future<Output = Result<()>> + Send + 'a>>;
+    fn export_directory<'a>(
+        &'a self,
+        container_path: &'a str,
+        host_path: &'a str,
+    ) -> Pin<Box<dyn Future<Output = Result<String>> + Send + 'a>>;
 }
 
 impl<T: Sandbox + Send + Sync> SandboxDyn for T {
@@ -111,6 +117,14 @@ impl<T: Sandbox + Send + Sync> SandboxDyn for T {
         path: &'a str,
     ) -> Pin<Box<dyn Future<Output = Result<()>> + Send + 'a>> {
         Box::pin(self.set_workdir(path))
+    }
+
+    fn export_directory<'a>(
+        &'a self,
+        container_path: &'a str,
+        host_path: &'a str,
+    ) -> Pin<Box<dyn Future<Output = Result<String>> + Send + 'a>> {
+        Box::pin(self.export_directory(container_path, host_path))
     }
 }
 

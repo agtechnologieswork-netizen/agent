@@ -1,6 +1,7 @@
 use crate::{handler::Handler, llm::CompletionResponse};
 use rig::completion::Message;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
 impl Handler for Thread {
     type Command = Command;
@@ -44,6 +45,9 @@ impl Handler for Thread {
                         false => State::Tool,
                     };
                     thread.messages.push(response.message());
+                }
+                Event::ArtifactsCollected(_) => {
+                    // This event doesn't affect the thread state, it's just a side effect
                 }
             }
         }
@@ -96,6 +100,7 @@ pub enum Event {
     Prompted(String),
     LlmCompleted(CompletionResponse),
     ToolCompleted(ToolResponse),
+    ArtifactsCollected(HashMap<String, String>),
 }
 
 impl dabgent_mq::Event for Event {
@@ -106,6 +111,7 @@ impl dabgent_mq::Event for Event {
             Event::Prompted(..) => "prompted",
             Event::LlmCompleted(..) => "llm_completed",
             Event::ToolCompleted(..) => "tool_completed",
+            Event::ArtifactsCollected(..) => "artifacts_collected",
         }
     }
 }

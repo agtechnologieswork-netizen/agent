@@ -18,6 +18,7 @@ dabgent_mq = { path = "../dabgent_mq" }
 dabgent_sandbox = { path = "../dabgent_sandbox" }
 clap = { version = "4.5.47", features = ["derive"] }
 tokio-stream = "0.1"
+tempfile = "3.0"
 
 [dev-dependencies]
 dagger-sdk = "0.18.16"

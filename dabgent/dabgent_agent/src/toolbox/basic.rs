@@ -98,8 +98,10 @@ impl Tool for WriteFile {
         sandbox: &mut Box<dyn SandboxDyn>,
     ) -> Result<Result<Self::Output, Self::Error>> {
         let WriteFileArgs { path, contents } = args;
-        sandbox.write_file(&path, &contents).await?;
-        Ok(Ok("success".to_string()))
+        match sandbox.write_file(&path, &contents).await {
+            Ok(_) => Ok(Ok("success".to_string())),
+            Err(e) => Ok(Err(format!("Failed to write file '{}': {}", path, e))),
+        }
     }
 }
 
@@ -142,8 +144,10 @@ impl Tool for ReadFile {
         args: Self::Args,
         sandbox: &mut Box<dyn SandboxDyn>,
     ) -> eyre::Result<Result<Self::Output, Self::Error>> {
-        let result = sandbox.read_file(&args.path).await?;
-        Ok(Ok(result))
+        match sandbox.read_file(&args.path).await {
+            Ok(content) => Ok(Ok(content)),
+            Err(e) => Ok(Err(format!("Failed to read file '{}': {}", args.path, e))),
+        }
     }
 }
 
@@ -186,8 +190,10 @@ impl Tool for LsDir {
         args: Self::Args,
         sandbox: &mut Box<dyn SandboxDyn>,
     ) -> eyre::Result<Result<Self::Output, Self::Error>> {
-        let result = sandbox.list_directory(&args.path).await?;
-        Ok(Ok(result))
+        match sandbox.list_directory(&args.path).await {
+            Ok(result) => Ok(Ok(result)),
+            Err(e) => Ok(Err(format!("Failed to list directory '{}': {}", args.path, e))),
+        }
     }
 }
 
@@ -230,8 +236,10 @@ impl Tool for RmFile {
         args: Self::Args,
         sandbox: &mut Box<dyn SandboxDyn>,
     ) -> eyre::Result<Result<Self::Output, Self::Error>> {
-        sandbox.delete_file(&args.path).await?;
-        Ok(Ok("success".to_string()))
+        match sandbox.delete_file(&args.path).await {
+            Ok(_) => Ok(Ok("success".to_string())),
+            Err(e) => Ok(Err(format!("Failed to delete file '{}': {}", args.path, e))),
+        }
     }
 }
 
@@ -289,12 +297,17 @@ impl Tool for EditFile {
             find,
             replace,
         } = args;
-        let contents = sandbox.read_file(&path).await?;
+        let contents = match sandbox.read_file(&path).await {
+            Ok(content) => content,
+            Err(e) => return Ok(Err(format!("Failed to read file '{}': {}", path, e))),
+        };
         match contents.matches(&find).count() {
             1 => {
                 let contents = contents.replace(&find, &replace);
-                sandbox.write_file(&path, &contents).await?;
-                Ok(Ok("success".to_string()))
+                match sandbox.write_file(&path, &contents).await {
+                    Ok(_) => Ok(Ok("success".to_string())),
+                    Err(e) => Ok(Err(format!("Failed to write file '{}': {}", path, e))),
+                }
             }
             num => Ok(Err(format!("Error: found {num} matches, expected 1"))),
         }
@@ -338,13 +351,13 @@ impl Tool for DoneTool {
         _args: Self::Args,
         sandbox: &mut Box<dyn SandboxDyn>,
     ) -> eyre::Result<eyre::Result<Self::Output, Self::Error>> {
-        self.validator
-            .run(sandbox)
-            .await
-            .map(|result| match result {
+        match self.validator.run(sandbox).await {
+            Ok(result) => Ok(match result {
                 Ok(_) => Ok("success".to_string()),
-                Err(err) => Err(format!("error: {}", err)),
-            })
+                Err(err) => Err(format!("validation error: {}", err)),
+            }),
+            Err(e) => Ok(Err(format!("validator failed: {}", e))),
+        }
     }
 }
 
