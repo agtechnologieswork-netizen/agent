@@ -26,6 +26,8 @@ impl DataAppsValidator {
                 error
             })?;
 
+        tracing::info!("uv sync result: exit_code={}, stdout={}, stderr={}", result.exit_code, result.stdout, result.stderr);
+
         if result.exit_code != 0 {
             let error_msg = format!(
                 "Python dependency installation failed (exit code {}): stderr: {} stdout: {}",
