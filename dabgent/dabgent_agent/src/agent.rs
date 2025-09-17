@@ -6,6 +6,7 @@ use dabgent_mq::EventStore;
 use dabgent_sandbox::SandboxDyn;
 use eyre::Result;
 use rig::completion::ToolDefinition;
+use std::collections::HashMap;
 
 pub struct Worker<T: LLMClient, E: EventStore> {
     llm: T,
@@ -123,11 +124,19 @@ impl<E: EventStore> ToolWorker<E> {
                             content: rig::OneOrMany::many(tools)?,
                         }
                     };
-                    let new_events = thread.process(Command::Tool(command))?;
+                    let new_events = thread.process(Command::Tool(command.clone()))?;
                     for event in new_events.iter() {
                         self.event_store
                             .push_event(stream_id, aggregate_id, event, &Default::default())
                             .await?;
+                    }
+
+                    // Check if this was a "done" tool call that completed successfully
+                    if thread.is_done(&command) {
+                        tracing::info!("Task completed! Collecting artifacts...");
+                        if let Err(e) = self.collect_and_emit_artifacts(stream_id, aggregate_id).await {
+                            tracing::error!("Failed to collect artifacts: {:?}", e);
+                        }
                     }
                 }
                 Err(error) => {
@@ -161,5 +170,78 @@ impl<E: EventStore> ToolWorker<E> {
             }
         }
         Ok(results)
+    }
+
+    async fn collect_and_emit_artifacts(&mut self, stream_id: &str, aggregate_id: &str) -> Result<()> {
+        // Create temp directory for export
+        let temp_dir = tempfile::tempdir()?;
+        let temp_path = temp_dir.path();
+
+        // Export /app directory from container to temp dir
+        tracing::info!("Exporting /app directory from container...");
+        self.sandbox.export_directory("/app", &temp_path.to_string_lossy()).await?;
+
+        // Collect all files from the exported directory
+        tracing::info!("Reading exported files...");
+        let files = Self::collect_exported_files(&temp_path)?;
+        
+        tracing::info!("Collected {} files from sandbox", files.len());
+        for (path, _) in &files {
+            tracing::info!("  - {}", path);
+        }
+
+        // Emit ArtifactsCollected event
+        let event = Event::ArtifactsCollected(files);
+        self.event_store
+            .push_event(stream_id, aggregate_id, &event, &Default::default())
+            .await?;
+
+        tracing::info!("ArtifactsCollected event emitted successfully");
+        Ok(())
+    }
+
+    fn collect_exported_files(export_path: &std::path::Path) -> Result<HashMap<String, String>> {
+        use std::fs;
+        
+        let mut files = HashMap::new();
+        let skip_dirs = ["node_modules", ".git", ".venv", "target", "dist", "build", "__pycache__"];
+        
+        fn collect_dir(
+            dir_path: &std::path::Path,
+            export_root: &std::path::Path,
+            files: &mut HashMap<String, String>,
+            skip_dirs: &[&str],
+        ) -> Result<()> {
+            for entry in fs::read_dir(dir_path)? {
+                let entry = entry?;
+                let path = entry.path();
+                
+                if path.is_dir() {
+                    let dir_name = path.file_name().unwrap().to_string_lossy();
+                    if skip_dirs.contains(&dir_name.as_ref()) {
+                        continue;
+                    }
+                    collect_dir(&path, export_root, files, skip_dirs)?;
+                } else if path.is_file() {
+                    // Get relative path from export root
+                    let rel_path = path.strip_prefix(export_root)?;
+                    let file_path = rel_path.to_string_lossy().to_string();
+                    
+                    // Read file content if it's a text file
+                    match fs::read_to_string(&path) {
+                        Ok(content) => {
+                            files.insert(file_path, content);
+                        }
+                        Err(_) => {
+                            tracing::warn!("Skipping binary file: {:?}", path);
+                        }
+                    }
+                }
+            }
+            Ok(())
+        }
+        
+        collect_dir(export_path, export_path, &mut files, &skip_dirs)?;
+        Ok(files)
     }
 }

@@ -88,6 +88,11 @@ impl crate::Sandbox for Sandbox {
         self.ctr = self.ctr.with_workdir(path);
         Ok(())
     }
+
+    async fn export_directory(&self, container_path: &str, host_path: &str) -> Result<String> {
+        let dir = self.ctr.directory(container_path);
+        dir.export(host_path).await.map_err(Into::into)
+    }
 }
 
 impl crate::SandboxFork for Sandbox {

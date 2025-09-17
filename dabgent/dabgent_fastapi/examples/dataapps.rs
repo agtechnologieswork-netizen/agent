@@ -199,3 +199,4 @@ fn collect_files_recursive(template_path: &Path, base_sandbox_path: &str) -> Res
     collect_dir(template_path, template_path, base_sandbox_path, &mut files, &skip_dirs)?;
     Ok(files)
 }
+

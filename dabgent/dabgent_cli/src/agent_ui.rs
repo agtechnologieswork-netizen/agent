@@ -203,6 +203,9 @@ fn calculate_event_height(event: &Event, expanded: bool) -> u16 {
                 }
                 lines as u16
             }
+            Event::ArtifactsCollected(files) => {
+                1 + files.len() as u16 // Header plus one line per file
+            }
         }
     }
 }

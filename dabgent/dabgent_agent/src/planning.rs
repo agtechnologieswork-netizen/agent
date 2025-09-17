@@ -119,6 +119,7 @@ impl<S: EventStore> PlanningAgent<S> {
                         thread::Event::Prompted(p) => format!("🎯 Starting task: {}", p),
                         thread::Event::LlmCompleted(_) => "🤔 Planning next steps...".to_string(),
                         thread::Event::ToolCompleted(_) => "🔧 Executing tools...".to_string(),
+                        thread::Event::ArtifactsCollected(files) => format!("📁 Collected {} artifacts", files.len()),
                     };
                     on_status(status).await?;
                     if matches!(Thread::fold(&events).state, thread::State::Done) {
