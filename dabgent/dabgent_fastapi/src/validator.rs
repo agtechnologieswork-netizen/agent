@@ -12,7 +12,7 @@ impl Default for DataAppsValidator {
 
 impl DataAppsValidator {
     pub fn new() -> Self {
-        Self::default()
+        Self
     }
 
     async fn check_python_dependencies(&self, sandbox: &mut Box<dyn SandboxDyn>) -> Result<(), String> {
