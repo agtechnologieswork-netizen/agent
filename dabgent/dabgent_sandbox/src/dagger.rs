@@ -7,19 +7,20 @@ use std::{io::Write, sync::Arc, future::Future};
 #[derive(Clone)]
 pub struct Sandbox {
     ctr: dagger_sdk::Container,
+    client: dagger_sdk::DaggerConn,
 }
 
 impl Sandbox {
-    /// Create a sandbox from an existing Dagger container
-    pub fn from_container(ctr: dagger_sdk::Container) -> Self {
-        Self { ctr }
+    /// Create a sandbox from an existing Dagger container and client
+    pub fn from_container(ctr: dagger_sdk::Container, client: dagger_sdk::DaggerConn) -> Self {
+        Self { ctr, client }
     }
 }
 
 impl crate::Sandbox for Sandbox {
     async fn exec(&mut self, command: &str) -> Result<ExecResult> {
         let ctr = self.ctr.clone();
-        let command: Vec<String> = command.split_whitespace().map(String::from).collect();
+        let command = vec!["sh".to_string(), "-c".to_string(), command.to_string()];
         let opts = dagger_sdk::ContainerWithExecOptsBuilder::default()
             .expect(dagger_sdk::ReturnType::Any)
             .build()
@@ -59,11 +60,10 @@ impl crate::Sandbox for Sandbox {
         }
 
         // Use with_directory to add all files at once - this prevents deep query chains
-        // We need to use a Dagger client reference, but we don't have direct access to it
-        // For now, let's use multiple with_new_file calls but batch them
-        for (file_path, contents) in files {
-            self.ctr = self.ctr.with_new_file(file_path, contents);
-        }
+        let host_dir = self.client.host().directory(temp_path.to_string_lossy().to_string());
+        
+        // Mount the entire temporary directory to root, which will merge all files
+        self.ctr = self.ctr.with_directory("/", host_dir);
 
         // Force evaluation to ensure files are written
         let _ = self.ctr.sync().await?;
@@ -96,7 +96,8 @@ impl crate::SandboxFork for Sandbox {
         Self: Sized,
     {
         let ctr = self.ctr.clone();
-        Ok(Sandbox { ctr })
+        let client = self.client.clone();
+        Ok(Sandbox { ctr, client })
     }
 }
 

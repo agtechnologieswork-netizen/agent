@@ -39,7 +39,7 @@ async fn sandbox(client: &dagger_sdk::DaggerConn) -> Result<DaggerSandbox> {
         .build()?;
     let ctr = client.container().build_opts(client.host().directory("./examples"), opts);
     ctr.sync().await?;
-    Ok(DaggerSandbox::from_container(ctr))
+    Ok(DaggerSandbox::from_container(ctr, client.clone()))
 }
 
 async fn store() -> SqliteStore {

@@ -147,6 +147,10 @@ where
             tracing::info!(?thread.state, ?event, "event");
             match thread.state {
                 thread::State::Done => break,
+                thread::State::UserWait => {
+                    tracing::info!("Waiting for user input");
+                    continue;
+                }
                 _ => continue,
             }
         }

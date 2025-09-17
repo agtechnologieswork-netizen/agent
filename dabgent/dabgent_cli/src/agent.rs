@@ -127,5 +127,5 @@ async fn create_sandbox(client: &dagger_sdk::DaggerConn) -> color_eyre::Result<D
             .build()?,
     );
     ctr.sync().await?;
-    Ok(DaggerSandbox::from_container(ctr))
+    Ok(DaggerSandbox::from_container(ctr, client.clone()))
 }
