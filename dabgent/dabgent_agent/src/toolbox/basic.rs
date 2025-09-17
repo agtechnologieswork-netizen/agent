@@ -459,16 +459,56 @@ pub fn toolset<T: Validator + Send + Sync + 'static>(validator: T) -> Vec<Box<dy
     ]
 }
 
+pub struct TaskListValidator<V: Validator> {
+    inner_validator: V,
+}
+
+impl<V: Validator> TaskListValidator<V> {
+    pub fn new(inner_validator: V) -> Self {
+        Self { inner_validator }
+    }
+}
+
+impl<V: Validator + Send + Sync> Validator for TaskListValidator<V> {
+    async fn run(&self, sandbox: &mut Box<dyn SandboxDyn>) -> Result<Result<(), String>> {
+        match sandbox.read_file("planning.md").await {
+            Ok(content) => {
+                // Check for incomplete tasks with various formats
+                let has_incomplete = content.contains("[ ]");
+
+                // Check for completed tasks with various formats
+                let has_completed = content.contains("[x]") || content.contains("[X]");
+
+                if has_incomplete {
+                    return Ok(Err("Not all tasks are completed. Please complete all tasks in planning.md before marking as done.".to_string()));
+                }
+
+                if !has_completed {
+                    return Ok(Err("No completed tasks found in planning.md. Please add and complete tasks before marking as done.".to_string()));
+                }
+            }
+            Err(_) => {
+                // If planning.md doesn't exist, that's okay - continue with inner validator
+            }
+        }
+
+        self.inner_validator.run(sandbox).await
+    }
+}
+
 pub fn toolset_with_tasklist<V: Validator + Send + Sync + 'static, T: TaskList + 'static>(
     validator: V,
     task_list: T,
 ) -> Vec<Box<dyn super::ToolDyn>> {
+    // Wrap the validator with TaskListValidator to ensure tasks are checked
+    let task_list_validator = TaskListValidator::new(validator);
+
     vec![
         Box::new(Bash),
         Box::new(ReadFile),
         Box::new(EditFile),
         Box::new(TaskListTool::new(task_list)),
-        Box::new(DoneTool::new(validator)),
+        Box::new(DoneTool::new(task_list_validator)),
     ]
 }
 
@@ -496,6 +536,75 @@ mod tests {
         fn update(&self, current_content: String) -> Result<String> {
             let mut f = self.update_fn.lock().unwrap();
             Ok(f(current_content))
+        }
+    }
+
+    #[tokio::test]
+    async fn test_task_list_validator() {
+        use dabgent_sandbox::dagger::{ConnectOpts, Sandbox as DaggerSandbox};
+
+        let opts = ConnectOpts::default();
+        let result = opts.connect(|client| async move {
+            let container = client
+                .container()
+                .from("python:3.11-slim")
+                .with_workdir("/workspace");
+
+            container.sync().await?;
+            let mut sandbox: Box<dyn SandboxDyn> = Box::new(DaggerSandbox::from_container(container));
+
+            // Create a mock inner validator that always passes
+            struct AlwaysPassValidator;
+            impl Validator for AlwaysPassValidator {
+                async fn run(&self, _sandbox: &mut Box<dyn SandboxDyn>) -> Result<Result<(), String>> {
+                    Ok(Ok(()))
+                }
+            }
+
+            let task_list_validator = TaskListValidator::new(AlwaysPassValidator);
+
+            // Test 1: No planning.md file - should pass (file is optional)
+            let result = Validator::run(&task_list_validator, &mut sandbox).await?;
+            assert!(result.is_ok(), "Should pass when planning.md doesn't exist");
+
+            // Test 2: planning.md with incomplete tasks - should fail
+            sandbox.write_file("planning.md", "# Tasks\n- [ ] Task 1\n- [x] Task 2").await?;
+            let result = Validator::run(&task_list_validator, &mut sandbox).await?;
+            assert!(result.is_err(), "Should fail when there are incomplete tasks");
+            assert!(result.unwrap_err().contains("Not all tasks are completed"));
+
+            // Test 3: planning.md with all tasks completed - should pass
+            sandbox.write_file("planning.md", "# Tasks\n- [x] Task 1\n- [x] Task 2").await?;
+            let result = Validator::run(&task_list_validator, &mut sandbox).await?;
+            assert!(result.is_ok(), "Should pass when all tasks are completed");
+
+            // Test 4: planning.md with no tasks - should fail
+            sandbox.write_file("planning.md", "# Tasks\nNo tasks defined yet").await?;
+            let result = Validator::run(&task_list_validator, &mut sandbox).await?;
+            assert!(result.is_err(), "Should fail when no tasks are defined");
+            assert!(result.unwrap_err().contains("No completed tasks found"));
+
+            // Test with inner validator that fails
+            struct AlwaysFailValidator;
+            impl Validator for AlwaysFailValidator {
+                async fn run(&self, _sandbox: &mut Box<dyn SandboxDyn>) -> Result<Result<(), String>> {
+                    Ok(Err("Inner validation failed".to_string()))
+                }
+            }
+
+            let task_list_validator_fail = TaskListValidator::new(AlwaysFailValidator);
+
+            // Test 5: All tasks completed but inner validator fails - should fail
+            sandbox.write_file("planning.md", "# Tasks\n- [x] Task 1\n- [x] Task 2").await?;
+            let result = Validator::run(&task_list_validator_fail, &mut sandbox).await?;
+            assert!(result.is_err(), "Should fail when inner validator fails");
+            assert_eq!(result.unwrap_err(), "Inner validation failed");
+
+            Ok::<(), eyre::Error>(())
+        }).await;
+
+        if result.is_err() {
+            eprintln!("Skipping test - Docker/Dagger not available");
         }
     }
 
