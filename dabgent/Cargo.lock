@@ -625,6 +625,7 @@ dependencies = [
  "dagger-sdk",
  "dotenvy",
  "eyre",
+ "regex",
  "rig-core",
  "serde",
  "serde_json",

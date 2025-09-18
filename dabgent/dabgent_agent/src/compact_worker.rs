@@ -1,6 +1,7 @@
 use crate::thread::{Event, ToolResponse};
 use dabgent_mq::{db::{Query, Metadata}, EventStore};
 use eyre::Result;
+use regex::Regex;
 use serde_json::json;
 use uuid::Uuid;
 
@@ -110,7 +111,8 @@ impl<E: EventStore> CompactWorker<E> {
                                 if let Ok(metadata) = serde_json::from_value::<Metadata>(prompted.metadata.clone()) {
                                     if let Some(parent_id) = metadata.causation_id {
                                         // Extract compacted text and send back to parent
-                                        let compacted_text = self.extract_text_from_completion(response);
+                                        let raw_text = self.extract_text_from_completion(response);
+                                        let compacted_text = self.extract_error_from_response(&raw_text);
                                         let tool_response = self.build_tool_response(&compacted_text);
 
                                         self.event_store
@@ -141,33 +143,25 @@ impl<E: EventStore> CompactWorker<E> {
     }
 
     fn estimate_response_length(&self, response: &ToolResponse) -> usize {
-        response
-            .content
-            .iter()
-            .map(|content| match content {
-                rig::message::UserContent::Text(text) => text.text.len(),
-                rig::message::UserContent::ToolResult(tool_result) => {
-                    tool_result
-                        .content
-                        .iter()
-                        .map(|content| match content {
-                            rig::message::ToolResultContent::Text(text) => text.text.len(),
-                            rig::message::ToolResultContent::Image(_) => 50, // Rough estimate for image refs
-                        })
-                        .sum()
-                }
-                rig::message::UserContent::Image(_) => 50, // Rough estimate for image refs
-                rig::message::UserContent::Audio(_) => 100, // Rough estimate for audio refs
-                rig::message::UserContent::Video(_) => 100, // Rough estimate for video refs
-                rig::message::UserContent::Document(_) => 200, // Rough estimate for document refs
-            })
-            .sum()
+        // Focus on text content only - extract text representation and measure that
+        self.extract_content_for_prompt(response).len()
     }
 
     fn build_compact_prompt(&self, response: &ToolResponse) -> String {
         let content = self.extract_content_for_prompt(response);
+        
         format!(
-            "Compact the following tool output to under {} characters while preserving the most critical information and error details:\n\n{}",
+            r#"You need to compact an error message to be concise while keeping the most important information.
+The error message is expected be reduced to be less than {} characters approximately.
+Keep the key error type, file paths, line numbers, and the core issue.
+Remove verbose stack traces, repeated information, and non-essential details not helping to understand the root cause.
+
+Output the compacted error message wrapped in <error> tags.
+
+The error message to compact is:
+<message>
+{}
+</message>"#,
             self.max_error_length,
             content
         )
@@ -177,23 +171,26 @@ impl<E: EventStore> CompactWorker<E> {
         response
             .content
             .iter()
-            .map(|content| match content {
-                rig::message::UserContent::Text(text) => text.text.clone(),
+            .filter_map(|content| match content {
+                rig::message::UserContent::Text(text) => Some(text.text.clone()),
                 rig::message::UserContent::ToolResult(tool_result) => {
-                    tool_result
+                    let text_parts: Vec<String> = tool_result
                         .content
                         .iter()
-                        .map(|content| match content {
-                            rig::message::ToolResultContent::Text(text) => text.text.clone(),
-                            rig::message::ToolResultContent::Image(_) => "[image]".to_string(),
+                        .filter_map(|content| match content {
+                            rig::message::ToolResultContent::Text(text) => Some(text.text.clone()),
+                            rig::message::ToolResultContent::Image(_) => None, // Skip non-text content
                         })
-                        .collect::<Vec<_>>()
-                        .join("\n")
+                        .collect();
+                    
+                    if text_parts.is_empty() {
+                        None
+                    } else {
+                        Some(text_parts.join("\n"))
+                    }
                 }
-                rig::message::UserContent::Image(_) => "[image]".to_string(),
-                rig::message::UserContent::Audio(_) => "[audio]".to_string(),
-                rig::message::UserContent::Video(_) => "[video]".to_string(),
-                rig::message::UserContent::Document(_) => "[document]".to_string(),
+                // Skip all other modalities for now - focus on text only
+                _ => None,
             })
             .collect::<Vec<_>>()
             .join("\n")
@@ -209,6 +206,29 @@ impl<E: EventStore> CompactWorker<E> {
             })
             .collect::<Vec<_>>()
             .join("\n")
+    }
+
+    fn extract_tag(source: &str, tag: &str) -> Option<String> {
+        // Match Python implementation: rf"<{tag}>(.*?)</{tag}>" with DOTALL
+        let pattern = format!(r"(?s)<{}>(.*?)</{}>", regex::escape(tag), regex::escape(tag));
+        if let Ok(regex) = Regex::new(&pattern) {
+            if let Some(captures) = regex.captures(source) {
+                if let Some(content) = captures.get(1) {
+                    return Some(content.as_str().trim().to_string());
+                }
+            }
+        }
+        None
+    }
+
+    fn extract_error_from_response(&self, response_text: &str) -> String {
+        // Use extract_tag utility like in Python implementation
+        if let Some(extracted) = Self::extract_tag(response_text, "error") {
+            extracted
+        } else {
+            // If no <error> tags found, return the raw response
+            response_text.to_string()
+        }
     }
 
     fn build_tool_response(&self, compacted_text: &str) -> ToolResponse {
