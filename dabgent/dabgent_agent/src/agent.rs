@@ -81,16 +81,6 @@ impl<T: LLMClient, E: EventStore> Worker<T, E> {
             .max_tokens(self.max_tokens);
         self.llm.completion(completion).await
     }
-
-    pub fn temperature(mut self, temperature: f64) -> Self {
-        self.temperature = temperature;
-        self
-    }
-
-    pub fn max_tokens(mut self, max_tokens: u64) -> Self {
-        self.max_tokens = max_tokens;
-        self
-    }
 }
 
 pub struct DirectToolExecutor {

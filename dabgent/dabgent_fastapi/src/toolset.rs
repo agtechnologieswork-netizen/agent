@@ -64,7 +64,7 @@ impl Tool for UvAdd {
     }
 }
 
-pub fn dataapps_toolset<T: Validator + Send + Sync + 'static>(validator: T) -> Vec<Box<dyn ToolDyn>> {
+pub fn dataapps_toolset<T: Validator>(validator: T) -> Vec<Box<dyn ToolDyn>> {
     vec![
         Box::new(WriteFile),
         Box::new(ReadFile),

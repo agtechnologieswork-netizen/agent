@@ -1,6 +1,5 @@
 use rig::{client::CompletionClient, completion::CompletionModel};
 use serde::{Deserialize, Serialize};
-use std::pin::Pin;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Completion {
@@ -113,29 +112,6 @@ pub trait LLMClient: Clone + Send + Sync {
         &self,
         completion: Completion,
     ) -> impl Future<Output = eyre::Result<CompletionResponse>> + Send;
-
-    fn boxed(self) -> Box<dyn LLMClientDyn>
-    where
-        Self: Sized + 'static,
-    {
-        Box::new(self)
-    }
-}
-
-pub trait LLMClientDyn: Send + Sync {
-    fn completion(
-        &self,
-        completion: Completion,
-    ) -> Pin<Box<dyn Future<Output = eyre::Result<CompletionResponse>> + Send + '_>>;
-}
-
-impl<T: LLMClient> LLMClientDyn for T {
-    fn completion(
-        &self,
-        completion: Completion,
-    ) -> Pin<Box<dyn Future<Output = eyre::Result<CompletionResponse>> + Send + '_>> {
-        Box::pin(self.completion(completion))
-    }
 }
 
 impl LLMClient for rig::providers::anthropic::Client {

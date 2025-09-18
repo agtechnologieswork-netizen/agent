@@ -59,7 +59,7 @@ impl<T: Tool> ToolDyn for T {
     }
 }
 
-pub trait Validator {
+pub trait Validator: Send + Sync + 'static {
     fn run(
         &self,
         sandbox: &mut Box<dyn SandboxDyn>,
@@ -67,7 +67,7 @@ pub trait Validator {
 
     fn boxed(self) -> Box<dyn ValidatorDyn>
     where
-        Self: Sized + Send + Sync + 'static,
+        Self: Sized,
     {
         Box::new(self)
     }
@@ -80,7 +80,7 @@ pub trait ValidatorDyn: Send + Sync {
     ) -> Pin<Box<dyn Future<Output = Result<Result<(), String>>> + Send + 'a>>;
 }
 
-impl<T: Validator + Send + Sync + 'static> ValidatorDyn for T {
+impl<T: Validator> ValidatorDyn for T {
     fn run<'a>(
         &'a self,
         sandbox: &'a mut Box<dyn SandboxDyn>,
