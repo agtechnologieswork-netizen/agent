@@ -1,10 +1,10 @@
-use crate::{App, ChatEvent};
+use crate::App;
+use crate::widgets::event_as_text;
 use dabgent_mq::db::EventStore;
 use ratatui::{
     buffer::Buffer,
     layout::{Constraint, Direction, Layout, Rect},
-    style::{Color, Style},
-    text::{Line, Span},
+    style::{Style, Stylize},
     widgets::{Block, Borders, List, ListItem, Paragraph, Widget},
 };
 
@@ -25,36 +25,30 @@ impl<S: EventStore> Widget for &App<S> {
 
         self.draw_messages(content_chunks[0], buf);
         self.draw_input(content_chunks[1], buf);
-        self.draw_event_log(main_chunks[1], buf);
     }
 }
 
 impl<S: EventStore> App<S> {
     fn draw_messages(&self, area: Rect, buf: &mut Buffer) {
-        let messages: Vec<ListItem> = self
-            .session
-            .messages()
+        // let mut state = ListState::default(); // move to parent state
+
+        let items: Vec<ListItem> = self
+            .history
             .iter()
-            .map(|event| {
-                let (prefix, content, style) = match event {
-                    ChatEvent::UserMessage { content, .. } => {
-                        ("User: ", content.as_str(), Style::default().fg(Color::Cyan))
-                    }
-                    ChatEvent::AgentMessage { content, .. } => (
-                        "Agent: ",
-                        content.as_str(),
-                        Style::default().fg(Color::Green),
-                    ),
-                };
-                ListItem::new(Line::from(vec![
-                    Span::styled(prefix, style),
-                    Span::raw(content),
-                ]))
-            })
+            .map(|event| ListItem::new(event_as_text(event)))
             .collect();
 
-        let messages_list =
-            List::new(messages).block(Block::default().borders(Borders::ALL).title("Messages"));
+        let messages_list = List::new(items)
+            .block(Block::default().borders(Borders::ALL).title("Event List"))
+            .highlight_style(Style::default().yellow())
+            .highlight_symbol(">> ");
+
+        // StatefulWidget::render(list, area, buf, &mut state);
+
+        // let messages: Vec<ListItem> = vec![ListItem::from("todo")];
+
+        // let messages_list =
+        //     List::new(messages).block(Block::default().borders(Borders::ALL).title("Messages"));
 
         messages_list.render(area, buf);
     }
@@ -69,42 +63,5 @@ impl<S: EventStore> App<S> {
             );
 
         input.render(area, buf);
-    }
-
-    fn draw_event_log(&self, area: Rect, buf: &mut Buffer) {
-        let events: Vec<ListItem> = self
-            .event_log
-            .iter()
-            .rev()
-            .take(area.height as usize - 2)
-            .map(|entry| {
-                // Parse the formatted string to apply colors
-                let parts: Vec<&str> = entry.formatted.splitn(3, ' ').collect();
-                if parts.len() >= 3 {
-                    // Format: "chat:1 👤💬 message"
-                    let topic_seq = parts[0];
-                    let icons = parts[1];
-                    let message = parts[2];
-                    
-                    ListItem::new(Line::from(vec![
-                        Span::styled(format!("{} {} ", topic_seq, icons), Style::default()),
-                        Span::raw(message),
-                    ]))
-                } else {
-                    ListItem::new(Line::from(entry.formatted.as_str()))
-                }
-            })
-            .collect();
-
-        let event_list = List::new(events)
-            .block(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .title("Events")
-                    .border_style(Style::default().fg(Color::Magenta)),
-            )
-            .style(Style::default().fg(Color::White));
-
-        event_list.render(area, buf);
     }
 }

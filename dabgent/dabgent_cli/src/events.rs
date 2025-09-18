@@ -1,6 +1,6 @@
-use crate::session::ChatEvent;
 use color_eyre::eyre::OptionExt;
 use crossterm::event::Event as CrosstermEvent;
+use dabgent_agent::thread::{self};
 use dabgent_mq::db::EventStream;
 use std::time::Duration;
 use tokio::sync::mpsc;
@@ -20,7 +20,7 @@ pub enum AppEvent {
 pub enum Event {
     Tick,
     Crossterm(CrosstermEvent),
-    Chat(ChatEvent),
+    Thread(thread::Event),
     App(AppEvent),
 }
 
@@ -30,7 +30,7 @@ pub struct EventHandler {
 }
 
 impl EventHandler {
-    pub fn new(events_stream: EventStream<ChatEvent>) -> Self {
+    pub fn new(events_stream: EventStream<thread::Event>) -> Self {
         let (sender, receiver) = mpsc::unbounded_channel();
         let actor = EventTask::new(sender.clone());
         tokio::spawn(async { actor.run().await });
@@ -53,11 +53,11 @@ impl EventHandler {
 
 pub struct StoreTask {
     sender: mpsc::UnboundedSender<Event>,
-    receiver: EventStream<ChatEvent>,
+    receiver: EventStream<thread::Event>,
 }
 
 impl StoreTask {
-    pub fn new(sender: mpsc::UnboundedSender<Event>, receiver: EventStream<ChatEvent>) -> Self {
+    pub fn new(sender: mpsc::UnboundedSender<Event>, receiver: EventStream<thread::Event>) -> Self {
         Self { sender, receiver }
     }
 
@@ -65,7 +65,7 @@ impl StoreTask {
         while let Some(event) = self.receiver.next().await {
             match event {
                 Ok(event) => {
-                    let _ = self.sender.send(Event::Chat(event));
+                    let _ = self.sender.send(Event::Thread(event));
                 }
                 Err(error) => {
                     tracing::error!("Error receiving app event: {}", error);
