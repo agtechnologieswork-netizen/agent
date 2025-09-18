@@ -16,7 +16,7 @@ impl Handler for Thread {
             (State::User | State::Tool, Command::Completion(response)) => {
                 Ok(vec![Event::LlmCompleted(response)])
             }
-            (State::Agent, Command::Tool(response)) => Ok(vec![Event::ToolCompleted(response)]),
+            (State::Agent, Command::Tool(response)) => Ok(vec![Event::ToolCompletedRaw(response)]),
             (state, command) => Err(Error::Other(format!(
                 "Invalid command {command:?} for state {state:?}"
             ))),
@@ -38,6 +38,9 @@ impl Handler for Thread {
                     };
                     thread.update_done_call(response);
                     thread.messages.push(response.message());
+                }
+                Event::ToolCompletedRaw(_) => {
+                    // Raw events don't affect thread state - they're processed by CompactWorker
                 }
                 Event::ToolCompleted(response) => {
                     thread.state = match thread.is_done(response) {
@@ -99,6 +102,7 @@ pub enum Command {
 pub enum Event {
     Prompted(String),
     LlmCompleted(CompletionResponse),
+    ToolCompletedRaw(ToolResponse),
     ToolCompleted(ToolResponse),
     ArtifactsCollected(HashMap<String, String>),
 }
@@ -110,6 +114,7 @@ impl dabgent_mq::Event for Event {
         match self {
             Event::Prompted(..) => "prompted",
             Event::LlmCompleted(..) => "llm_completed",
+            Event::ToolCompletedRaw(..) => "tool_completed_raw",
             Event::ToolCompleted(..) => "tool_completed",
             Event::ArtifactsCollected(..) => "artifacts_collected",
         }

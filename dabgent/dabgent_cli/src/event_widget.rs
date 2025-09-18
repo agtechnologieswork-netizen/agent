@@ -36,6 +36,7 @@ impl<'a> EventWidget<'a> {
         match self.event {
             Event::Prompted(prompt) => self.render_prompted(prompt),
             Event::LlmCompleted(response) => self.render_llm_completed(response),
+            Event::ToolCompletedRaw(response) => self.render_tool_completed_raw(response),
             Event::ToolCompleted(response) => self.render_tool_completed(response),
             Event::ArtifactsCollected(files) => self.render_artifacts_collected(files),
         }
@@ -156,6 +157,42 @@ impl<'a> EventWidget<'a> {
         } else {
             let summary = self.summarize_tool_response(response);
             lines.push(Line::from(format!("  {}", summary)));
+        }
+
+        Text::from(lines)
+    }
+
+    fn render_tool_completed_raw(&self, response: &dabgent_agent::thread::ToolResponse) -> Text<'static> {
+        let mut lines = vec![Line::from(vec![Span::styled(
+            "🔧 Tool Completed (Raw)",
+            Style::default().fg(Color::Blue).add_modifier(Modifier::BOLD),
+        )])];
+
+        if self.expanded {
+            for item in response.content.iter() {
+                match item {
+                    rig::message::UserContent::Text(text) => {
+                        lines.push(Line::from(format!("  Text: {}", text.text)));
+                    }
+                    rig::message::UserContent::ToolResult(result) => {
+                        lines.push(Line::from(format!("  🛠️ Tool: {}", result.id)));
+                        for content in result.content.iter() {
+                            match content {
+                                rig::message::ToolResultContent::Text(text) => {
+                                    for line in text.text.lines() {
+                                        lines.push(Line::from(format!("    {}", line)));
+                                    }
+                                }
+                                _ => continue,
+                            }
+                        }
+                    }
+                    _ => continue,
+                }
+            }
+        } else {
+            let summary = self.summarize_tool_response(response);
+            lines.push(Line::from(format!("  {} (Raw)", summary)));
         }
 
         Text::from(lines)

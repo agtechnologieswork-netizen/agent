@@ -183,7 +183,7 @@ fn calculate_event_height(event: &Event, expanded: bool) -> u16 {
                 }
                 lines as u16
             }
-            Event::ToolCompleted(response) => {
+            Event::ToolCompletedRaw(response) | Event::ToolCompleted(response) => {
                 let mut lines = 1;
                 for item in response.content.iter() {
                     match item {
