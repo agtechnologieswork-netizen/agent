@@ -386,7 +386,7 @@ pub struct TaskListArgs {
     pub instruction: String,
 }
 
-impl<T: TaskList + 'static> Tool for TaskListTool<T> {
+impl<T: TaskList> Tool for TaskListTool<T> {
     type Args = TaskListArgs;
     type Output = String;
     type Error = String;
