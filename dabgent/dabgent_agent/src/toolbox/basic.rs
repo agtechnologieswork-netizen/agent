@@ -551,7 +551,7 @@ mod tests {
                 .with_workdir("/workspace");
 
             container.sync().await?;
-            let mut sandbox: Box<dyn SandboxDyn> = Box::new(DaggerSandbox::from_container(container));
+            let mut sandbox: Box<dyn SandboxDyn> = Box::new(DaggerSandbox::from_container(container, client.clone()));
 
             // Create a mock inner validator that always passes
             struct AlwaysPassValidator;
@@ -622,7 +622,7 @@ mod tests {
                 .with_exec(vec!["sh", "-c", "echo 'test environment ready'"]);
 
             container.sync().await?;
-            let mut sandbox: Box<dyn SandboxDyn> = Box::new(DaggerSandbox::from_container(container));
+            let mut sandbox: Box<dyn SandboxDyn> = Box::new(DaggerSandbox::from_container(container, client.clone()));
 
             // Create mock task list that adds "- Task completed" to content
             let mock_tasklist = MockTaskList::new(|content| {
