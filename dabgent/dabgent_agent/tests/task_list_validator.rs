@@ -26,7 +26,7 @@ async fn test_task_list_validator_with_done_tool() {
             .with_workdir("/workspace");
 
         container.sync().await?;
-        let mut sandbox: Box<dyn SandboxDyn> = Box::new(DaggerSandbox::from_container(container));
+        let mut sandbox: Box<dyn SandboxDyn> = Box::new(DaggerSandbox::from_container(container, client.clone()));
 
         // Create TaskListValidator with SimpleValidator
         let validator = TaskListValidator::new(SimpleValidator);
@@ -114,7 +114,7 @@ async fn test_task_list_edge_cases() {
             .with_workdir("/workspace");
 
         container.sync().await?;
-        let mut sandbox: Box<dyn SandboxDyn> = Box::new(DaggerSandbox::from_container(container));
+        let mut sandbox: Box<dyn SandboxDyn> = Box::new(DaggerSandbox::from_container(container, client.clone()));
 
         struct AlwaysPassValidator;
         impl Validator for AlwaysPassValidator {
