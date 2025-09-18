@@ -292,10 +292,6 @@ mod tests {
         async fn add_file(&self, path: &str, content: &str) {
             self.files.lock().await.insert(path.to_string(), content.to_string());
         }
-
-        async fn get_file(&self, path: &str) -> Option<String> {
-            self.files.lock().await.get(path).cloned()
-        }
     }
 
     impl Sandbox for MockSandbox {
@@ -341,6 +337,10 @@ mod tests {
         async fn set_workdir(&mut self, _path: &str) -> Result<()> {
             Ok(())
         }
+
+        async fn export_directory(&self, _container_path: &str, _host_path: &str) -> Result<String> {
+            Ok("mock_export".to_string())
+        }
     }
 
     // SandboxDyn is automatically implemented for types that implement Sandbox + Send + Sync
@@ -373,7 +373,7 @@ mod tests {
     }
 
     impl TaskList for MockTaskList {
-        fn update(&self, current_content: String) -> Result<String> {
+        fn update(&self, current_content: String, _instruction: String) -> Result<String> {
             let updated = self.updated.clone();
             let updates = self.updates.clone();
             let content_clone = current_content.clone();

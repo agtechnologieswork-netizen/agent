@@ -41,7 +41,7 @@ async fn create_real_sandbox() -> Result<Box<dyn SandboxDyn>> {
             .with_exec(vec!["uv", "init", "--quiet", "--name", "test-project"]);
 
         container.sync().await?;
-        let sandbox = DaggerSandbox::from_container(container);
+        let sandbox = DaggerSandbox::from_container(container, conn.clone());
 
         // Store the sandbox
         *sandbox_clone.lock().await = Some(sandbox);
@@ -98,11 +98,11 @@ impl RealTaskList {
 }
 
 impl TaskList for RealTaskList {
-    fn update(&self, current_content: String) -> Result<String> {
+    fn update(&self, current_content: String, instruction: String) -> Result<String> {
         let updates = self.updates.clone();
 
         // Track the update
-        let update_record = format!("Update at {}: {}", chrono::Utc::now(), current_content);
+        let update_record = format!("Update at {}: {} - Instruction: {}", chrono::Utc::now(), current_content, instruction);
         tokio::spawn(async move {
             updates.lock().await.push(update_record);
         });
