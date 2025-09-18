@@ -143,7 +143,6 @@ impl<S: EventStore> PlanningAgent<S> {
                                     text.push('\n');
                                 }
                             }
-                            eprintln!("DEBUG LLM Response: {}", text);
                             if !text.is_empty() {
                                 text.trim().to_string()
                             } else {
@@ -151,20 +150,7 @@ impl<S: EventStore> PlanningAgent<S> {
                             }
                         },
                         thread::Event::ToolCompleted(tool_response) => {
-                            // Extract ALL tool results for debugging
-                            let mut all_results = String::new();
-                            for item in tool_response.content.iter() {
-                                if let rig::message::UserContent::ToolResult(result) = item {
-                                    for content in result.content.iter() {
-                                        if let rig::message::ToolResultContent::Text(t) = content {
-                                            all_results.push_str(&format!("Tool output: {}\n", t.text));
-                                        }
-                                    }
-                                }
-                            }
-                            eprintln!("DEBUG Tool Results: {}", all_results);
-
-                            // Try to extract planning content
+                            // Extract tool results
                             let mut text = String::new();
                             for item in tool_response.content.iter() {
                                 if let rig::message::UserContent::ToolResult(result) = item {
@@ -184,12 +170,8 @@ impl<S: EventStore> PlanningAgent<S> {
                                     if !text.is_empty() { break; }
                                 }
                             }
-
                             if !text.is_empty() {
                                 text
-                            } else if !all_results.is_empty() {
-                                // Send any tool output if we have it
-                                all_results.trim().to_string()
                             } else {
                                 "🔧 Working...".to_string()
                             }
