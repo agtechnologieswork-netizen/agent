@@ -6,7 +6,10 @@ use dabgent_mq::EventStore;
 use dabgent_sandbox::SandboxDyn;
 use eyre::Result;
 use rig::completion::ToolDefinition;
+use serde_json::Value;
 use std::collections::HashMap;
+use std::sync::Arc;
+use tokio::sync::Mutex;
 
 pub struct Worker<T: LLMClient, E: EventStore> {
     llm: T,
@@ -90,18 +93,59 @@ impl<T: LLMClient, E: EventStore> Worker<T, E> {
     }
 }
 
+pub struct DirectToolExecutor {
+    sandbox: Arc<Mutex<Box<dyn SandboxDyn>>>,
+    tool_registry: HashMap<String, Arc<dyn Fn(Value, Arc<Mutex<Box<dyn SandboxDyn>>>) -> Result<Value> + Send + Sync>>,
+}
+
+impl DirectToolExecutor {
+    pub fn new(sandbox: Box<dyn SandboxDyn>) -> Self {
+        let mut registry = HashMap::new();
+        let sandbox = Arc::new(Mutex::new(sandbox));
+
+        let exec_sandbox = sandbox.clone();
+        registry.insert("exec".to_string(), Arc::new(move |args: Value, _| {
+            let cmd = args["command"].as_str().unwrap_or("");
+            let sandbox_clone = exec_sandbox.clone();
+            tokio::task::block_in_place(move || {
+                tokio::runtime::Handle::current().block_on(async move {
+                    let mut sb = sandbox_clone.lock().await;
+                    let result = sb.exec(cmd).await?;
+                    Ok(serde_json::json!({
+                        "stdout": result.stdout,
+                        "stderr": result.stderr,
+                        "exit_code": result.exit_code
+                    }))
+                })
+            })
+        }) as Arc<dyn Fn(Value, Arc<Mutex<Box<dyn SandboxDyn>>>) -> Result<Value> + Send + Sync>);
+
+        Self {
+            sandbox,
+            tool_registry: registry,
+        }
+    }
+
+    pub async fn execute(&self, tool_name: &str, args: Value) -> Result<Value> {
+        match self.tool_registry.get(tool_name) {
+            Some(tool_fn) => tool_fn(args, self.sandbox.clone()),
+            None => Ok(serde_json::json!({"error": format!("Tool {} not found", tool_name)}))
+        }
+    }
+}
+
 pub struct ToolWorker<E: EventStore> {
-    sandbox: Box<dyn SandboxDyn>,
+    executor: DirectToolExecutor,
     event_store: E,
-    tools: Vec<Box<dyn ToolDyn>>,
+    legacy_tools: Vec<Box<dyn ToolDyn>>,
 }
 
 impl<E: EventStore> ToolWorker<E> {
     pub fn new(sandbox: Box<dyn SandboxDyn>, event_store: E, tools: Vec<Box<dyn ToolDyn>>) -> Self {
         Self {
-            sandbox,
+            executor: DirectToolExecutor::new(sandbox),
             event_store,
-            tools,
+            legacy_tools: tools,
         }
     }
 
@@ -131,7 +175,6 @@ impl<E: EventStore> ToolWorker<E> {
                             .await?;
                     }
 
-                    // Check if this was a "done" tool call that completed successfully
                     if thread.is_done(&command) {
                         tracing::info!("Task completed! Collecting artifacts...");
                         if let Err(e) = self.collect_and_emit_artifacts(stream_id, aggregate_id).await {
@@ -155,15 +198,23 @@ impl<E: EventStore> ToolWorker<E> {
         let mut results = Vec::new();
         for content in response.choice.iter() {
             if let rig::message::AssistantContent::ToolCall(call) = content {
-                let tool = self.tools.iter().find(|t| t.name() == call.function.name);
-                let result = match tool {
-                    Some(tool) => {
-                        let args = call.function.arguments.clone();
-                        tool.call(args, &mut self.sandbox).await?
+                let result = if self.executor.tool_registry.contains_key(&call.function.name) {
+                    match self.executor.execute(&call.function.name, call.function.arguments.clone()).await {
+                        Ok(val) => Ok(val),
+                        Err(e) => Err(serde_json::json!({"error": e.to_string()}))
                     }
-                    None => {
-                        let error = format!("{} not found", call.function.name);
-                        Err(serde_json::json!(error))
+                } else {
+                    let tool = self.legacy_tools.iter().find(|t| t.name() == call.function.name);
+                    match tool {
+                        Some(tool) => {
+                            let args = call.function.arguments.clone();
+                            let mut sandbox = self.executor.sandbox.lock().await;
+                            tool.call(args, &mut *sandbox).await?
+                        }
+                        None => {
+                            let error = format!("{} not found", call.function.name);
+                            Err(serde_json::json!(error))
+                        }
                     }
                 };
                 results.push(call.to_result(result));
@@ -173,15 +224,13 @@ impl<E: EventStore> ToolWorker<E> {
     }
 
     async fn collect_and_emit_artifacts(&mut self, stream_id: &str, aggregate_id: &str) -> Result<()> {
-        // Create temp directory for export
         let temp_dir = tempfile::tempdir()?;
         let temp_path = temp_dir.path();
 
-        // Export /app directory from container to temp dir
         tracing::info!("Exporting /app directory from container...");
-        self.sandbox.export_directory("/app", &temp_path.to_string_lossy()).await?;
+        let sandbox = self.executor.sandbox.lock().await;
+        sandbox.export_directory("/app", &temp_path.to_string_lossy()).await?;
 
-        // Collect all files from the exported directory
         tracing::info!("Reading exported files...");
         let files = Self::collect_exported_files(&temp_path)?;
         
@@ -190,7 +239,6 @@ impl<E: EventStore> ToolWorker<E> {
             tracing::info!("  - {}", path);
         }
 
-        // Emit ArtifactsCollected event
         let event = Event::ArtifactsCollected(files);
         self.event_store
             .push_event(stream_id, aggregate_id, &event, &Default::default())

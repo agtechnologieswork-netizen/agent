@@ -75,13 +75,16 @@ impl<S: EventStore> PlanningAgent<S> {
             env::var("SYSTEM_PROMPT").unwrap_or_else(|_| DEFAULT_SYSTEM_PROMPT.to_owned()),
             tools.iter().map(|tool| tool.definition()).collect(),
         );
+
         let tools = toolset(PlannerValidator);
         let mut sandbox_worker = ToolWorker::new(sandbox, self.store.clone(), tools);
+
         let stream = self.planning_stream_id.clone();
         let aggregate = self.planning_aggregate_id.clone();
         tokio::spawn(async move {
             let _ = planning_worker.run(&stream, &aggregate).await;
         });
+
         let stream = self.planning_stream_id.clone();
         let aggregate = self.planning_aggregate_id.clone();
         tokio::spawn(async move {
