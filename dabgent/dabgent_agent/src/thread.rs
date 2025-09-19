@@ -1,7 +1,7 @@
-use crate::{handler::Handler, llm::CompletionResponse};
+use crate::llm::CompletionResponse;
+use crate::{Event, Handler};
 use rig::completion::Message;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 
 impl Handler for Thread {
     type Command = Command;
@@ -10,7 +10,7 @@ impl Handler for Thread {
 
     fn process(&mut self, command: Self::Command) -> Result<Vec<Self::Event>, Self::Error> {
         match (&self.state, command) {
-            (State::None | State::User, Command::Prompt(prompt)) => {
+            (State::None | State::Agent, Command::Prompt(prompt)) => {
                 Ok(vec![Event::Prompted(prompt)])
             }
             (State::User | State::Tool, Command::Completion(response)) => {
@@ -39,16 +39,16 @@ impl Handler for Thread {
                     thread.update_done_call(response);
                     thread.messages.push(response.message());
                 }
-                Event::ToolCompleted(response) => {
-                    thread.state = match thread.is_done(response) {
+                Event::ToolCompleted(content) => {
+                    thread.state = match thread.is_done(content) {
                         true => State::Done,
                         false => State::Tool,
                     };
-                    thread.messages.push(response.message());
+                    thread.messages.push(rig::message::Message::User {
+                        content: content.clone(),
+                    });
                 }
-                Event::ArtifactsCollected(_) => {
-                    // This event doesn't affect the thread state, it's just a side effect
-                }
+                _ => {}
             }
         }
         thread
@@ -56,11 +56,11 @@ impl Handler for Thread {
 }
 
 impl Thread {
-    pub fn is_done(&self, response: &ToolResponse) -> bool {
+    pub fn is_done(&self, content: &rig::OneOrMany<rig::message::UserContent>) -> bool {
         let Some(done_id) = &self.done_call_id else {
             return false;
         };
-        response.content.iter().any(|item| {
+        content.iter().any(|item| {
             let rig::message::UserContent::ToolResult(res) = item else {
                 return false;
             };
@@ -92,28 +92,7 @@ impl Thread {
 pub enum Command {
     Prompt(String),
     Completion(CompletionResponse),
-    Tool(ToolResponse),
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum Event {
-    Prompted(String),
-    LlmCompleted(CompletionResponse),
-    ToolCompleted(ToolResponse),
-    ArtifactsCollected(HashMap<String, String>),
-}
-
-impl dabgent_mq::Event for Event {
-    const EVENT_VERSION: &'static str = "1.0";
-
-    fn event_type(&self) -> &'static str {
-        match self {
-            Event::Prompted(..) => "prompted",
-            Event::LlmCompleted(..) => "llm_completed",
-            Event::ToolCompleted(..) => "tool_completed",
-            Event::ArtifactsCollected(..) => "artifacts_collected",
-        }
-    }
+    Tool(rig::OneOrMany<rig::message::UserContent>),
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -148,19 +127,6 @@ impl Thread {
             state: State::None,
             messages: Vec::new(),
             done_call_id: None,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ToolResponse {
-    pub content: rig::OneOrMany<rig::message::UserContent>,
-}
-
-impl ToolResponse {
-    pub fn message(&self) -> rig::completion::Message {
-        rig::message::Message::User {
-            content: self.content.clone(),
         }
     }
 }
