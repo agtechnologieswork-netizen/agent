@@ -7,13 +7,20 @@ use tokio::sync::mpsc;
 pub use thread::ThreadProcessor;
 pub use tool::ToolProcessor;
 
-pub trait Handler {
+pub trait Aggregate: Default {
     type Command;
     type Event;
     type Error: std::error::Error + Send + Sync + 'static;
 
     fn process(&mut self, command: Self::Command) -> Result<Vec<Self::Event>, Self::Error>;
-    fn fold(events: &[Self::Event]) -> Self;
+    fn apply(&mut self, event: &Self::Event);
+    fn fold(events: &[Self::Event]) -> Self {
+        let mut aggregate = Self::default();
+        for event in events {
+            aggregate.apply(event);
+        }
+        aggregate
+    }
 }
 
 pub trait Processor<T>: Send {

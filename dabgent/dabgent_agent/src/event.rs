@@ -4,9 +4,19 @@ use std::collections::HashMap;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Event {
-    Prompted(String),
-    LlmCompleted(CompletionResponse),
-    ToolCompleted(rig::OneOrMany<rig::message::UserContent>),
+    LLMConfig {
+        model: String,
+        temperature: f64,
+        max_tokens: u64,
+        preamble: Option<String>,
+        tools: Option<Vec<rig::completion::ToolDefinition>>,
+        recipient: Option<String>,
+    },
+    AgentMessage {
+        response: CompletionResponse,
+        recipient: Option<String>,
+    },
+    UserMessage(rig::OneOrMany<rig::message::UserContent>),
     ArtifactsCollected(HashMap<String, String>),
 }
 
@@ -15,9 +25,9 @@ impl dabgent_mq::Event for Event {
 
     fn event_type(&self) -> &'static str {
         match self {
-            Event::Prompted(..) => "prompted",
-            Event::LlmCompleted(..) => "llm_completed",
-            Event::ToolCompleted(..) => "tool_completed",
+            Event::LLMConfig { .. } => "llm_config",
+            Event::AgentMessage { .. } => "agent_message",
+            Event::UserMessage(..) => "user_message",
             Event::ArtifactsCollected(..) => "artifacts_collected",
         }
     }

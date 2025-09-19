@@ -6,18 +6,33 @@ use dabgent_sandbox::{Sandbox, SandboxDyn};
 use eyre::Result;
 use rig::client::ProviderClient;
 
+const MODEL: &str = "claude-sonnet-4-20250514";
+
+const SYSTEM_PROMPT: &str = "
+You are a python software engineer.
+Workspace is already set up using uv init.
+Use uv package manager if you need to add extra libraries.
+Program will be run using uv run main.py command.
+";
+
 #[tokio::main]
 async fn main() {
     tracing_subscriber::fmt::init();
 
     const STREAM_ID: &str = "pipeline";
-    const AGGREGATE_ID: &str = "thread";
+    let prompt = "minimal script that fetches my ip using some api like ipify.org";
 
+    let store = store().await;
+    push_prompt(&store, STREAM_ID, "", prompt).await.unwrap();
+    pipeline_fn(STREAM_ID, store).await.unwrap();
+}
+
+pub async fn pipeline_fn(stream_id: &str, store: impl EventStore) -> Result<()> {
+    let stream_id = stream_id.to_owned();
     let opts = ConnectOpts::default();
     opts.connect(|client| async move {
         let llm = rig::providers::anthropic::Client::from_env();
         let sandbox = sandbox(&client).await?;
-        let store = store().await;
         let tools = toolset(Validator);
 
         let thread_processor = ThreadProcessor::new(
@@ -32,25 +47,12 @@ async fn main() {
             store.clone(),
             vec![thread_processor.boxed(), tool_processor.boxed()],
         );
-
-        push_prompt(&store, STREAM_ID, AGGREGATE_ID, USER_PROMPT).await?;
-        pipeline.run(STREAM_ID.to_owned()).await?;
+        pipeline.run(stream_id.clone()).await?;
         Ok(())
     })
     .await
-    .unwrap();
+    .map_err(Into::into)
 }
-
-const SYSTEM_PROMPT: &str = "
-You are a python software engineer.
-Workspace is already set up using uv init.
-Use uv package manager if you need to add extra libraries.
-Program will be run using uv run main.py command.
-";
-
-const USER_PROMPT: &str = "minimal script that fetches my ip using some api like ipify.org";
-
-const MODEL: &str = "claude-sonnet-4-20250514";
 
 async fn sandbox(client: &dagger_sdk::DaggerConn) -> Result<DaggerSandbox> {
     let opts = dagger_sdk::ContainerBuildOptsBuilder::default()
