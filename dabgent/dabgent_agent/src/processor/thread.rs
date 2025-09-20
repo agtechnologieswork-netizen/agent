@@ -1,6 +1,5 @@
-use super::{Aggregate, Processor};
-use crate::event::Event;
 use crate::llm::{Completion, CompletionResponse, LLMClient};
+use crate::{Aggregate, Event, Processor};
 use dabgent_mq::{EventDb, EventStore, Query};
 use eyre::Result;
 use rig::completion::ToolDefinition;
@@ -47,10 +46,10 @@ impl Aggregate for Thread {
     fn process(&mut self, command: Self::Command) -> Result<Vec<Self::Event>, Self::Error> {
         let events = match command {
             Command::Setup { .. } => self.handle_setup(command)?,
-            Command::Agent(response) => self.handle_agent(command)?,
-            Command::User(content) => self.handle_user(command)?,
+            Command::Agent(..) => self.handle_agent(command)?,
+            Command::User(..) => self.handle_user(command)?,
         };
-        for event in events {
+        for event in events.iter() {
             self.apply(&event);
         }
         Ok(events)
@@ -66,9 +65,9 @@ impl Aggregate for Thread {
                 tools,
                 recipient,
             } => {
-                self.model = model.clone();
-                self.temperature = temperature.clone();
-                self.max_tokens = max_tokens.clone();
+                self.model = Some(model.clone());
+                self.temperature = Some(temperature.clone());
+                self.max_tokens = Some(max_tokens.clone());
                 self.preamble = preamble.clone();
                 self.tools = tools.clone();
                 self.recipient = recipient.clone();
@@ -100,24 +99,22 @@ impl Thread {
                 preamble,
                 tools,
                 recipient,
-            } => {
-                if model.is_none() || temperature.is_none() || max_tokens.is_none() {
-                    return Err(Error::Uninitialized);
-                }
-                Ok(vec![Event::LLMConfig {
-                    model,
-                    temperature: temperature,
-                    max_tokens: max_tokens,
-                    preamble,
-                    tools,
-                    recipient,
-                }])
-            }
+            } => Ok(vec![Event::LLMConfig {
+                model,
+                temperature: temperature,
+                max_tokens: max_tokens,
+                preamble,
+                tools,
+                recipient,
+            }]),
             _ => unreachable!(),
         }
     }
 
     pub fn handle_user(&self, command: Command) -> Result<Vec<Event>, Error> {
+        if self.model.is_none() || self.temperature.is_none() || self.max_tokens.is_none() {
+            return Err(Error::Uninitialized);
+        }
         match command {
             Command::User(content) => match self.messages.last() {
                 None | Some(rig::completion::Message::Assistant { .. }) => {
@@ -132,12 +129,10 @@ impl Thread {
     pub fn handle_agent(&self, command: Command) -> Result<Vec<Event>, Error> {
         match command {
             Command::Agent(response) => match self.messages.last() {
-                None | Some(rig::completion::Message::User { .. }) => {
-                    Ok(vec![Event::AgentMessage {
-                        response,
-                        recipient: self.recipient.clone(),
-                    }])
-                }
+                Some(rig::completion::Message::User { .. }) => Ok(vec![Event::AgentMessage {
+                    response,
+                    recipient: self.recipient.clone(),
+                }]),
                 _ => Err(Error::WrongTurn),
             },
             _ => unreachable!(),

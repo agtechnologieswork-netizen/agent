@@ -1,11 +1,11 @@
+pub mod sandbox;
 pub mod thread;
-pub mod tool;
 use dabgent_mq::{EventDb, EventStore, Query};
 use std::pin::Pin;
 use tokio::sync::mpsc;
 
+pub use sandbox::ToolProcessor;
 pub use thread::ThreadProcessor;
-pub use tool::ToolProcessor;
 
 pub trait Aggregate: Default {
     type Command;
