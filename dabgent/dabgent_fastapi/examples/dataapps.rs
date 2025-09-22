@@ -1,6 +1,6 @@
 use dabgent_agent::pipeline::PipelineBuilder;
 use dabgent_fastapi::{toolset::dataapps_toolset, validator::DataAppsValidator};
-use dabgent_mq::{EventStore, db::sqlite::SqliteStore};
+use dabgent_mq::{EventStore, create_store, StoreConfig};
 use dabgent_sandbox::dagger::{ConnectOpts, Sandbox as DaggerSandbox};
 use dabgent_sandbox::Sandbox;
 use eyre::Result;
@@ -21,7 +21,7 @@ async fn main() {
     opts.connect(|client| async move {
         let llm = rig::providers::anthropic::Client::from_env();
         let sandbox = sandbox(&client).await?;
-        let store = store().await;
+        let store = create_store(Some(StoreConfig::from_env())).await?;
         let tools = dataapps_toolset(DataAppsValidator::new());
 
         push_prompt(&store, STREAM_ID, AGGREGATE_ID, USER_PROMPT).await?;
@@ -114,16 +114,6 @@ async fn sandbox(client: &dagger_sdk::DaggerConn) -> Result<DaggerSandbox> {
     Ok(sandbox)
 }
 
-async fn store() -> SqliteStore {
-    tracing::info!("Initializing SQLite event store...");
-    let pool = sqlx::SqlitePool::connect(":memory:")
-        .await
-        .expect("Failed to create in-memory SQLite pool");
-    let store = SqliteStore::new(pool);
-    store.migrate().await;
-    tracing::info!("Event store initialized");
-    store
-}
 
 async fn push_prompt<S: EventStore>(
     store: &S,
