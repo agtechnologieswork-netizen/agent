@@ -1,10 +1,12 @@
 use dabgent_agent::processor::{Pipeline, Processor, ThreadProcessor, ToolProcessor};
-use dabgent_agent::toolbox::{self, basic::toolset};
+use dabgent_agent::toolbox::{self, ToolDyn, basic::toolset};
 use dabgent_mq::{EventStore, db::sqlite::SqliteStore};
 use dabgent_sandbox::dagger::{ConnectOpts, Sandbox as DaggerSandbox};
 use dabgent_sandbox::{Sandbox, SandboxDyn};
 use eyre::Result;
 use rig::client::ProviderClient;
+use rig::completion::ToolDefinition;
+use rig::message::{Text, UserContent};
 
 const MODEL: &str = "claude-sonnet-4-20250514";
 
@@ -15,40 +17,58 @@ Use uv package manager if you need to add extra libraries.
 Program will be run using uv run main.py command.
 ";
 
+const TOOL_RECIPIENT: &str = "sandbox-tools";
+
 #[tokio::main]
-async fn main() {
+async fn main() -> Result<()> {
     tracing_subscriber::fmt::init();
 
     const STREAM_ID: &str = "pipeline";
     let prompt = "minimal script that fetches my ip using some api like ipify.org";
 
     let store = store().await;
-    push_prompt(&store, STREAM_ID, "", prompt).await.unwrap();
-    pipeline_fn(STREAM_ID, store).await.unwrap();
+    let tools = toolset(Validator);
+    let tool_definitions: Vec<ToolDefinition> =
+        tools.iter().map(|tool| tool.definition()).collect();
+    push_prompt(
+        &store,
+        STREAM_ID,
+        "",
+        prompt,
+        tool_definitions,
+        Some(TOOL_RECIPIENT.to_string()),
+    )
+    .await?;
+    pipeline_fn(STREAM_ID, store, tools, Some(TOOL_RECIPIENT.to_string())).await?;
+    Ok(())
 }
 
-pub async fn pipeline_fn(stream_id: &str, store: impl EventStore) -> Result<()> {
+pub async fn pipeline_fn(
+    stream_id: &str,
+    store: impl EventStore + Clone,
+    tools: Vec<Box<dyn ToolDyn>>,
+    recipient: Option<String>,
+) -> Result<()> {
     let stream_id = stream_id.to_owned();
     let opts = ConnectOpts::default();
-    opts.connect(|client| async move {
-        let llm = rig::providers::anthropic::Client::from_env();
-        let sandbox = sandbox(&client).await?;
-        let tools = toolset(Validator);
+    opts.connect(move |client| {
+        let store_clone = store.clone();
+        let recipient_clone = recipient.clone();
+        let stream_id_clone = stream_id.clone();
+        async move {
+            let llm = rig::providers::anthropic::Client::from_env();
+            let sandbox = sandbox(&client).await?;
 
-        let thread_processor = ThreadProcessor::new(
-            llm.clone(),
-            store.clone(),
-            MODEL.to_owned(),
-            SYSTEM_PROMPT.to_owned(),
-            tools.iter().map(|tool| tool.definition()).collect(),
-        );
-        let tool_processor = ToolProcessor::new(sandbox.boxed(), store.clone(), tools);
-        let pipeline = Pipeline::new(
-            store.clone(),
-            vec![thread_processor.boxed(), tool_processor.boxed()],
-        );
-        pipeline.run(stream_id.clone()).await?;
-        Ok(())
+            let thread_processor = ThreadProcessor::new(llm.clone(), store_clone.clone());
+            let tool_processor =
+                ToolProcessor::new(sandbox.boxed(), store_clone.clone(), tools, recipient_clone);
+            let pipeline = Pipeline::new(
+                store_clone.clone(),
+                vec![thread_processor.boxed(), tool_processor.boxed()],
+            );
+            pipeline.run(stream_id_clone).await?;
+            Ok(())
+        }
     })
     .await
     .map_err(Into::into)
@@ -80,8 +100,25 @@ async fn push_prompt<S: EventStore>(
     stream_id: &str,
     aggregate_id: &str,
     prompt: &str,
+    tools: Vec<ToolDefinition>,
+    recipient: Option<String>,
 ) -> Result<()> {
-    let event = dabgent_agent::event::Event::Prompted(prompt.to_owned());
+    let config = dabgent_agent::event::Event::LLMConfig {
+        model: MODEL.to_owned(),
+        temperature: 0.7,
+        max_tokens: 4096,
+        preamble: Some(SYSTEM_PROMPT.to_owned()),
+        tools: Some(tools),
+        recipient: recipient.clone(),
+    };
+    store
+        .push_event(stream_id, aggregate_id, &config, &Default::default())
+        .await?;
+
+    let user_content = UserContent::Text(Text {
+        text: prompt.to_owned(),
+    });
+    let event = dabgent_agent::event::Event::UserMessage(rig::OneOrMany::one(user_content));
     store
         .push_event(stream_id, aggregate_id, &event, &Default::default())
         .await

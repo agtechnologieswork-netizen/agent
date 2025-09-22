@@ -1,5 +1,6 @@
 pub mod event;
 pub mod llm;
+pub mod planner;
 pub mod processor;
 pub mod toolbox;
 
