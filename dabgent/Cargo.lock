@@ -630,7 +630,6 @@ version = "0.1.0"
 dependencies = [
  "chrono",
  "clap",
- "dabgent_integrations",
  "dabgent_mq",
  "dabgent_sandbox",
  "dagger-sdk",
