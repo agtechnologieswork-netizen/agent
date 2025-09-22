@@ -1,4 +1,6 @@
 pub mod db;
+pub mod listener;
 pub mod models;
-pub use db::{Event as EventDb, EventStore, Query};
-pub use models::Event;
+pub use db::{EventStore, SerializedEvent};
+pub use listener::{Callback, Listener};
+pub use models::{Aggregate, AggregateContext, Envelope, Event, Handler, Metadata};
