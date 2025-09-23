@@ -1,9 +1,9 @@
 use crate::planner::{Planner, ThreadSettings};
 use dabgent_mq::EventStore;
-use dabgent_sandbox::SandboxDyn;
 use eyre::Result;
 use serde::{Deserialize, Serialize};
 use std::sync::{Arc, Mutex};
+use super::{NoSandboxTool, NoSandboxAdapter};
 
 /// Tool for creating an initial plan from a task description
 pub struct CreatePlanTool<S: EventStore> {
@@ -40,7 +40,7 @@ pub struct CreatePlanOutput {
     pub message: String,
 }
 
-impl<S: EventStore + Clone + Send + Sync> super::Tool for CreatePlanTool<S> {
+impl<S: EventStore + Clone + Send + Sync> NoSandboxTool for CreatePlanTool<S> {
     type Args = CreatePlanArgs;
     type Output = CreatePlanOutput;
     type Error = String;
@@ -69,7 +69,6 @@ impl<S: EventStore + Clone + Send + Sync> super::Tool for CreatePlanTool<S> {
     async fn call(
         &self,
         args: Self::Args,
-        _sandbox: &mut Box<dyn SandboxDyn>,
     ) -> Result<Result<Self::Output, Self::Error>> {
         let mut planner_lock = match self.planner.lock() {
             Ok(lock) => lock,
@@ -124,7 +123,7 @@ pub struct UpdatePlanOutput {
     pub message: String,
 }
 
-impl<S: EventStore + Send + Sync> super::Tool for UpdatePlanTool<S> {
+impl<S: EventStore + Send + Sync> NoSandboxTool for UpdatePlanTool<S> {
     type Args = UpdatePlanArgs;
     type Output = UpdatePlanOutput;
     type Error = String;
@@ -153,7 +152,6 @@ impl<S: EventStore + Send + Sync> super::Tool for UpdatePlanTool<S> {
     async fn call(
         &self,
         args: Self::Args,
-        _sandbox: &mut Box<dyn SandboxDyn>,
     ) -> Result<Result<Self::Output, Self::Error>> {
         let mut planner_lock = match self.planner.lock() {
             Ok(lock) => lock,
@@ -209,7 +207,7 @@ pub struct GetPlanStatusOutput {
     pub total_count: usize,
 }
 
-impl<S: EventStore + Send + Sync> super::Tool for GetPlanStatusTool<S> {
+impl<S: EventStore + Send + Sync> NoSandboxTool for GetPlanStatusTool<S> {
     type Args = GetPlanStatusArgs;
     type Output = GetPlanStatusOutput;
     type Error = String;
@@ -233,7 +231,6 @@ impl<S: EventStore + Send + Sync> super::Tool for GetPlanStatusTool<S> {
     async fn call(
         &self,
         _args: Self::Args,
-        _sandbox: &mut Box<dyn SandboxDyn>,
     ) -> Result<Result<Self::Output, Self::Error>> {
         let planner_lock = match self.planner.lock() {
             Ok(lock) => lock,
@@ -266,7 +263,6 @@ impl<S: EventStore + Send + Sync> super::Tool for GetPlanStatusTool<S> {
     }
 }
 
-/// Create a toolset for planning
 pub fn planning_toolset<S: EventStore + Clone + Send + Sync + 'static>(
     planner: Arc<Mutex<Option<Planner<S>>>>,
     store: S,
@@ -274,8 +270,8 @@ pub fn planning_toolset<S: EventStore + Clone + Send + Sync + 'static>(
     settings: ThreadSettings,
 ) -> Vec<Box<dyn super::ToolDyn>> {
     vec![
-        Box::new(CreatePlanTool::new(planner.clone(), store, stream_id, settings)),
-        Box::new(UpdatePlanTool::new(planner.clone())),
-        Box::new(GetPlanStatusTool::new(planner)),
+        Box::new(NoSandboxAdapter::new(CreatePlanTool::new(planner.clone(), store, stream_id, settings))),
+        Box::new(NoSandboxAdapter::new(UpdatePlanTool::new(planner.clone()))),
+        Box::new(NoSandboxAdapter::new(GetPlanStatusTool::new(planner))),
     ]
 }

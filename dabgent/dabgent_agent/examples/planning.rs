@@ -66,9 +66,8 @@ pub async fn planning_pipeline(stream_id: &str, store: impl EventStore + Clone, 
         println!("=== PLANNING PHASE ===");
         println!("Task: {}\n", task);
 
-        // Phase 1: Create the plan using planning tools
+        // Phase 1: Create the plan using planning tools (no sandbox needed)
         {
-            let planning_sandbox = sandbox(&client).await?;
             let planning_tools = planning_toolset(
                 planner.clone(),
                 store.clone(),
@@ -82,9 +81,10 @@ pub async fn planning_pipeline(stream_id: &str, store: impl EventStore + Clone, 
                 store.clone(),
             );
 
-            // Create tool processor for planning tools
+            // Create tool processor for planning tools with a mock sandbox (not used by planning tools)
+            let mock_sandbox = sandbox(&client).await?;
             let planning_tool_processor = ToolProcessor::new(
-                planning_sandbox.boxed(),
+                mock_sandbox.boxed(),
                 store.clone(),
                 planning_tools,
                 Some("planner".to_string()),

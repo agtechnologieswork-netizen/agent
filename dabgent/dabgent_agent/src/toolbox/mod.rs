@@ -5,6 +5,54 @@ use eyre::Result;
 use serde::{Deserialize, Serialize};
 use std::pin::Pin;
 
+pub trait NoSandboxTool: Send + Sync {
+    type Args: for<'a> Deserialize<'a> + Serialize + Send + Sync;
+    type Output: Serialize + Send + Sync;
+    type Error: Serialize + Send + Sync;
+    fn name(&self) -> String;
+    fn definition(&self) -> rig::completion::ToolDefinition;
+    fn call(
+        &self,
+        args: Self::Args,
+    ) -> impl Future<Output = Result<Result<Self::Output, Self::Error>>> + Send;
+}
+
+/// Adapter to make NoSandboxTool compatible with Tool trait
+pub struct NoSandboxAdapter<T> {
+    tool: T,
+}
+
+impl<T> NoSandboxAdapter<T> {
+    pub fn new(tool: T) -> Self {
+        Self { tool }
+    }
+}
+
+impl<T> Tool for NoSandboxAdapter<T>
+where
+    T: NoSandboxTool,
+{
+    type Args = T::Args;
+    type Output = T::Output;
+    type Error = T::Error;
+
+    fn name(&self) -> String {
+        self.tool.name()
+    }
+
+    fn definition(&self) -> rig::completion::ToolDefinition {
+        self.tool.definition()
+    }
+
+    async fn call(
+        &self,
+        args: Self::Args,
+        _sandbox: &mut Box<dyn SandboxDyn>,
+    ) -> Result<Result<Self::Output, Self::Error>> {
+        self.tool.call(args).await
+    }
+}
+
 pub trait Tool: Send + Sync {
     type Args: for<'a> Deserialize<'a> + Serialize + Send + Sync;
     type Output: Serialize + Send + Sync;
