@@ -28,12 +28,8 @@ When creating a plan:
 3. Order the steps logically
 4. Use the create_plan tool to submit your plan
 
-Example format:
-- Create the main file
-- Add necessary imports
-- Implement core functionality
-- Add error handling
-- Test the implementation
+The create_plan tool expects an array of task descriptions.
+Each task should be a concrete, actionable step that can be independently executed.
 ";
 
 #[tokio::main]

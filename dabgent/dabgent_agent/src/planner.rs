@@ -92,6 +92,14 @@ impl<S: EventStore> Planner<S> {
         &self.tasks
     }
 
+    pub fn set_tasks(&mut self, descriptions: Vec<String>) {
+        self.tasks.clear();
+        for (index, description) in descriptions.into_iter().enumerate() {
+            let thread = format!("task-{}", index);
+            self.tasks.push(Task::new(description, thread));
+        }
+    }
+
     pub async fn execute(&mut self) -> Result<()> {
         for index in 0..self.tasks.len() {
             let description = self.tasks[index].description.clone();
