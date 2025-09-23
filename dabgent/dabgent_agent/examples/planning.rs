@@ -43,26 +43,21 @@ pub async fn pipeline_fn(stream_id: &str, store: impl EventStore) -> Result<()> 
     let opts = ConnectOpts::default();
     opts.connect(|client| async move {
         let llm = rig::providers::anthropic::Client::from_env();
-        let sandbox = sandbox(&client).await?;
+        let code_sandbox = sandbox(&client).await?;
+        let dummy_sandbox = sandbox(&client).await?;
         let tools = toolset(Validator);
-        let planning_tools = toolset();
+        let planning_tools = toolset(NoOpValidator::new());
 
         let thread_processor = ThreadProcessor::new(
             llm.clone(),
             store.clone(),
-            MODEL.to_owned(),
-            SYSTEM_PROMPT.to_owned(),
-            tools.iter().map(|tool| tool.definition()).collect(),
         );
-        let planning_processor = PlanningProcessor::new(
+        let planning_processor = ThreadProcessor::new(
             llm.clone(),
             store.clone(),
-            MODEL.to_owned(),
-            PLANNING_PROMPT.to_owned(),
-            planning_tools.iter().map(|tool| tool.definition()).collect(),
         );
-        let tool_processor = ToolProcessor::new(sandbox.boxed(), store.clone(), tools);
-        let planning_tool_processor = ToolProcessor::new(sandbox.boxed(), store.clone(), planning_tools);
+        let tool_processor = ToolProcessor::new(code_sandbox.boxed(), store.clone(), tools, None);
+        let planning_tool_processor = ToolProcessor::new(dummy_sandbox.boxed(), store.clone(), planning_tools, Some("planner".to_string()));
         let pipeline = Pipeline::new(
             store.clone(),
             vec![thread_processor.boxed(), tool_processor.boxed(), planning_processor.boxed(), planning_tool_processor.boxed()],
@@ -101,7 +96,11 @@ async fn push_prompt<S: EventStore>(
     aggregate_id: &str,
     prompt: &str,
 ) -> Result<()> {
-    let event = dabgent_agent::event::Event::Prompted(prompt.to_owned());
+    let event = dabgent_agent::event::Event::UserMessage(
+        rig::OneOrMany::one(rig::message::UserContent::Text(rig::message::Text {
+            text: prompt.to_owned()
+        }))
+    );
     store
         .push_event(stream_id, aggregate_id, &event, &Default::default())
         .await
@@ -109,6 +108,13 @@ async fn push_prompt<S: EventStore>(
 }
 
 pub struct Validator;
+pub struct NoOpValidator;
+
+impl NoOpValidator {
+    fn new() -> Self {
+        Self
+    }
+}
 
 impl toolbox::Validator for Validator {
     async fn run(&self, sandbox: &mut Box<dyn SandboxDyn>) -> Result<Result<(), String>> {
@@ -125,19 +131,9 @@ impl toolbox::Validator for Validator {
     }
 }
 
-
-impl toolbox::Validator for Validator {
-    async fn run(&self, sandbox: &mut Box<dyn SandboxDyn>) -> Result<Result<(), String>> {
-        sandbox.exec("uv run main.py").await.map(|result| {
-            if result.exit_code == 0 {
-                Ok(())
-            } else {
-                Err(format!(
-                    "code: {}\nstdout: {}\nstderr: {}",
-                    result.exit_code, result.stdout, result.stderr
-                ))
-            }
-        })
+impl toolbox::Validator for NoOpValidator {
+    async fn run(&self, _sandbox: &mut Box<dyn SandboxDyn>) -> Result<Result<(), String>> {
+        Ok(Ok(()))
     }
 }
 
