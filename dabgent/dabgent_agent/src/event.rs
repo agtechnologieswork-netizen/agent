@@ -18,6 +18,20 @@ pub enum Event {
     },
     UserMessage(rig::OneOrMany<rig::message::UserContent>),
     ArtifactsCollected(HashMap<String, String>),
+    TaskCompleted {
+        success: bool,
+    },
+    SeedSandboxFromTemplate {
+        template_path: String,
+        base_path: String,
+    },
+    SandboxSeeded {
+        template_path: String,
+        base_path: String,
+        file_count: usize,
+        template_hash: Option<String>,
+    },
+    PipelineShutdown,
 }
 
 impl dabgent_mq::Event for Event {
@@ -29,6 +43,10 @@ impl dabgent_mq::Event for Event {
             Event::AgentMessage { .. } => "agent_message",
             Event::UserMessage(..) => "user_message",
             Event::ArtifactsCollected(..) => "artifacts_collected",
+            Event::TaskCompleted { .. } => "task_completed",
+            Event::SeedSandboxFromTemplate { .. } => "seed_sandbox_from_template",
+            Event::SandboxSeeded { .. } => "sandbox_seeded",
+            Event::PipelineShutdown => "pipeline_shutdown",
         }
     }
 }
