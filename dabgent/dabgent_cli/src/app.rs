@@ -1,14 +1,17 @@
-use crate::events::{AppEvent, Event, EventHandler};
+use crate::events::{AppEvent, Event as UiEvent, EventHandler};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-use dabgent_agent::handler::Handler;
-use dabgent_agent::thread::{self};
+use dabgent_agent::Aggregate;
+use dabgent_agent::event::Event as AgentEvent;
+use dabgent_agent::processor::thread::{self};
 use dabgent_mq::db::{EventStore, Metadata, Query};
+use rig::OneOrMany;
+use rig::message::{Text, UserContent};
 
 pub struct App<S: EventStore> {
     store: S,
     query: Query,
     pub thread: thread::Thread,
-    pub history: Vec<thread::Event>,
+    pub history: Vec<AgentEvent>,
     pub input_buffer: String,
     pub running: bool,
     pub events: EventHandler,
@@ -22,7 +25,7 @@ impl<S: EventStore> App<S> {
             aggregate_id: Some("thread".to_owned()),
         };
 
-        let event_stream = store.subscribe::<thread::Event>(&query)?;
+        let event_stream = store.subscribe::<AgentEvent>(&query)?;
         let events = EventHandler::new(event_stream);
         let thread = thread::Thread::new();
 
@@ -42,16 +45,16 @@ impl<S: EventStore> App<S> {
         while self.running {
             terminal.draw(|frame| frame.render_widget(&self, frame.area()))?;
             match self.events.next().await? {
-                Event::Tick => self.tick(),
-                Event::Crossterm(event) => match event {
+                UiEvent::Tick => self.tick(),
+                UiEvent::Crossterm(event) => match event {
                     crossterm::event::Event::Key(key_event) => self.handle_key_events(key_event)?,
                     _ => {}
                 },
-                Event::Thread(event) => {
+                UiEvent::Thread(event) => {
                     self.history.push(event);
                     self.fold_thread().await?;
                 }
-                Event::App(app_event) => match app_event {
+                UiEvent::App(app_event) => match app_event {
                     AppEvent::Confirm => self.confirm().await?,
                     AppEvent::Erase => self.erase(),
                     AppEvent::Input(input) => self.input(input),
@@ -64,12 +67,12 @@ impl<S: EventStore> App<S> {
 
     pub fn handle_key_events(&mut self, key: KeyEvent) -> color_eyre::Result<()> {
         match key.code {
-            KeyCode::Enter => self.events.send(Event::App(AppEvent::Confirm)),
+            KeyCode::Enter => self.events.send(UiEvent::App(AppEvent::Confirm)),
             KeyCode::Char('c' | 'C') if key.modifiers == KeyModifiers::CONTROL => {
-                self.events.send(Event::App(AppEvent::Quit))
+                self.events.send(UiEvent::App(AppEvent::Quit))
             }
-            KeyCode::Char(c) => self.events.send(Event::App(AppEvent::Input(c))),
-            KeyCode::Backspace => self.events.send(Event::App(AppEvent::Erase)),
+            KeyCode::Char(c) => self.events.send(UiEvent::App(AppEvent::Input(c))),
+            KeyCode::Backspace => self.events.send(UiEvent::App(AppEvent::Erase)),
             _ => {}
         }
         Ok(())
@@ -78,14 +81,16 @@ impl<S: EventStore> App<S> {
     pub async fn fold_thread(&mut self) -> color_eyre::Result<()> {
         let events = self
             .store
-            .load_events::<thread::Event>(&self.query, None)
+            .load_events::<AgentEvent>(&self.query, None)
             .await?;
         self.thread = thread::Thread::fold(&events);
         Ok(())
     }
 
     async fn send_message(&mut self, content: String) -> color_eyre::Result<()> {
-        let command = thread::Command::Prompt(content);
+        let text = UserContent::Text(Text { text: content });
+        let message = OneOrMany::one(text);
+        let command = thread::Command::User(message);
         let events = self.thread.process(command)?;
         let metadata = Metadata::default();
         for event in events {
