@@ -22,7 +22,7 @@ pub trait Sandbox {
     fn list_directory(&self, path: &str) -> impl Future<Output = Result<Vec<String>>> + Send;
     fn set_workdir(&mut self, path: &str) -> impl Future<Output = Result<()>> + Send;
     fn export_directory(&self, container_path: &str, host_path: &str) -> impl Future<Output = Result<String>> + Send;
-    
+
     fn fork(&self) -> impl Future<Output = Result<Self>> + Send
     where
         Self: Sized,
@@ -32,7 +32,7 @@ pub trait Sandbox {
 
     fn boxed(self) -> Box<dyn SandboxDyn>
     where
-        Self: Sized + Send + Sync + Clone + 'static,
+        Self: Sized + Send + Sync + 'static,
     {
         Box::new(self)
     }
@@ -76,7 +76,7 @@ pub trait SandboxDyn: Send + Sync {
     fn fork(&self) -> Pin<Box<dyn Future<Output = Result<Box<dyn SandboxDyn>>> + Send + '_>>;
 }
 
-impl<T: Sandbox + Send + Sync + Clone + 'static> SandboxDyn for T {
+impl<T: Sandbox + Send + Sync + 'static> SandboxDyn for T {
     fn exec<'a>(
         &'a mut self,
         command: &'a str,
@@ -139,4 +139,3 @@ impl<T: Sandbox + Send + Sync + Clone + 'static> SandboxDyn for T {
         Box::pin(async move { self.fork().await.map(|fork| fork.boxed()) })
     }
 }
-
