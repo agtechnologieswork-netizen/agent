@@ -6,12 +6,16 @@ pub const DEFAULT_TEMPLATE_PATH: &str = "../dataapps/template_minimal";
 
 #[derive(Embed)]
 #[folder = "../../dataapps/template_minimal"]
-#[exclude = "node_modules/*"]
-#[exclude = ".git/*"]
-#[exclude = ".venv/*"]
-#[exclude = "target/*"]
-#[exclude = "dist/*"]
-#[exclude = "build/*"]
+#[exclude = "node_modules/**"]
+#[exclude = ".git/**"]
+#[exclude = ".venv/**"]
+#[exclude = "backend/.venv/**"]
+#[exclude = "backend/.ruff_cache/**"]
+#[exclude = "frontend/node_modules/**"]
+#[exclude = "target/**"]
+#[exclude = "dist/**"]
+#[exclude = "build/**"]
+#[exclude = "**/.DS_Store"]
 pub struct Templates;
 
 /// Get template files for seeding sandbox
