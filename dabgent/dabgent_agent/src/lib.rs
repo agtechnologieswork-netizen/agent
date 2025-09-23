@@ -1,6 +1,7 @@
 pub mod event;
 pub mod llm;
 pub mod pipeline;
+pub mod planner;
 pub mod processor;
 pub mod toolbox;
 pub mod sandbox_seed;
