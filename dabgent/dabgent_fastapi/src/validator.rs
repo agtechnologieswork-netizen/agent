@@ -156,14 +156,16 @@ impl Validator for DataAppsValidator {
             Ok(_) => (),
             Err(e) => return Ok(Err(format!("Failed to run uv sync: {}", e))),
         }
-        tracing::info!("Sandbox is ready. Starting validation steps...");
+        let mut sandbox_for_tests = sandbox.fork().await?;
+        let mut sandbox_for_linting = sandbox.fork().await?;
+        let mut sandbox_for_frontend = sandbox.fork().await?;
 
-        // Run all validation checks and collect results
-        // FixMe: how to parallelize these?
-        let deps_result = self.check_python_dependencies(sandbox).await;
-        let tests_result = self.check_tests(sandbox).await;
-        let linting_result = self.check_linting(sandbox).await;
-        let frontend_result = self.check_frontend_build(sandbox).await;
+        let (deps_result, tests_result, linting_result, frontend_result) = tokio::join!(
+            self.check_python_dependencies(sandbox),
+            self.check_tests(&mut sandbox_for_tests),
+            self.check_linting(&mut sandbox_for_linting),
+            self.check_frontend_build(&mut sandbox_for_frontend),
+        );
 
         // Collect all errors
         let mut errors = Vec::new();
