@@ -203,6 +203,7 @@ pub async fn planning_pipeline(stream_id: &str, store: impl EventStore + Clone, 
             }
 
             // Create execution pipeline
+            println!("Executing tasks...");
             let execution_thread = ThreadProcessor::new(llm.clone(), store.clone());
             let execution_tool_processor = ToolProcessor::new(
                 execution_sandbox.boxed(),
@@ -216,7 +217,6 @@ pub async fn planning_pipeline(stream_id: &str, store: impl EventStore + Clone, 
                 vec![execution_thread.boxed(), execution_tool_processor.boxed()],
             );
 
-            println!("Executing tasks...");
             let exec_handle = tokio::spawn({
                 let stream_id = stream_id.clone();
                 async move {
@@ -225,21 +225,33 @@ pub async fn planning_pipeline(stream_id: &str, store: impl EventStore + Clone, 
             });
 
             let mut completed_tasks = 0;
+            let mut last_progress_time = std::time::Instant::now();
+            let timeout = std::time::Duration::from_secs(300); // 5 minute timeout
+            let start_time = std::time::Instant::now();
+
             loop {
-                tokio::time::sleep(tokio::time::Duration::from_millis(1)).await;
+                tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
 
                 let query = dabgent_mq::Query::stream(&stream_id);
                 let events = store.load_events::<dabgent_agent::event::Event>(&query, None).await?;
 
-                let current_event_count = events.len();
                 completed_tasks = events.iter()
                     .filter(|e| matches!(e, dabgent_agent::event::Event::TaskCompleted { .. }))
                     .count();
 
-                println!("Progress: {}/{} tasks completed", completed_tasks, tasks.len());
+                // Only print progress every 5 seconds to avoid spam
+                if last_progress_time.elapsed() > std::time::Duration::from_secs(5) {
+                    println!("Progress: {}/{} tasks completed", completed_tasks, tasks.len());
+                    last_progress_time = std::time::Instant::now();
+                }
 
                 if completed_tasks >= tasks.len() {
                     println!("✓ All tasks completed successfully!");
+                    break;
+                }
+
+                if start_time.elapsed() > timeout {
+                    println!("⚠ Timeout: Only {}/{} tasks completed after 5 minutes", completed_tasks, tasks.len());
                     break;
                 }
             }
