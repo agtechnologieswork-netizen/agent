@@ -1,0 +1,202 @@
+name: Python Legacy Pipeline
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'agent/**'
+  pull_request:
+    paths:
+      - 'agent/**'
+
+env:
+  CONTAINER_NAME: agent-apiserver-1
+  ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+  GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+
+jobs:
+  python-lint:
+    name: Python Lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          version: "0.7.3"
+
+      - name: Run Python linters
+        uses: astral-sh/ruff-action@v3
+        with:
+          version: ">=0.11.5"
+          args: check ./agent
+        continue-on-error: true
+
+  python-tests:
+    name: Python Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          version: "0.7.3"
+
+      - name: Run Python tests
+        working-directory: ./agent/
+        run: |
+          echo "Running Python tests..."
+          uv run test --verbose --exclude e2e
+          exit_code=$?
+          if [ $exit_code -ne 0 ]; then
+            echo "Tests failed with exit code $exit_code"
+            exit $exit_code
+          else
+            echo "Tests passed successfully!"
+          fi
+
+  python-template-build:
+    name: Build Python Template
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2
+
+      - name: Set up Docker Compose
+        uses: docker/setup-compose-action@v1
+
+      - name: Start Docker Compose services
+        working-directory: ./agent/trpc_agent/template/
+        run: docker compose up -d --build
+
+      - name: Check Container Health
+        run: |
+          sleep 10
+          containers_to_check="postgres app"
+          all_healthy=true
+          failed_containers=""
+
+          for container_name in $containers_to_check; do
+            echo "Checking health of container: $container_name"
+            status=$(docker inspect --format='{{.State.Health.Status}}' $container_name)
+
+            if [ "$status" = "healthy" ]; then
+              echo "Container $container_name is healthy!"
+            else
+              echo "Container $container_name is not healthy (status: $status)."
+              all_healthy=false
+              failed_containers="$failed_containers $container_name"
+            fi
+          done
+
+          if [ "$all_healthy" = "true" ]; then
+            echo "All specified containers are healthy!"
+            exit 0
+          else
+            echo "Error: One or more containers are not healthy. Failing workflow."
+            echo "--- Logs for failed containers: ---"
+            for failed_container in $failed_containers; do
+              echo "--- Logs for $failed_container ---"
+              docker logs --tail 50 $failed_container || echo "Could not retrieve container logs for $failed_container."
+              echo "------------------------------------"
+            done
+            exit 1
+          fi
+
+      - name: Clean up Docker Compose services
+        working-directory: ./agent/trpc_agent/template/
+        if: always()
+        run: |
+          echo "Stopping and removing Docker Compose services..."
+          docker compose down -v --remove-orphans
+          echo "Cleanup complete."
+
+  python-health-check:
+    name: Python Container Health Check
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2
+
+      - name: Set up Docker Compose
+        uses: docker/setup-compose-action@v1
+
+      - name: Start Docker Compose services
+        working-directory: ./agent/
+        run: docker compose up -d --build
+
+      - name: Check Container Health
+        run: |
+          sleep 30
+          echo "Checking health of container: ${{ env.CONTAINER_NAME }}"
+          status=$(docker inspect --format='{{.State.Health.Status}}' ${{ env.CONTAINER_NAME }})
+
+          if [ "$status" = "healthy" ]; then
+            echo "Container is healthy!"
+            exit 0
+          else
+            echo "Error: Container is not healthy (status: $status). Failing workflow."
+            echo "--- Recent container logs: ---"
+            docker logs --tail 50 ${{ env.CONTAINER_NAME }} || echo "Could not retrieve container logs."
+            exit 1
+          fi
+
+      - name: Clean up Docker Compose services
+        working-directory: ./agent/
+        if: always()
+        run: |
+          echo "Stopping and removing Docker Compose services..."
+          docker compose down -v --remove-orphans
+          echo "Cleanup complete."
+
+  python-e2e-tests:
+    name: Python E2E Tests (${{ matrix.template }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      matrix:
+        template: [trpc, laravel]
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          version: "0.7.3"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2
+
+      - name: Set up Docker Compose
+        uses: docker/setup-compose-action@v1
+
+      - name: Start Docker Compose services
+        working-directory: ./agent/
+        run: docker compose up -d --build
+
+      - name: Run E2E tests
+        working-directory: ./agent/
+        run: |
+          echo "Running E2E tests for ${{ matrix.template }}..."
+          uv run test_e2e ${{ matrix.template }}
+
+      - name: Clean up Docker Compose services
+        working-directory: ./agent/
+        if: always()
+        run: docker compose down -v --remove-orphans

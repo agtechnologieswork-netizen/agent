@@ -1,4 +1,4 @@
-name: CI Pipeline
+name: CI Coordinator
 
 on:
   push:
@@ -7,309 +7,20 @@ on:
   pull_request:
 
 env:
-  CONTAINER_NAME: agent-apiserver-1
-  ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-  GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
   ECR_REGISTRY: 361769577597.dkr.ecr.us-west-2.amazonaws.com
   ECR_REPOSITORY: appdotbuild/agent-fullstack
   AWS_REGION: us-west-2
 
 jobs:
-  lint:
-    name: Lint Code
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v3
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@v5
-        with:
-          version: "0.7.3"
-
-      - name: Run linters
-        uses: astral-sh/ruff-action@v3
-        with:
-          version: ">=0.11.5"
-          args: check .
-        continue-on-error: true
-
-  rust-checks:
-    name: Rust Checks
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v3
-
-      - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          components: clippy
-
-      - name: Cache cargo dependencies
-        uses: actions/cache@v3
-        with:
-          path: |
-            ~/.cargo/bin/
-            ~/.cargo/registry/index/
-            ~/.cargo/registry/cache/
-            ~/.cargo/git/db/
-            dabgent/target/
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-
-      - name: Run cargo check
-        working-directory: ./dabgent
-        run: cargo check
-
-      - name: Run cargo clippy
-        working-directory: ./dabgent
-        run: cargo clippy -- -W warnings
-        continue-on-error: true
-
-  rust-tests:
-    name: Rust Tests
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v3
-
-      - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Cache cargo dependencies
-        uses: actions/cache@v3
-        with:
-          path: |
-            ~/.cargo/bin/
-            ~/.cargo/registry/index/
-            ~/.cargo/registry/cache/
-            ~/.cargo/git/db/
-            dabgent/target/
-          key: ${{ runner.os }}-cargo-test-${{ hashFiles('**/Cargo.lock') }}
-
-      - name: Run unit tests
-        working-directory: ./dabgent
-        run: cargo test --lib --all
-        continue-on-error: true
-
-      - name: Run integration tests (excluding e2e)
-        working-directory: ./dabgent
-        run: cargo test --all --test '*' -- --skip e2e_generation
-        continue-on-error: true
-
-  # E2E tests disabled until e2e_generation.rs is properly implemented
-  # rust-e2e-tests:
-  #   name: Rust E2E Tests
-  #   runs-on: ubuntu-latest
-  #   timeout-minutes: 20
-  #   if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-  #   env:
-  #     ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-  #   steps:
-  #     - name: Checkout repository
-  #       uses: actions/checkout@v3
-  #
-  #     - name: Setup Rust
-  #       uses: dtolnay/rust-toolchain@stable
-  #
-  #     - name: Cache cargo dependencies
-  #       uses: actions/cache@v3
-  #       with:
-  #         path: |
-  #           ~/.cargo/bin/
-  #           ~/.cargo/registry/index/
-  #           ~/.cargo/registry/cache/
-  #           ~/.cargo/git/db/
-  #           dabgent/target/
-  #         key: ${{ runner.os }}-cargo-e2e-${{ hashFiles('**/Cargo.lock') }}
-  #
-  #     - name: Run E2E tests
-  #       working-directory: ./dabgent
-  #       run: cargo test --test e2e_generation -- --nocapture
-  #       continue-on-error: true
-
-  build-template:
-    name: Build Template
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v3
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v2
-
-      - name: Set up Docker Compose
-        uses: docker/setup-compose-action@v1
-
-      - name: Start Docker Compose services
-        working-directory: ./agent/trpc_agent/template/
-        run: docker compose up -d --build
-
-      - name: Check Container Health
-        run: |
-          sleep 10
-          # List of containers to check
-          containers_to_check="postgres app"
-          all_healthy=true
-          failed_containers=""
-
-          for container_name in $containers_to_check; do
-            echo "Checking health of container: $container_name"
-            status=$(docker inspect --format='{{.State.Health.Status}}' $container_name)
-
-            if [ "$status" = "healthy" ]; then
-              echo "Container $container_name is healthy!"
-            else
-              echo "Container $container_name is not healthy (status: $status)."
-              all_healthy=false
-              failed_containers="$failed_containers $container_name" # Add to the list of failed containers
-            fi
-          done
-
-          if [ "$all_healthy" = "true" ]; then
-            echo "All specified containers are healthy!"
-            exit 0
-          else
-            echo "Error: One or more containers are not healthy. Failing workflow."
-            echo "--- Logs for failed containers: ---"
-            # Loop through failed containers and print logs
-            for failed_container in $failed_containers; do
-              echo "--- Logs for $failed_container ---"
-              docker logs --tail 50 $failed_container || echo "Could not retrieve container logs for $failed_container."
-              echo "------------------------------------"
-            done
-            exit 1
-          fi
-
-      - name: Clean up Docker Compose services
-        working-directory: ./agent/trpc_agent/template/
-        if: always()
-        run: |
-          echo "Stopping and removing Docker Compose services..."
-          docker compose down -v --remove-orphans
-          echo "Cleanup complete."
-
-  # not really unit for now, but should be at some point!
-  unit-tests:
-    name: Run Other Tests
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v3
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@v5
-        with:
-          version: "0.7.3"
-
-      - name: Run tests
-        working-directory: ./agent/
-        run: |
-          echo "Running tests..."
-          uv run test --verbose --exclude e2e
-          exit_code=$?
-          if [ $exit_code -ne 0 ]; then
-            echo "Tests failed with exit code $exit_code"
-            exit $exit_code
-          else
-            echo "Tests passed successfully!"
-          fi
-
-  health-check:
-    name: Container Health Check
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v3
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v2
-
-      - name: Set up Docker Compose
-        uses: docker/setup-compose-action@v1
-
-      - name: Start Docker Compose services
-        working-directory: ./agent/
-        run: docker compose up -d --build
-
-      - name: Check Container Health
-        run: |
-          sleep 30
-          echo "Checking health of container: ${{ env.CONTAINER_NAME }}"
-          status=$(docker inspect --format='{{.State.Health.Status}}' ${{ env.CONTAINER_NAME }})
-
-          if [ "$status" = "healthy" ]; then
-            echo "Container is healthy!"
-            exit 0
-          else
-            echo "Error: Container is not healthy (status: $status). Failing workflow."
-            echo "--- Recent container logs: ---"
-            docker logs --tail 50 ${{ env.CONTAINER_NAME }} || echo "Could not retrieve container logs."
-            exit 1
-          fi
-
-      # Cleanup even if the job fails
-      - name: Clean up Docker Compose services
-        working-directory: ./agent/
-        if: always()
-        run: |
-          echo "Stopping and removing Docker Compose services..."
-          docker compose down -v --remove-orphans
-          echo "Cleanup complete."
-
-  e2e-tests:
-    name: E2E Tests (${{ matrix.template }})
+  # Legacy Python deployment (temporary)
+  build-and-push-python:
+    name: Build and Push Python Docker Image
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    strategy:
-      matrix:
-        template: [trpc, laravel] # TODO: return after test fix nicegui
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v3
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@v5
-        with:
-          version: "0.7.3"
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v2
-
-      - name: Set up Docker Compose
-        uses: docker/setup-compose-action@v1
-
-      - name: Start Docker Compose services
-        working-directory: ./agent/
-        run: docker compose up -d --build
-
-      - name: Run E2E tests
-        working-directory: ./agent/
-        run: |
-          echo "Running E2E tests for ${{ matrix.template }}..."
-          uv run test_e2e ${{ matrix.template }}
-
-      # Cleanup even if the job fails
-      - name: Clean up Docker Compose services
-        working-directory: ./agent/
-        if: always()
-        run: docker compose down -v --remove-orphans
-
-  # 6. Build and push to ECR (only runs if previous jobs succeed)
-  build-and-push:
-    name: Build and Push Docker Image
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    needs: [build-template, unit-tests, health-check, e2e-tests, lint, rust-checks, rust-tests]
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
           fetch-depth: 2
 
@@ -317,7 +28,6 @@ jobs:
         id: check_release
         run: |
           is_release="false"
-          # we check two commits because the first commit is the merge commit
           if git log -2 --pretty=%s | tail -n 1 | grep -q "release"; then
             is_release="true"
             echo "Release build detected based on commit message."
@@ -325,18 +35,16 @@ jobs:
             is_release="true"
             echo "Release build detected based on push to main branch."
           fi
-
           echo "is_release=${is_release}" >> $GITHUB_OUTPUT
 
       - name: Calculate Build Tag
-        # Only run if we determined it's a release build
         if: steps.check_release.outputs.is_release == 'true'
         id: build_tag
         run: |
           BRANCH_NAME_RAW="${{ github.head_ref || github.ref_name }}"
           BRANCH_NAME=$(echo "$BRANCH_NAME_RAW" | sed -e 's#^refs/heads/##' -e 's#^refs/tags/##' -e 's#/#-#g' -e 's/[^a-zA-Z0-9.-]/-/g')
           SHORT_SHA=$(git rev-parse --short ${{ github.sha }})
-          echo "commit_short_sha=$SHORT_SHA" >> "$GITHUB_OUTPUT" # Set commit_short_sha as an output
+          echo "commit_short_sha=$SHORT_SHA" >> "$GITHUB_OUTPUT"
           TAG=${BRANCH_NAME}-${SHORT_SHA}
           echo "Calculated Tag: $TAG"
           echo "image_tag=$TAG" >> "$GITHUB_OUTPUT"
@@ -366,7 +74,7 @@ jobs:
           IMAGE_TAG: ${{ steps.build_tag.outputs.image_tag }}
           BRANCH_NAME: ${{ steps.build_tag.outputs.branch_name }}
         run: |
-          echo "Building and pushing Docker image with tag: $IMAGE_TAG ..."
+          echo "Building and pushing Python Docker image with tag: $IMAGE_TAG ..."
           docker buildx build \
             --platform linux/arm64 \
             --target prod \
