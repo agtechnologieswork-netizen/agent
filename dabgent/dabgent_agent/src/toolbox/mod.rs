@@ -1,7 +1,9 @@
 pub mod basic;
+pub mod planning;
 use dabgent_sandbox::SandboxDyn;
 use eyre::Result;
 use serde::{Deserialize, Serialize};
+use std::future::Future;
 use std::pin::Pin;
 
 pub trait Tool: Send + Sync {
@@ -118,6 +120,58 @@ impl ToolCallExt for rig::message::ToolCall {
             call_id: self.call_id.clone(),
             content: rig::OneOrMany::one(ToolResultContent::Text(inner.into())),
         }
+    }
+}
+
+// Trait for tools that don't require sandbox access
+pub trait NoSandboxTool: Send + Sync {
+    type Args: for<'a> Deserialize<'a> + Serialize + Send + Sync;
+    type Output: Serialize + Send + Sync;
+    type Error: Serialize + Send + Sync;
+
+    fn name(&self) -> String;
+    fn definition(&self) -> rig::completion::ToolDefinition;
+
+    fn call(
+        &self,
+        args: Self::Args,
+    ) -> impl Future<Output = Result<Result<Self::Output, Self::Error>>> + Send;
+}
+
+// Adapter to make NoSandboxTool compatible with Tool trait
+pub struct NoSandboxAdapter<T: NoSandboxTool> {
+    inner: T,
+}
+
+impl<T: NoSandboxTool> NoSandboxAdapter<T> {
+    pub fn new(inner: T) -> Self {
+        Self { inner }
+    }
+}
+
+impl<T: NoSandboxTool> Tool for NoSandboxAdapter<T> {
+    type Args = T::Args;
+    type Output = T::Output;
+    type Error = T::Error;
+
+    fn name(&self) -> String {
+        self.inner.name()
+    }
+
+    fn definition(&self) -> rig::completion::ToolDefinition {
+        self.inner.definition()
+    }
+
+    fn needs_replay(&self) -> bool {
+        false // NoSandbox tools don't need replay as they don't modify sandbox
+    }
+
+    async fn call(
+        &self,
+        args: Self::Args,
+        _sandbox: &mut Box<dyn SandboxDyn>,
+    ) -> Result<Result<Self::Output, Self::Error>> {
+        self.inner.call(args).await
     }
 }
 
