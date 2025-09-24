@@ -41,6 +41,7 @@ impl<S: EventStore> App<S> {
     }
 
     pub async fn run(mut self, mut terminal: ratatui::DefaultTerminal) -> color_eyre::Result<()> {
+        self.setup_thread().await?;
         self.fold_thread().await?;
         while self.running {
             terminal.draw(|frame| frame.render_widget(&self, frame.area()))?;
@@ -128,5 +129,35 @@ impl<S: EventStore> App<S> {
 
     pub fn input(&mut self, input: char) {
         self.input_buffer.push(input);
+    }
+
+    async fn setup_thread(&mut self) -> color_eyre::Result<()> {
+        // Check if thread is already configured
+        if self.thread.model.is_some() {
+            return Ok(());
+        }
+
+        // Send setup command
+        let setup_command = thread::Command::Setup {
+            model: "claude-sonnet-4-20250514".to_string(),
+            temperature: 0.7,
+            max_tokens: 4096,
+        };
+
+        let events = self.thread.process(setup_command)?;
+        let metadata = Metadata::default();
+
+        for event in events {
+            self.store
+                .push_event(
+                    &self.query.stream_id,
+                    &self.query.aggregate_id.clone().unwrap_or_default(),
+                    event.clone(),
+                    metadata.clone(),
+                )
+                .await?;
+        }
+
+        Ok(())
     }
 }
