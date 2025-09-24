@@ -1,0 +1,2 @@
+This file tests the Python legacy workflow trigger.
+Created for CI testing purposes.
