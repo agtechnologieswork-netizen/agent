@@ -5,10 +5,10 @@ on:
     branches:
       - main
     paths-ignore:
-      - "agent/**"
+      - 'agent/**'
   pull_request:
     paths-ignore:
-      - "agent/**"
+      - 'agent/**'
 
 jobs:
   rust-checks:
