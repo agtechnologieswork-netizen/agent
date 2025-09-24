@@ -142,6 +142,9 @@ impl<S: EventStore> App<S> {
             model: "claude-sonnet-4-20250514".to_string(),
             temperature: 0.7,
             max_tokens: 4096,
+            preamble: Some("You are a helpful AI assistant.".to_string()),
+            tools: None,
+            recipient: None,
         };
 
         let events = self.thread.process(setup_command)?;
@@ -152,8 +155,8 @@ impl<S: EventStore> App<S> {
                 .push_event(
                     &self.query.stream_id,
                     &self.query.aggregate_id.clone().unwrap_or_default(),
-                    event.clone(),
-                    metadata.clone(),
+                    &event,
+                    &metadata,
                 )
                 .await?;
         }
