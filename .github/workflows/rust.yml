@@ -1,4 +1,4 @@
-name: CI Pipeline (Python)
+name: Rust
 
 on:
   push:
@@ -12,7 +12,7 @@ env:
 
 jobs:
   rust-checks:
-    name: Rust Checks
+    name: Check and Clippy
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
