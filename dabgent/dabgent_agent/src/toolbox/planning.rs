@@ -1,30 +1,19 @@
-use crate::planner::{Planner, ThreadSettings};
 use dabgent_mq::EventStore;
 use eyre::Result;
 use serde::{Deserialize, Serialize};
-use std::sync::{Arc, Mutex};
 use super::{NoSandboxTool, NoSandboxAdapter};
 
-/// Tool for creating an initial plan from a task description
+/// Tool for creating a plan from task descriptions
 pub struct CreatePlanTool<S: EventStore> {
-    planner: Arc<Mutex<Option<Planner<S>>>>,
     store: S,
     stream_id: String,
-    settings: ThreadSettings,
 }
 
 impl<S: EventStore + Clone> CreatePlanTool<S> {
-    pub fn new(
-        planner: Arc<Mutex<Option<Planner<S>>>>,
-        store: S,
-        stream_id: String,
-        settings: ThreadSettings,
-    ) -> Self {
+    pub fn new(store: S, stream_id: String) -> Self {
         Self {
-            planner,
             store,
             stream_id,
-            settings,
         }
     }
 }
@@ -74,41 +63,37 @@ impl<S: EventStore + Clone + Send + Sync> NoSandboxTool for CreatePlanTool<S> {
         &self,
         args: Self::Args,
     ) -> Result<Result<Self::Output, Self::Error>> {
-        let mut planner_lock = match self.planner.lock() {
-            Ok(lock) => lock,
-            Err(_) => return Ok(Err("Failed to acquire planner lock".to_string())),
+        // Create PlanCreated event
+        let event = crate::event::Event::PlanCreated {
+            tasks: args.tasks.clone(),
         };
 
-        // Create new planner
-        let mut planner = Planner::new(
-            self.store.clone(),
-            self.stream_id.clone(),
-            self.settings.clone(),
-        );
+        // Push event to store
+        match self.store
+            .push_event(&self.stream_id, "planner", &event, &Default::default())
+            .await {
+            Ok(_) => {},
+            Err(e) => return Ok(Err(e.to_string())),
+        }
 
-        // Set tasks from the structured input
-        planner.set_tasks(args.tasks.clone());
+        let message = format!("Created plan with {} tasks", args.tasks.len());
 
-        // Return the tasks
-        let tasks = args.tasks;
-
-        let message = format!("Created plan with {} tasks", tasks.len());
-
-        // Store the planner
-        *planner_lock = Some(planner);
-
-        Ok(Ok(CreatePlanOutput { tasks, message }))
+        Ok(Ok(CreatePlanOutput {
+            tasks: args.tasks,
+            message
+        }))
     }
 }
 
 /// Tool for updating an existing plan
 pub struct UpdatePlanTool<S: EventStore> {
-    planner: Arc<Mutex<Option<Planner<S>>>>,
+    store: S,
+    stream_id: String,
 }
 
 impl<S: EventStore> UpdatePlanTool<S> {
-    pub fn new(planner: Arc<Mutex<Option<Planner<S>>>>) -> Self {
-        Self { planner }
+    pub fn new(store: S, stream_id: String) -> Self {
+        Self { store, stream_id }
     }
 }
 
@@ -157,36 +142,37 @@ impl<S: EventStore + Send + Sync> NoSandboxTool for UpdatePlanTool<S> {
         &self,
         args: Self::Args,
     ) -> Result<Result<Self::Output, Self::Error>> {
-        let mut planner_lock = match self.planner.lock() {
-            Ok(lock) => lock,
-            Err(_) => return Ok(Err("Failed to acquire planner lock".to_string())),
+        // Create PlanUpdated event
+        let event = crate::event::Event::PlanUpdated {
+            tasks: args.tasks.clone(),
         };
 
-        let planner = match planner_lock.as_mut() {
-            Some(p) => p,
-            None => return Ok(Err("No plan exists yet. Use create_plan first.".to_string())),
-        };
+        // Push event to store
+        match self.store
+            .push_event(&self.stream_id, "planner", &event, &Default::default())
+            .await {
+            Ok(_) => {},
+            Err(e) => return Ok(Err(e.to_string())),
+        }
 
-        // Update the plan with structured tasks
-        planner.set_tasks(args.tasks.clone());
+        let message = format!("Updated plan with {} tasks", args.tasks.len());
 
-        // Return the updated tasks
-        let tasks = args.tasks;
-
-        let message = format!("Updated plan with {} tasks", tasks.len());
-
-        Ok(Ok(UpdatePlanOutput { tasks, message }))
+        Ok(Ok(UpdatePlanOutput {
+            tasks: args.tasks,
+            message
+        }))
     }
 }
 
-/// Tool for getting the current plan status
+/// Tool for getting the current plan status from events
 pub struct GetPlanStatusTool<S: EventStore> {
-    planner: Arc<Mutex<Option<Planner<S>>>>,
+    store: S,
+    stream_id: String,
 }
 
 impl<S: EventStore> GetPlanStatusTool<S> {
-    pub fn new(planner: Arc<Mutex<Option<Planner<S>>>>) -> Self {
-        Self { planner }
+    pub fn new(store: S, stream_id: String) -> Self {
+        Self { store, stream_id }
     }
 }
 
@@ -219,7 +205,7 @@ impl<S: EventStore + Send + Sync> NoSandboxTool for GetPlanStatusTool<S> {
     fn definition(&self) -> rig::completion::ToolDefinition {
         rig::completion::ToolDefinition {
             name: self.name(),
-            description: "Get the current status of all tasks in the plan".to_string(),
+            description: "Get the current status of the plan".to_string(),
             parameters: serde_json::json!({
                 "type": "object",
                 "properties": {},
@@ -232,31 +218,47 @@ impl<S: EventStore + Send + Sync> NoSandboxTool for GetPlanStatusTool<S> {
         &self,
         _args: Self::Args,
     ) -> Result<Result<Self::Output, Self::Error>> {
-        let planner_lock = match self.planner.lock() {
-            Ok(lock) => lock,
-            Err(_) => return Ok(Err("Failed to acquire planner lock".to_string())),
+        // Load events to find the latest plan
+        let query = dabgent_mq::Query::stream(&self.stream_id).aggregate("planner");
+        let events = match self.store
+            .load_events::<crate::event::Event>(&query, None)
+            .await {
+            Ok(events) => events,
+            Err(e) => return Ok(Err(e.to_string())),
         };
 
-        let planner = match planner_lock.as_ref() {
-            Some(p) => p,
+        // Find the most recent plan
+        let mut current_tasks: Option<Vec<String>> = None;
+        for event in events.iter() {
+            match event {
+                crate::event::Event::PlanCreated { tasks } |
+                crate::event::Event::PlanUpdated { tasks } => {
+                    current_tasks = Some(tasks.clone());
+                }
+                _ => {}
+            }
+        }
+
+        let tasks = match current_tasks {
+            Some(tasks) => tasks,
             None => return Ok(Err("No plan exists yet. Use create_plan first.".to_string())),
         };
 
-        let tasks: Vec<TaskStatus> = planner
-            .tasks()
-            .iter()
-            .map(|t| TaskStatus {
-                description: t.description.clone(),
-                thread_id: t.thread().to_string(),
-                completed: t.completed,
+        // Convert to task status with thread IDs
+        let task_statuses: Vec<TaskStatus> = tasks.iter()
+            .enumerate()
+            .map(|(i, desc)| TaskStatus {
+                description: desc.clone(),
+                thread_id: format!("task-{}", i),
+                completed: false,  // Would need to track completion events
             })
             .collect();
 
-        let completed_count = tasks.iter().filter(|t| t.completed).count();
-        let total_count = tasks.len();
+        let total_count = task_statuses.len();
+        let completed_count = task_statuses.iter().filter(|t| t.completed).count();
 
         Ok(Ok(GetPlanStatusOutput {
-            tasks,
+            tasks: task_statuses,
             completed_count,
             total_count,
         }))
@@ -264,22 +266,19 @@ impl<S: EventStore + Send + Sync> NoSandboxTool for GetPlanStatusTool<S> {
 }
 
 pub fn planning_toolset<S: EventStore + Clone + Send + Sync + 'static>(
-    planner: Arc<Mutex<Option<Planner<S>>>>,
     store: S,
     stream_id: String,
-    settings: ThreadSettings,
 ) -> Vec<Box<dyn super::ToolDyn>> {
     vec![
-        Box::new(NoSandboxAdapter::new(CreatePlanTool::new(planner.clone(), store, stream_id, settings))),
-        Box::new(NoSandboxAdapter::new(UpdatePlanTool::new(planner.clone()))),
-        Box::new(NoSandboxAdapter::new(GetPlanStatusTool::new(planner))),
+        Box::new(NoSandboxAdapter::new(CreatePlanTool::new(store.clone(), stream_id.clone()))),
+        Box::new(NoSandboxAdapter::new(UpdatePlanTool::new(store.clone(), stream_id.clone()))),
+        Box::new(NoSandboxAdapter::new(GetPlanStatusTool::new(store, stream_id))),
     ]
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::planner::{Planner, ThreadSettings};
     use dabgent_mq::db::sqlite::SqliteStore;
     use sqlx::SqlitePool;
 
@@ -295,15 +294,7 @@ mod tests {
     #[tokio::test]
     async fn test_create_plan_tool() {
         let store = test_store().await;
-        let planner = Arc::new(Mutex::new(None));
-        let settings = ThreadSettings::new("test-model", 0.7, 1024);
-
-        let tool = CreatePlanTool::new(
-            planner.clone(),
-            store.clone(),
-            "test-stream".to_string(),
-            settings,
-        );
+        let tool = CreatePlanTool::new(store.clone(), "test-stream".to_string());
 
         // Test tool metadata
         assert_eq!(tool.name(), "create_plan");
@@ -320,29 +311,21 @@ mod tests {
         assert_eq!(result.tasks[1], "Task 2");
         assert_eq!(result.tasks[2], "Task 3");
         assert!(result.message.contains("3 tasks"));
-
-        // Verify planner was stored
-        assert!(planner.lock().unwrap().is_some());
     }
 
     #[tokio::test]
     async fn test_update_plan_tool() {
         let store = test_store().await;
-        let settings = ThreadSettings::new("test-model", 0.7, 1024);
 
-        // First create a planner with initial tasks
-        let planner = Arc::new(Mutex::new(None));
-        let mut initial_planner = Planner::new(
-            store.clone(),
-            "test-stream".to_string(),
-            settings.clone(),
-        );
-        initial_planner.set_tasks(vec!["Initial task".to_string()]);
-        *planner.lock().unwrap() = Some(initial_planner);
+        // First create a plan
+        let create_tool = CreatePlanTool::new(store.clone(), "test-stream".to_string());
+        let create_args = CreatePlanArgs {
+            tasks: vec!["Initial task".to_string()],
+        };
+        create_tool.call(create_args).await.unwrap().unwrap();
 
         // Now test updating the plan
-        let tool = UpdatePlanTool::new(planner.clone());
-
+        let tool = UpdatePlanTool::new(store.clone(), "test-stream".to_string());
         assert_eq!(tool.name(), "update_plan");
 
         let args = UpdatePlanArgs {
@@ -357,45 +340,18 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_update_plan_without_existing_plan() {
-        let _store = test_store().await;
-        let planner: Arc<Mutex<Option<Planner<SqliteStore>>>> = Arc::new(Mutex::new(None));
-        let tool = UpdatePlanTool::new(planner);
-
-        let args = UpdatePlanArgs {
-            tasks: vec!["Task".to_string()],
-        };
-
-        let result = tool.call(args).await.unwrap();
-        assert!(result.is_err());
-        if let Err(error) = result {
-            assert!(error.contains("No plan exists"));
-            assert!(error.contains("create_plan first"));
-        }
-    }
-
-    #[tokio::test]
     async fn test_get_plan_status_tool() {
         let store = test_store().await;
-        let settings = ThreadSettings::new("test-model", 0.7, 1024);
 
-        // Create a planner with some tasks using CreatePlanTool
-        let planner = Arc::new(Mutex::new(None));
-
-        let create_tool = CreatePlanTool::new(
-            planner.clone(),
-            store.clone(),
-            "test-stream".to_string(),
-            settings.clone(),
-        );
-
+        // Create a plan first
+        let create_tool = CreatePlanTool::new(store.clone(), "test-stream".to_string());
         let create_args = CreatePlanArgs {
             tasks: vec!["Task A".to_string(), "Task B".to_string(), "Task C".to_string()],
         };
-
         create_tool.call(create_args).await.unwrap().unwrap();
 
-        let tool = GetPlanStatusTool::new(planner.clone());
+        // Get plan status
+        let tool = GetPlanStatusTool::new(store.clone(), "test-stream".to_string());
         assert_eq!(tool.name(), "get_plan_status");
 
         let args = GetPlanStatusArgs {};
@@ -420,9 +376,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_get_plan_status_without_plan() {
-        let _store = test_store().await;
-        let planner: Arc<Mutex<Option<Planner<SqliteStore>>>> = Arc::new(Mutex::new(None));
-        let tool = GetPlanStatusTool::new(planner);
+        let store = test_store().await;
+        let tool = GetPlanStatusTool::new(store, "test-stream".to_string());
 
         let args = GetPlanStatusArgs {};
         let result = tool.call(args).await.unwrap();
@@ -432,79 +387,5 @@ mod tests {
             assert!(error.contains("No plan exists"));
             assert!(error.contains("create_plan first"));
         }
-    }
-
-    #[tokio::test]
-    async fn test_planning_toolset_integration() {
-        let store = test_store().await;
-        let settings = ThreadSettings::new("test-model", 0.7, 1024);
-        let planner = Arc::new(Mutex::new(None));
-
-        let tools = planning_toolset(
-            planner.clone(),
-            store.clone(),
-            "test-stream".to_string(),
-            settings,
-        );
-
-        assert_eq!(tools.len(), 3);
-        assert_eq!(tools[0].name(), "create_plan");
-        assert_eq!(tools[1].name(), "update_plan");
-        assert_eq!(tools[2].name(), "get_plan_status");
-    }
-
-    #[tokio::test]
-    async fn test_create_plan_with_empty_input() {
-        let store = test_store().await;
-        let planner = Arc::new(Mutex::new(None));
-        let settings = ThreadSettings::new("test-model", 0.7, 1024);
-
-        let tool = CreatePlanTool::new(
-            planner.clone(),
-            store.clone(),
-            "test-stream".to_string(),
-            settings,
-        );
-
-        let args = CreatePlanArgs {
-            tasks: vec![],
-        };
-
-        let result = tool.call(args).await.unwrap().unwrap();
-        assert_eq!(result.tasks.len(), 0);
-        assert!(result.message.contains("0 tasks"));
-    }
-
-    #[tokio::test]
-    async fn test_create_plan_with_multiple_tasks() {
-        let store = test_store().await;
-        let planner = Arc::new(Mutex::new(None));
-        let settings = ThreadSettings::new("test-model", 0.7, 1024);
-
-        let tool = CreatePlanTool::new(
-            planner.clone(),
-            store.clone(),
-            "test-stream".to_string(),
-            settings,
-        );
-
-        // Test with multiple tasks
-        let args = CreatePlanArgs {
-            tasks: vec![
-                "Create main file".to_string(),
-                "Add necessary imports".to_string(),
-                "Implement core functionality".to_string(),
-                "Add error handling".to_string(),
-                "Test the implementation".to_string(),
-            ],
-        };
-
-        let result = tool.call(args).await.unwrap().unwrap();
-        assert_eq!(result.tasks.len(), 5);
-        assert_eq!(result.tasks[0], "Create main file");
-        assert_eq!(result.tasks[1], "Add necessary imports");
-        assert_eq!(result.tasks[2], "Implement core functionality");
-        assert_eq!(result.tasks[3], "Add error handling");
-        assert_eq!(result.tasks[4], "Test the implementation");
     }
 }

@@ -1,12 +1,11 @@
-use dabgent_agent::planner::{Planner, ThreadSettings};
 use dabgent_agent::processor::{Pipeline, Processor, ThreadProcessor, ToolProcessor};
 use dabgent_agent::toolbox::{self, basic::toolset, planning::planning_toolset};
-use dabgent_mq::{EventStore, db::sqlite::SqliteStore};
+use dabgent_mq::db::sqlite::SqliteStore;
+use dabgent_mq::EventStore;
 use dabgent_sandbox::dagger::{ConnectOpts, Sandbox as DaggerSandbox};
 use dabgent_sandbox::{Sandbox, SandboxDyn};
 use eyre::Result;
 use rig::client::ProviderClient;
-use std::sync::{Arc, Mutex};
 
 const MODEL: &str = "claude-sonnet-4-20250514";
 
@@ -18,8 +17,8 @@ Program will be run using uv run main.py command.
 ";
 
 const PLANNING_PROMPT: &str = "
-You are an engineering project manager.
-Your role is to break down complex tasks into manageable steps.
+You are a planning assistant that breaks down complex tasks into actionable steps.
+
 Create a clear, actionable plan that an engineer can follow.
 
 When creating a plan:
@@ -43,100 +42,35 @@ async fn main() {
     let store = store().await;
 
     // Run the planning and execution pipeline
-    planning_pipeline(STREAM_ID, store, &prompt).await.unwrap();
+    planning_pipeline(STREAM_ID, store, prompt)
+        .await
+        .expect("Pipeline failed");
+
+    println!("\n✨ Planning example completed!");
 }
 
 pub async fn planning_pipeline(stream_id: &str, store: impl EventStore + Clone, task: &str) -> Result<()> {
     let stream_id = stream_id.to_owned();
     let task = task.to_owned();
 
-    // Shared planner state
-    let planner: Arc<Mutex<Option<Planner<_>>>> = Arc::new(Mutex::new(None));
-
-    // Thread settings
-    let settings = ThreadSettings::new(MODEL, 0.7, 4096);
-
     let opts = ConnectOpts::default();
     opts.connect(|client| async move {
-        println!("=== SINGLE PIPELINE, MULTI-AGENT ARCHITECTURE ===\n");
+        println!("=== EVENT-DRIVEN PLANNING PIPELINE ===\n");
         println!("Task: {}\n", task);
 
         let llm = rig::providers::anthropic::Client::from_env();
 
-        // Create processors for different agent types
-
-        // 1. Planning Agent (no sandbox needed)
-        let planning_thread = ThreadProcessor::new(
-            llm.clone(),
-            store.clone(),
-        );
-
-        // Create a dummy sandbox for planning tools
-        // Planning tools don't need actual sandbox functionality
-        let planning_sandbox = DummySandbox::new();
-
-        let planning_tools = planning_toolset(
-            planner.clone(),
-            store.clone(),
-            stream_id.clone(),
-            settings.clone(),
-        );
-
-        let planning_tool_processor = ToolProcessor::new(
-            planning_sandbox.boxed(),
-            store.clone(),
-            planning_tools,
-            Some("planner".to_string()),  // Only process planner messages
-        );
-
-        // 2. Execution Agent (with sandbox)
-        let execution_thread = ThreadProcessor::new(
-            llm.clone(),
-            store.clone(),
-        );
-
-        let execution_sandbox = sandbox(&client).await?;
-        let execution_tools = toolset(Validator);
-
-        let execution_tool_processor = ToolProcessor::new(
-            execution_sandbox.boxed(),
-            store.clone(),
-            execution_tools,
-            None,  // Process all non-planner messages (worker threads)
-        );
-
-        // Create the unified pipeline with both agent processors
-        // They will route based on the recipient field in events
-        let pipeline = Pipeline::new(
-            store.clone(),
-            vec![
-                planning_thread.boxed(),
-                planning_tool_processor.boxed(),
-                execution_thread.boxed(),
-                execution_tool_processor.boxed(),
-            ],
-        );
-
-        // Start the pipeline in background
-        let pipeline_handle = tokio::spawn({
-            let stream_id = stream_id.clone();
-            async move {
-                println!("Pipeline started, processing events...\n");
-                pipeline.run(stream_id).await
-            }
-        });
-
         // === PHASE 1: PLANNING ===
         println!("=== PHASE 1: PLANNING ===");
 
-        // Configure the planner agent
+        // Configure and run the planning agent
         let planning_config = dabgent_agent::event::Event::LLMConfig {
             model: MODEL.to_string(),
             temperature: 0.7,
             max_tokens: 4096,
             preamble: Some(PLANNING_PROMPT.to_string()),
             tools: Some(
-                planning_toolset(planner.clone(), store.clone(), stream_id.clone(), settings.clone())
+                planning_toolset(store.clone(), stream_id.clone())
                     .iter()
                     .map(|tool| tool.definition())
                     .collect()
@@ -157,81 +91,129 @@ pub async fn planning_pipeline(stream_id: &str, store: impl EventStore + Clone, 
             .push_event(&stream_id, "planner", &user_message, &Default::default())
             .await?;
 
-        // Wait for planning to complete
+        // Create planning pipeline with tools
+        let planning_sandbox = DummySandbox::new();
+        let planning_tools = planning_toolset(store.clone(), stream_id.clone());
+
+        let planning_thread = ThreadProcessor::new(llm.clone(), store.clone());
+        let planning_tool_processor = ToolProcessor::new(
+            planning_sandbox.boxed(),
+            store.clone(),
+            planning_tools,
+            Some("planner".to_string()),  // Only process planner messages
+        );
+
+        let planning_pipeline = Pipeline::new(
+            store.clone(),
+            vec![planning_thread.boxed(), planning_tool_processor.boxed()],
+        );
+
+        // Run planning pipeline briefly
         println!("Creating plan...");
-        let mut attempts = 0;
-        while attempts < 30 {
-            tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
-            if planner.lock().unwrap().is_some() {
-                println!("✓ Plan created!\n");
-                break;
+        let pipeline_handle = tokio::spawn({
+            let stream_id = stream_id.clone();
+            async move {
+                planning_pipeline.run(stream_id).await
             }
-            attempts += 1;
-            if attempts % 5 == 0 {
-                println!("  Still planning... ({} seconds)", attempts);
+        });
+
+        // Wait for plan to be created
+        tokio::time::sleep(tokio::time::Duration::from_secs(10)).await;
+        pipeline_handle.abort();
+
+        // === PHASE 2: EXECUTION ===
+        println!("\n=== PHASE 2: EXECUTION ===");
+
+        // Load events to get the plan
+        let query = dabgent_mq::Query::stream(&stream_id).aggregate("planner");
+        let events = store.load_events::<dabgent_agent::event::Event>(&query, None).await?;
+
+        // Find the most recent plan
+        let mut plan_tasks: Option<Vec<String>> = None;
+        for event in events.iter() {
+            match event {
+                dabgent_agent::event::Event::PlanCreated { tasks } |
+                dabgent_agent::event::Event::PlanUpdated { tasks } => {
+                    plan_tasks = Some(tasks.clone());
+                }
+                _ => {}
             }
         }
 
-        // === PHASE 2: EXECUTION ===
-        if let Some(planner_instance) = planner.lock().unwrap().as_ref() {
-            let tasks = planner_instance.tasks();
+        if let Some(tasks) = plan_tasks {
+            println!("Executing {} tasks:\n", tasks.len());
 
-            if !tasks.is_empty() {
-                println!("=== PHASE 2: EXECUTION ===");
-                println!("Executing {} tasks:\n", tasks.len());
+            // Create sandbox for execution
+            let execution_sandbox = sandbox(&client).await?;
+            let execution_tools = toolset(Validator);
 
-                // Configure each worker thread and dispatch tasks
-                for (i, task) in tasks.iter().enumerate() {
-                    let thread_id = task.thread();
-                    println!("Task {}/{}: {}", i + 1, tasks.len(), task.description);
-                    println!("  Thread: {}", thread_id);
+            // Configure each task thread and dispatch
+            for (i, task_desc) in tasks.iter().enumerate() {
+                let thread_id = format!("task-{}", i);
+                println!("Task {}/{}: {}", i + 1, tasks.len(), task_desc);
+                println!("  Thread: {}", thread_id);
 
-                    // Configure the worker thread with execution prompt and tools
-                    let worker_config = dabgent_agent::event::Event::LLMConfig {
-                        model: MODEL.to_string(),
-                        temperature: 0.7,
-                        max_tokens: 4096,
-                        preamble: Some(SYSTEM_PROMPT.to_string()),
-                        tools: Some(
-                            toolset(Validator)
-                                .iter()
-                                .map(|tool| tool.definition())
-                                .collect()
-                        ),
-                        recipient: Some(thread_id.to_string()),
-                    };
-                    store
-                        .push_event(&stream_id, thread_id, &worker_config, &Default::default())
-                        .await?;
+                // Configure the worker thread
+                let worker_config = dabgent_agent::event::Event::LLMConfig {
+                    model: MODEL.to_string(),
+                    temperature: 0.7,
+                    max_tokens: 4096,
+                    preamble: Some(SYSTEM_PROMPT.to_string()),
+                    tools: Some(
+                        execution_tools
+                            .iter()
+                            .map(|tool| tool.definition())
+                            .collect()
+                    ),
+                    recipient: Some(thread_id.to_string()),
+                };
+                store
+                    .push_event(&stream_id, &thread_id, &worker_config, &Default::default())
+                    .await?;
 
-                    // Send task to worker
-                    let task_message = dabgent_agent::event::Event::UserMessage(
-                        rig::OneOrMany::one(rig::message::UserContent::Text(rig::message::Text {
-                            text: task.description.clone(),
-                        }))
-                    );
-                    store
-                        .push_event(&stream_id, thread_id, &task_message, &Default::default())
-                        .await?;
+                // Send task to worker
+                let task_message = dabgent_agent::event::Event::UserMessage(
+                    rig::OneOrMany::one(rig::message::UserContent::Text(rig::message::Text {
+                        text: task_desc.clone(),
+                    }))
+                );
+                store
+                    .push_event(&stream_id, &thread_id, &task_message, &Default::default())
+                    .await?;
 
-                    println!("  ✓ Dispatched to worker\n");
-
-                    // Give some time between tasks for processing
-                    tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
-                }
-
-                // Wait for all tasks to complete
-                println!("Waiting for workers to complete tasks...");
-                tokio::time::sleep(tokio::time::Duration::from_secs(30)).await;
+                println!("  ✓ Dispatched to worker\n");
             }
+
+            // Create execution pipeline
+            let execution_thread = ThreadProcessor::new(llm.clone(), store.clone());
+            let execution_tool_processor = ToolProcessor::new(
+                execution_sandbox.boxed(),
+                store.clone(),
+                execution_tools,
+                None,  // Process all non-planner messages
+            );
+
+            let execution_pipeline = Pipeline::new(
+                store.clone(),
+                vec![execution_thread.boxed(), execution_tool_processor.boxed()],
+            );
+
+            // Run execution briefly
+            println!("Executing tasks...");
+            let exec_handle = tokio::spawn({
+                let stream_id = stream_id.clone();
+                async move {
+                    execution_pipeline.run(stream_id).await
+                }
+            });
+
+            tokio::time::sleep(tokio::time::Duration::from_secs(30)).await;
+            exec_handle.abort();
         } else {
             println!("No plan was created.");
         }
 
-        // Stop the pipeline
-        pipeline_handle.abort();
         println!("\n✅ Pipeline execution complete!");
-
         Ok(())
     })
     .await
@@ -303,6 +285,10 @@ impl Sandbox for DummySandbox {
 
     async fn export_directory(&self, _container_path: &str, _host_path: &str) -> Result<String> {
         Ok(String::new())
+    }
+
+    async fn fork(&self) -> Result<DummySandbox> {
+        Ok(DummySandbox)
     }
 }
 
