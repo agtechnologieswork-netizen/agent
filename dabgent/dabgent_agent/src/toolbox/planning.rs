@@ -168,6 +168,231 @@ impl<S: EventStore + Send + Sync> NoSandboxTool for UpdatePlanTool<S> {
     }
 }
 
+pub struct AddTaskTool<S: EventStore> {
+    store: S,
+    stream_id: String,
+}
+
+impl<S: EventStore> AddTaskTool<S> {
+    pub fn new(store: S, stream_id: String) -> Self {
+        Self { store, stream_id }
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct AddTaskArgs {
+    pub task: String,
+    pub position: Option<usize>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct AddTaskOutput {
+    pub tasks: Vec<String>,
+    pub message: String,
+}
+
+impl<S: EventStore + Send + Sync> NoSandboxTool for AddTaskTool<S> {
+    type Args = AddTaskArgs;
+    type Output = AddTaskOutput;
+    type Error = String;
+
+    fn name(&self) -> String {
+        "add_task".to_string()
+    }
+
+    fn definition(&self) -> rig::completion::ToolDefinition {
+        rig::completion::ToolDefinition {
+            name: self.name(),
+            description: "Add a single task to the existing plan".to_string(),
+            parameters: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "task": {
+                        "type": "string",
+                        "description": "A concrete, actionable task description to add"
+                    },
+                    "position": {
+                        "type": "integer",
+                        "description": "Optional position to insert the task (0-based index). If not provided, adds to the end"
+                    }
+                },
+                "required": ["task"]
+            }),
+        }
+    }
+
+    async fn call(
+        &self,
+        args: Self::Args,
+    ) -> Result<Result<Self::Output, Self::Error>> {
+        // Load current plan
+        let query = dabgent_mq::Query::stream(&self.stream_id).aggregate("planner");
+        let events = match self.store
+            .load_events::<crate::event::Event>(&query, None)
+            .await {
+            Ok(events) => events,
+            Err(e) => return Ok(Err(e.to_string())),
+        };
+
+        // Find the most recent plan
+        let mut current_tasks: Option<Vec<String>> = None;
+        for event in events.iter() {
+            match event {
+                crate::event::Event::PlanCreated { tasks } |
+                crate::event::Event::PlanUpdated { tasks } => {
+                    current_tasks = Some(tasks.clone());
+                }
+                _ => {}
+            }
+        }
+
+        let mut tasks = match current_tasks {
+            Some(tasks) => tasks,
+            None => return Ok(Err("No plan exists yet. Use create_plan first.".to_string())),
+        };
+
+        // Add the new task at the specified position or at the end
+        if let Some(pos) = args.position {
+            if pos > tasks.len() {
+                return Ok(Err(format!("Position {} is out of bounds (plan has {} tasks)", pos, tasks.len())));
+            }
+            tasks.insert(pos, args.task.clone());
+        } else {
+            tasks.push(args.task.clone());
+        }
+
+        // Create PlanUpdated event with the new task list
+        let event = crate::event::Event::PlanUpdated {
+            tasks: tasks.clone(),
+        };
+
+        // Push event to store
+        match self.store
+            .push_event(&self.stream_id, "planner", &event, &Default::default())
+            .await {
+            Ok(_) => {},
+            Err(e) => return Ok(Err(e.to_string())),
+        }
+
+        let message = format!("Added task '{}' to plan", args.task);
+
+        Ok(Ok(AddTaskOutput {
+            tasks,
+            message,
+        }))
+    }
+}
+
+pub struct CompleteTaskTool<S: EventStore> {
+    store: S,
+    stream_id: String,
+}
+
+impl<S: EventStore> CompleteTaskTool<S> {
+    pub fn new(store: S, stream_id: String) -> Self {
+        Self { store, stream_id }
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct CompleteTaskArgs {
+    pub task_index: usize,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct CompleteTaskOutput {
+    pub task: String,
+    pub message: String,
+}
+
+impl<S: EventStore + Send + Sync> NoSandboxTool for CompleteTaskTool<S> {
+    type Args = CompleteTaskArgs;
+    type Output = CompleteTaskOutput;
+    type Error = String;
+
+    fn name(&self) -> String {
+        "complete_task".to_string()
+    }
+
+    fn definition(&self) -> rig::completion::ToolDefinition {
+        rig::completion::ToolDefinition {
+            name: self.name(),
+            description: "Mark a specific task in the plan as completed".to_string(),
+            parameters: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "task_index": {
+                        "type": "integer",
+                        "description": "The index of the task to mark as completed (0-based)"
+                    }
+                },
+                "required": ["task_index"]
+            }),
+        }
+    }
+
+    async fn call(
+        &self,
+        args: Self::Args,
+    ) -> Result<Result<Self::Output, Self::Error>> {
+        // Load current plan to validate task exists
+        let query = dabgent_mq::Query::stream(&self.stream_id).aggregate("planner");
+        let events = match self.store
+            .load_events::<crate::event::Event>(&query, None)
+            .await {
+            Ok(events) => events,
+            Err(e) => return Ok(Err(e.to_string())),
+        };
+
+        // Find the most recent plan
+        let mut current_tasks: Option<Vec<String>> = None;
+        for event in events.iter() {
+            match event {
+                crate::event::Event::PlanCreated { tasks } |
+                crate::event::Event::PlanUpdated { tasks } => {
+                    current_tasks = Some(tasks.clone());
+                }
+                _ => {}
+            }
+        }
+
+        let tasks = match current_tasks {
+            Some(tasks) => tasks,
+            None => return Ok(Err("No plan exists yet. Use create_plan first.".to_string())),
+        };
+
+        // Validate task index
+        if args.task_index >= tasks.len() {
+            return Ok(Err(format!(
+                "Task index {} is out of bounds (plan has {} tasks)",
+                args.task_index,
+                tasks.len()
+            )));
+        }
+
+        let task = tasks[args.task_index].clone();
+
+        // Create TaskCompleted event for the specific task
+        let event = crate::event::Event::TaskCompleted { success: true };
+
+        // Push event to store with the appropriate thread_id
+        let thread_id = format!("task-{}", args.task_index);
+        match self.store
+            .push_event(&self.stream_id, &thread_id, &event, &Default::default())
+            .await {
+            Ok(_) => {},
+            Err(e) => return Ok(Err(e.to_string())),
+        }
+
+        let message = format!("Marked task {} as completed: '{}'", args.task_index, task);
+
+        Ok(Ok(CompleteTaskOutput {
+            task,
+            message,
+        }))
+    }
+}
+
 /// Tool for getting the current plan status from events
 pub struct GetPlanStatusTool<S: EventStore> {
     store: S,
@@ -276,6 +501,8 @@ pub fn planning_toolset<S: EventStore + Clone + Send + Sync + 'static>(
     vec![
         Box::new(NoSandboxAdapter::new(CreatePlanTool::new(store.clone(), stream_id.clone()))),
         Box::new(NoSandboxAdapter::new(UpdatePlanTool::new(store.clone(), stream_id.clone()))),
+        Box::new(NoSandboxAdapter::new(AddTaskTool::new(store.clone(), stream_id.clone()))),
+        Box::new(NoSandboxAdapter::new(CompleteTaskTool::new(store.clone(), stream_id.clone()))),
         Box::new(NoSandboxAdapter::new(GetPlanStatusTool::new(store, stream_id))),
     ]
 }
@@ -390,6 +617,116 @@ mod tests {
         if let Err(error) = result {
             assert!(error.contains("No plan exists"));
             assert!(error.contains("create_plan first"));
+        }
+    }
+
+    #[tokio::test]
+    async fn test_add_task_tool() {
+        let store = test_store().await;
+
+        // First create a plan
+        let create_tool = CreatePlanTool::new(store.clone(), "test-stream".to_string());
+        let create_args = CreatePlanArgs {
+            tasks: vec!["Task 1".to_string(), "Task 3".to_string()],
+        };
+        create_tool.call(create_args).await.unwrap().unwrap();
+
+        // Test adding a task at the end
+        let tool = AddTaskTool::new(store.clone(), "test-stream".to_string());
+        let args = AddTaskArgs {
+            task: "Task 4".to_string(),
+            position: None,
+        };
+        let result = tool.call(args).await.unwrap().unwrap();
+
+        assert_eq!(result.tasks.len(), 3);
+        assert_eq!(result.tasks[2], "Task 4");
+        assert!(result.message.contains("Added task"));
+
+        // Test adding a task at a specific position
+        let args = AddTaskArgs {
+            task: "Task 2".to_string(),
+            position: Some(1),
+        };
+        let result = tool.call(args).await.unwrap().unwrap();
+
+        assert_eq!(result.tasks.len(), 4);
+        assert_eq!(result.tasks[1], "Task 2");
+        assert_eq!(result.tasks[2], "Task 3");
+    }
+
+    #[tokio::test]
+    async fn test_add_task_without_plan() {
+        let store = test_store().await;
+        let tool = AddTaskTool::new(store, "test-stream".to_string());
+
+        let args = AddTaskArgs {
+            task: "New task".to_string(),
+            position: None,
+        };
+        let result = tool.call(args).await.unwrap();
+
+        assert!(result.is_err());
+        if let Err(error) = result {
+            assert!(error.contains("No plan exists"));
+        }
+    }
+
+    #[tokio::test]
+    async fn test_complete_task_tool() {
+        let store = test_store().await;
+
+        // First create a plan
+        let create_tool = CreatePlanTool::new(store.clone(), "test-stream".to_string());
+        let create_args = CreatePlanArgs {
+            tasks: vec![
+                "Task 1".to_string(),
+                "Task 2".to_string(),
+                "Task 3".to_string(),
+            ],
+        };
+        create_tool.call(create_args).await.unwrap().unwrap();
+
+        // Mark task 1 (index 1) as completed
+        let tool = CompleteTaskTool::new(store.clone(), "test-stream".to_string());
+        let args = CompleteTaskArgs {
+            task_index: 1,
+        };
+        let result = tool.call(args).await.unwrap().unwrap();
+
+        assert_eq!(result.task, "Task 2");
+        assert!(result.message.contains("Marked task 1 as completed"));
+
+        // Verify TaskCompleted event was created
+        let query = dabgent_mq::Query::stream("test-stream").aggregate("task-1");
+        let events = store.load_events::<crate::event::Event>(&query, None).await.unwrap();
+
+        let has_completed = events.iter().any(|e| matches!(e, crate::event::Event::TaskCompleted { success: true }));
+        assert!(has_completed);
+    }
+
+    #[tokio::test]
+    async fn test_complete_task_invalid_index() {
+        let store = test_store().await;
+
+        // Create a plan with 2 tasks
+        let create_tool = CreatePlanTool::new(store.clone(), "test-stream".to_string());
+        let create_args = CreatePlanArgs {
+            tasks: vec!["Task 1".to_string(), "Task 2".to_string()],
+        };
+        create_tool.call(create_args).await.unwrap().unwrap();
+
+        // Try to complete task at index 5 (out of bounds)
+        let tool = CompleteTaskTool::new(store.clone(), "test-stream".to_string());
+        let args = CompleteTaskArgs {
+            task_index: 5,
+        };
+        let result = tool.call(args).await.unwrap();
+
+        assert!(result.is_err());
+        if let Err(error) = result {
+            assert!(error.contains("out of bounds"));
+            assert!(error.contains("plan has 2 tasks"));
         }
     }
 }
