@@ -1,4 +1,4 @@
-use dabgent_agent::processor::{FinishProcessor, Pipeline, Processor, ThreadProcessor, ToolProcessor};
+use dabgent_agent::processor::{CompactProcessor, FinishProcessor, Pipeline, Processor, ThreadProcessor, ToolProcessor};
 use dabgent_agent::toolbox::ToolDyn;
 use dabgent_fastapi::{toolset::dataapps_toolset, validator::DataAppsValidator, artifact_preparer::DataAppsArtifactPreparer};
 use dabgent_mq::{EventStore, create_store, StoreConfig};
@@ -45,6 +45,13 @@ async fn main() {
         let completion_sandbox = sandbox.fork().await?;
         let tool_processor = ToolProcessor::new(dabgent_sandbox::Sandbox::boxed(sandbox), store.clone(), tool_processor_tools, None);
 
+        // Create CompactProcessor with small threshold for testing
+        let compact_processor = CompactProcessor::new(
+            store.clone(),
+            500,  // Small threshold to trigger compaction easily for testing
+            "gemini-2.5-flash".to_string(),  // Use same model as main pipeline
+        );
+
         // FixMe: FinishProcessor should have no state, including export path
         let finish_processor = FinishProcessor::new_with_preparer(
             dabgent_sandbox::Sandbox::boxed(completion_sandbox),
@@ -59,11 +66,13 @@ async fn main() {
             vec![
                 thread_processor.boxed(),
                 tool_processor.boxed(),
+                compact_processor.boxed(),  // Add CompactProcessor to the pipeline
                 finish_processor.boxed(),
             ],
         );
 
         tracing::info!("Artifacts will be exported to: {}", export_path);
+        tracing::info!("Error compaction enabled with threshold: 500 characters");
 
         tracing::info!("Pipeline configured, starting execution...");
 
@@ -158,6 +167,7 @@ async fn push_llm_config<S: EventStore>(
         preamble: Some(SYSTEM_PROMPT.to_owned()),
         tools: Some(tool_definitions),
         recipient: None,
+        parent: None,
     };
     store
         .push_event(stream_id, aggregate_id, &event, &Default::default())

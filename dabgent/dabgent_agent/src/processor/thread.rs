@@ -64,6 +64,7 @@ impl Aggregate for Thread {
                 preamble,
                 tools,
                 recipient,
+                parent: _,
             } => {
                 self.model = Some(model.clone());
                 self.temperature = Some(temperature.clone());
@@ -106,6 +107,7 @@ impl Thread {
                 preamble,
                 tools,
                 recipient,
+                parent: None,
             }]),
             _ => unreachable!(),
         }

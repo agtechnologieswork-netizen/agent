@@ -2,6 +2,7 @@ pub mod finish;
 pub mod sandbox;
 pub mod thread;
 pub mod replay;
+pub mod compaction;
 use dabgent_mq::{EventDb, EventStore, Query};
 use std::pin::Pin;
 use tokio::sync::mpsc;
@@ -9,6 +10,7 @@ use tokio::sync::mpsc;
 pub use finish::FinishProcessor;
 pub use sandbox::ToolProcessor;
 pub use thread::ThreadProcessor;
+pub use compaction::CompactProcessor;
 
 pub trait Aggregate: Default {
     type Command;
