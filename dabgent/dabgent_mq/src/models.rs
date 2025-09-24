@@ -61,12 +61,23 @@ impl<A: Aggregate, ES: EventStore> Handler<A, ES> {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct Envelope<A: Aggregate> {
     pub aggregate_id: String,
     pub sequence: i64,
     pub data: A::Event,
     pub metadata: Metadata,
+}
+
+impl<A: Aggregate> Clone for Envelope<A> {
+    fn clone(&self) -> Self {
+        Self {
+            aggregate_id: self.aggregate_id.clone(),
+            sequence: self.sequence,
+            data: self.data.clone(),
+            metadata: self.metadata.clone(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

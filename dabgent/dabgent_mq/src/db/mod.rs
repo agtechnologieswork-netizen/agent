@@ -65,10 +65,20 @@ pub trait EventStore: Clone + Send + Sync + 'static {
         aggregate_id: &str,
     ) -> impl Future<Output = Result<Vec<Envelope<A>>, Error>> + Send;
 
+    fn load_latest_events<A: Aggregate>(
+        &self,
+        aggregate_id: &str,
+        sequence_from: i64,
+    ) -> impl Future<Output = Result<Vec<Envelope<A>>, Error>> + Send;
+
     fn load_aggregate<A: Aggregate>(
         &self,
         aggregate_id: &str,
     ) -> impl Future<Output = Result<AggregateContext<A>, Error>> + Send;
+
+    fn load_sequence_nums<A: Aggregate>(
+        &self,
+    ) -> impl Future<Output = Result<Vec<(String, i64)>, Error>> + Send;
 }
 
 pub fn wrap_events<A: Aggregate>(
@@ -90,13 +100,6 @@ pub fn wrap_events<A: Aggregate>(
             }
         })
         .collect()
-}
-
-pub trait EventQueue {
-    fn listen<A: Aggregate>(
-        &mut self,
-        callbacks: Vec<Box<dyn crate::Callback<A>>>,
-    ) -> eyre::Result<crate::Listener<A>>;
 }
 
 #[derive(Debug, thiserror::Error)]

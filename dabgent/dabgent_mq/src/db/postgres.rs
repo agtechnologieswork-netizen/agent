@@ -1,9 +1,5 @@
 use super::*;
-use serde_json::Value as JsonValue;
 use sqlx::PgPool;
-use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
-use tokio::sync::mpsc;
 
 static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("./migrations/postgres");
 
@@ -125,5 +121,32 @@ impl EventStore for PostgresStore {
             .into_iter()
             .map(Envelope::try_from)
             .collect::<Result<Vec<_>, _>>()
+    }
+
+    async fn load_latest_events<A: Aggregate>(
+        &self,
+        aggregate_id: &str,
+        sequence_from: i64,
+    ) -> Result<Vec<Envelope<A>>, Error> {
+        let (sql, params) = self.select_query(A::TYPE, Some(aggregate_id), Some(sequence_from));
+        let mut query = sqlx::query_as::<_, SerializedEvent>(&sql);
+        for param in params {
+            query = query.bind(param);
+        }
+        let serialized = query.fetch_all(&self.pool).await.map_err(Error::Database)?;
+        serialized
+            .into_iter()
+            .map(Envelope::try_from)
+            .collect::<Result<Vec<_>, _>>()
+    }
+
+    async fn load_sequence_nums<A: Aggregate>(&self) -> Result<Vec<(String, i64)>, Error> {
+        sqlx::query_as::<_, (String, i64)>(
+            r#"SELECT aggregate_id, MAX(sequence) FROM events WHERE stream_id = $1 GROUP BY aggregate_id;"#
+        )
+        .bind(&self.stream_id)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(Error::Database)
     }
 }
