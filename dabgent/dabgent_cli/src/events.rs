@@ -1,6 +1,6 @@
 use color_eyre::eyre::OptionExt;
 use crossterm::event::Event as CrosstermEvent;
-use dabgent_agent::thread::{self};
+use dabgent_agent::event::Event as AgentEvent;
 use dabgent_mq::db::EventStream;
 use std::time::Duration;
 use tokio::sync::mpsc;
@@ -20,7 +20,7 @@ pub enum AppEvent {
 pub enum Event {
     Tick,
     Crossterm(CrosstermEvent),
-    Thread(thread::Event),
+    Thread(AgentEvent),
     App(AppEvent),
 }
 
@@ -30,7 +30,7 @@ pub struct EventHandler {
 }
 
 impl EventHandler {
-    pub fn new(events_stream: EventStream<thread::Event>) -> Self {
+    pub fn new(events_stream: EventStream<AgentEvent>) -> Self {
         let (sender, receiver) = mpsc::unbounded_channel();
         let actor = EventTask::new(sender.clone());
         tokio::spawn(async { actor.run().await });
@@ -53,11 +53,11 @@ impl EventHandler {
 
 pub struct StoreTask {
     sender: mpsc::UnboundedSender<Event>,
-    receiver: EventStream<thread::Event>,
+    receiver: EventStream<AgentEvent>,
 }
 
 impl StoreTask {
-    pub fn new(sender: mpsc::UnboundedSender<Event>, receiver: EventStream<thread::Event>) -> Self {
+    pub fn new(sender: mpsc::UnboundedSender<Event>, receiver: EventStream<AgentEvent>) -> Self {
         Self { sender, receiver }
     }
 
