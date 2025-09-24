@@ -1,7 +1,7 @@
 use dabgent_agent::processor::{Pipeline, Processor, ThreadProcessor, ToolProcessor};
 use dabgent_agent::toolbox::{self, basic::toolset, planning::planning_toolset};
 use dabgent_mq::db::sqlite::SqliteStore;
-use dabgent_mq::EventStore;
+use dabgent_mq::{Event as _, EventStore};
 use dabgent_sandbox::dagger::{ConnectOpts, Sandbox as DaggerSandbox};
 use dabgent_sandbox::{Sandbox, SandboxDyn};
 use eyre::Result;
@@ -37,7 +37,7 @@ async fn main() {
     tracing_subscriber::fmt::init();
 
     const STREAM_ID: &str = "planning-pipeline";
-    let prompt = "Build an app that creates sample random dataset of CSV files and builds a UI to display it";
+    let prompt = "Create a hello world Python script that prints a greeting";
 
     let store = store().await;
 
@@ -159,51 +159,13 @@ pub async fn planning_pipeline(stream_id: &str, store: impl EventStore + Clone, 
         }
 
         if let Some(tasks) = plan_tasks {
-            println!("Executing {} tasks:\n", tasks.len());
+            println!("Executing {} tasks sequentially:\n", tasks.len());
 
             // Create sandbox for execution
             let execution_sandbox = sandbox(&client).await?;
             let execution_tools = toolset(Validator);
 
-            // Configure each task thread and dispatch
-            for (i, task_desc) in tasks.iter().enumerate() {
-                let thread_id = format!("task-{}", i);
-                println!("Task {}/{}: {}", i + 1, tasks.len(), task_desc);
-                println!("  Thread: {}", thread_id);
-
-                // Configure the worker thread
-                let worker_config = dabgent_agent::event::Event::LLMConfig {
-                    model: MODEL.to_string(),
-                    temperature: 0.7,
-                    max_tokens: 4096,
-                    preamble: Some(SYSTEM_PROMPT.to_string()),
-                    tools: Some(
-                        execution_tools
-                            .iter()
-                            .map(|tool| tool.definition())
-                            .collect()
-                    ),
-                    recipient: Some(thread_id.to_string()),
-                };
-                store
-                    .push_event(&stream_id, &thread_id, &worker_config, &Default::default())
-                    .await?;
-
-                // Send task to worker
-                let task_message = dabgent_agent::event::Event::UserMessage(
-                    rig::OneOrMany::one(rig::message::UserContent::Text(rig::message::Text {
-                        text: task_desc.clone(),
-                    }))
-                );
-                store
-                    .push_event(&stream_id, &thread_id, &task_message, &Default::default())
-                    .await?;
-
-                println!("  ✓ Dispatched to worker\n");
-            }
-
             // Create execution pipeline
-            println!("Executing tasks...");
             let execution_thread = ThreadProcessor::new(llm.clone(), store.clone());
             let execution_tool_processor = ToolProcessor::new(
                 execution_sandbox.boxed(),
@@ -217,6 +179,7 @@ pub async fn planning_pipeline(stream_id: &str, store: impl EventStore + Clone, 
                 vec![execution_thread.boxed(), execution_tool_processor.boxed()],
             );
 
+            // Start the execution pipeline
             let exec_handle = tokio::spawn({
                 let stream_id = stream_id.clone();
                 async move {
@@ -224,39 +187,85 @@ pub async fn planning_pipeline(stream_id: &str, store: impl EventStore + Clone, 
                 }
             });
 
-            let mut completed_tasks = 0;
-            let mut last_progress_time = std::time::Instant::now();
-            let timeout = std::time::Duration::from_secs(300); // 5 minute timeout
-            let start_time = std::time::Instant::now();
+            // Execute tasks one by one
+            for (i, task_desc) in tasks.iter().enumerate() {
+                let thread_id = format!("task-{}", i);
+                println!("Task {}/{}: {}", i + 1, tasks.len(), task_desc);
+                println!("  Executing on thread: {}", thread_id);
 
-            loop {
-                tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
+                // Configure the worker thread
+                let worker_config = dabgent_agent::event::Event::LLMConfig {
+                    model: MODEL.to_string(),
+                    temperature: 0.7,
+                    max_tokens: 4096,
+                    preamble: Some(SYSTEM_PROMPT.to_string()),
+                    tools: Some(
+                        toolset(Validator)
+                            .iter()
+                            .map(|tool| tool.definition())
+                            .collect()
+                    ),
+                    recipient: None,
+                };
+                store
+                    .push_event(&stream_id, &thread_id, &worker_config, &Default::default())
+                    .await?;
 
-                let query = dabgent_mq::Query::stream(&stream_id);
-                let events = store.load_events::<dabgent_agent::event::Event>(&query, None).await?;
+                // Send task to worker
+                let task_message = dabgent_agent::event::Event::UserMessage(
+                    rig::OneOrMany::one(rig::message::UserContent::Text(rig::message::Text {
+                        text: format!("{}\nWhen complete, call the 'done' tool to mark this task as finished.", task_desc),
+                    }))
+                );
+                store
+                    .push_event(&stream_id, &thread_id, &task_message, &Default::default())
+                    .await?;
 
-                completed_tasks = events.iter()
-                    .filter(|e| matches!(e, dabgent_agent::event::Event::TaskCompleted { .. }))
-                    .count();
+                // Wait for this specific task to complete
+                let task_timeout = std::time::Duration::from_secs(60); // 1 minute per task
+                let task_start = std::time::Instant::now();
+                let mut task_completed = false;
 
-                // Only print progress every 5 seconds to avoid spam
-                if last_progress_time.elapsed() > std::time::Duration::from_secs(5) {
-                    println!("Progress: {}/{} tasks completed", completed_tasks, tasks.len());
-                    last_progress_time = std::time::Instant::now();
+                while !task_completed && task_start.elapsed() < task_timeout {
+                    tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+
+                    // Check for TaskCompleted events
+                    let query = dabgent_mq::Query::stream(&stream_id);
+                    let events = store.load_events::<dabgent_agent::event::Event>(&query, None).await?;
+
+                    let completed_count = events.iter()
+                        .filter(|e| matches!(e, dabgent_agent::event::Event::TaskCompleted { .. }))
+                        .count();
+
+                    if completed_count > i {
+                        task_completed = true;
+                        println!("  ✓ Task completed\n");
+                    }
                 }
 
-                if completed_tasks >= tasks.len() {
-                    println!("✓ All tasks completed successfully!");
-                    break;
-                }
-
-                if start_time.elapsed() > timeout {
-                    println!("⚠ Timeout: Only {}/{} tasks completed after 5 minutes", completed_tasks, tasks.len());
-                    break;
+                if !task_completed {
+                    println!("  ⚠ Task timed out after 1 minute\n");
+                    // Continue to next task anyway
                 }
             }
 
+            // Stop the execution pipeline
             exec_handle.abort();
+
+            // Final summary
+            let query = dabgent_mq::Query::stream(&stream_id);
+            let events = store.load_events::<dabgent_agent::event::Event>(&query, None).await?;
+            let final_completed = events.iter()
+                .filter(|e| matches!(e, dabgent_agent::event::Event::TaskCompleted { .. }))
+                .count();
+
+            println!("=== EXECUTION SUMMARY ===");
+            println!("Completed: {}/{} tasks", final_completed, tasks.len());
+            if final_completed == tasks.len() {
+                println!("✓ All tasks completed successfully!");
+            } else {
+                println!("⚠ Some tasks did not complete");
+            }
         } else {
             println!("No plan was created.");
         }
