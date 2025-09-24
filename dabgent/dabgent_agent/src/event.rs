@@ -3,6 +3,12 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ParentAggregate {
+    pub aggregate_id: String,
+    pub tool_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Event {
     LLMConfig {
         model: String,
@@ -11,12 +17,14 @@ pub enum Event {
         preamble: Option<String>,
         tools: Option<Vec<rig::completion::ToolDefinition>>,
         recipient: Option<String>,
+        parent: Option<ParentAggregate>,
     },
     AgentMessage {
         response: CompletionResponse,
         recipient: Option<String>,
     },
     UserMessage(rig::OneOrMany<rig::message::UserContent>),
+    ToolResult(Vec<rig::message::ToolResult>),
     ArtifactsCollected(HashMap<String, String>),
     TaskCompleted {
         success: bool,
@@ -48,6 +56,7 @@ impl dabgent_mq::Event for Event {
             Event::LLMConfig { .. } => "llm_config",
             Event::AgentMessage { .. } => "agent_message",
             Event::UserMessage(..) => "user_message",
+            Event::ToolResult { .. } => "tool_result",
             Event::ArtifactsCollected(..) => "artifacts_collected",
             Event::TaskCompleted { .. } => "task_completed",
             Event::SeedSandboxFromTemplate { .. } => "seed_sandbox_from_template",

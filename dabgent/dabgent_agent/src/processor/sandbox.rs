@@ -1,7 +1,6 @@
-use super::{Aggregate, Processor};
+use super::Processor;
 use crate::event::Event;
 use crate::llm::{CompletionResponse, FinishReason};
-use crate::processor::thread::{self};
 use crate::toolbox::{ToolCallExt, ToolDyn};
 use dabgent_mq::{EventDb, EventStore, Query};
 use dabgent_sandbox::SandboxDyn;
@@ -19,7 +18,6 @@ pub struct ToolProcessor<E: EventStore> {
 
 impl<E: EventStore> Processor<Event> for ToolProcessor<E> {
     async fn run(&mut self, event: &EventDb<Event>) -> eyre::Result<()> {
-        let query = Query::stream(&event.stream_id).aggregate(&event.aggregate_id);
         match &event.data {
             Event::SeedSandboxFromTemplate { template_path, base_path } => {
                 // Seed sandbox from template on host filesystem
@@ -53,29 +51,25 @@ impl<E: EventStore> Processor<Event> for ToolProcessor<E> {
                     }
                 }
             }
+            // Phase 1: AgentMessage with ToolUse -> emit ToolResult
             Event::AgentMessage {
                 response,
                 recipient,
+                ..
             } if response.finish_reason == FinishReason::ToolUse
                 && recipient.eq(&self.recipient) =>
             {
-                let events = self.event_store.load_events::<Event>(&query, None).await?;
-                let mut thread = thread::Thread::fold(&events);
-                let tools = self.run_tools(&response, &event.stream_id, &event.aggregate_id).await?;
-                let tools = tools.into_iter().map(rig::message::UserContent::ToolResult);
-                let content = rig::OneOrMany::many(tools)?;
-                let new_events = thread.process(thread::Command::User(content))?;
-                for new_event in new_events.iter() {
-                    self.event_store
-                        .push_event(
-                            &event.stream_id,
-                            &event.aggregate_id,
-                            new_event,
-                            &Default::default(),
-                        )
-                        .await?;
-                }
+                let tool_results = self.run_tools(&response, &event.stream_id, &event.aggregate_id).await?;
+                let tool_result_event = Event::ToolResult(tool_results);
+
+                self.event_store.push_event(
+                    &event.stream_id,
+                    &event.aggregate_id,
+                    &tool_result_event,
+                    &Default::default(),
+                ).await?;
             }
+
             _ => {}
         }
         Ok(())
