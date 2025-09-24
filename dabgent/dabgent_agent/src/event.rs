@@ -40,6 +40,12 @@ pub enum Event {
         template_hash: Option<String>,
     },
     PipelineShutdown,
+    PlanCreated {
+        tasks: Vec<String>,
+    },
+    PlanUpdated {
+        tasks: Vec<String>,
+    },
 }
 
 impl dabgent_mq::Event for Event {
@@ -56,6 +62,8 @@ impl dabgent_mq::Event for Event {
             Event::SeedSandboxFromTemplate { .. } => "seed_sandbox_from_template",
             Event::SandboxSeeded { .. } => "sandbox_seeded",
             Event::PipelineShutdown => "pipeline_shutdown",
+            Event::PlanCreated { .. } => "plan_created",
+            Event::PlanUpdated { .. } => "plan_updated",
         }
     }
 }

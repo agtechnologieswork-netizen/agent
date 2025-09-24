@@ -59,6 +59,8 @@ pub fn event_as_text(event: &AgentEvent) -> Text<'_> {
         AgentEvent::SandboxSeeded { .. } => Text::raw("Sandbox seeded"),
         AgentEvent::PipelineShutdown => Text::raw("Pipeline shutdown"),
         AgentEvent::ToolResult(_) => Text::raw("Tool result"),
+        AgentEvent::PlanCreated { tasks } => render_plan_created(tasks),
+        AgentEvent::PlanUpdated { tasks } => render_plan_updated(tasks),
     }
 }
 
@@ -66,6 +68,22 @@ pub fn render_artifacts_collected(
     artifacts: &std::collections::HashMap<String, String>,
 ) -> Text<'_> {
     Text::from(format!("Collected {} artifacts", artifacts.len()))
+}
+
+pub fn render_plan_created(tasks: &[String]) -> Text<'_> {
+    let mut lines = vec![Line::from("Plan created with tasks:")];
+    for (i, task) in tasks.iter().enumerate() {
+        lines.push(Line::from(format!("  {}. {}", i + 1, task)));
+    }
+    Text::from(lines)
+}
+
+pub fn render_plan_updated(tasks: &[String]) -> Text<'_> {
+    let mut lines = vec![Line::from("Plan updated with tasks:")];
+    for (i, task) in tasks.iter().enumerate() {
+        lines.push(Line::from(format!("  {}. {}", i + 1, task)));
+    }
+    Text::from(lines)
 }
 
 pub fn render_llm_config<'a>(
