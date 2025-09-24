@@ -49,6 +49,7 @@ pub fn event_as_text(event: &AgentEvent) -> Text<'_> {
             preamble,
             tools,
             recipient,
+            ..
         } => render_llm_config(model, *temperature, *max_tokens, preamble, tools, recipient),
         AgentEvent::AgentMessage { response, .. } => render_agent_message(response),
         AgentEvent::UserMessage(content) => render_user_message(content),
@@ -57,6 +58,7 @@ pub fn event_as_text(event: &AgentEvent) -> Text<'_> {
         AgentEvent::SeedSandboxFromTemplate { .. } => Text::raw("Sandbox seeded from template"),
         AgentEvent::SandboxSeeded { .. } => Text::raw("Sandbox seeded"),
         AgentEvent::PipelineShutdown => Text::raw("Pipeline shutdown"),
+        AgentEvent::ToolResult(_) => Text::raw("Tool result"),
     }
 }
 
