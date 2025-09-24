@@ -93,9 +93,7 @@ impl crate::Sandbox for Sandbox {
         let dir = self.ctr.directory(container_path);
         dir.export(host_path).await.map_err(Into::into)
     }
-}
 
-impl crate::SandboxFork for Sandbox {
     async fn fork(&self) -> Result<Self>
     where
         Self: Sized,
@@ -105,6 +103,7 @@ impl crate::SandboxFork for Sandbox {
         Ok(Sandbox { ctr, client })
     }
 }
+
 
 impl ExecResult {
     async fn get_output(ctr: &dagger_sdk::Container) -> Result<Self> {

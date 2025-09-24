@@ -1,4 +1,4 @@
-use dabgent_agent::handler::Handler;
+use dabgent_agent::Aggregate;
 use dabgent_mq::models::Event;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -63,46 +63,50 @@ impl ChatSession {
     }
 }
 
-impl Handler for ChatSession {
+impl Aggregate for ChatSession {
     type Command = ChatCommand;
     type Event = ChatEvent;
     type Error = ChatError;
 
     fn process(&mut self, command: Self::Command) -> Result<Vec<Self::Event>, Self::Error> {
-        match command {
-            ChatCommand::SendMessage(content) => {
-                if self.waiting_for_agent {
-                    return Err(ChatError::AgentProcessing);
-                }
-                let event = ChatEvent::UserMessage { content };
-                self.messages.push(event.clone());
-                self.waiting_for_agent = true;
-                Ok(vec![event])
-            }
-            ChatCommand::AgentRespond(content) => {
-                if !self.waiting_for_agent {
-                    return Err(ChatError::NoUserMessage);
-                }
-                let event = ChatEvent::AgentMessage { content };
-                self.messages.push(event.clone());
-                self.waiting_for_agent = false;
-                Ok(vec![event])
-            }
+        let events = match command {
+            ChatCommand::SendMessage(content) => self.handle_send_message(content)?,
+            ChatCommand::AgentRespond(content) => self.handle_agent_respond(content)?,
+        };
+        for event in events.iter() {
+            self.apply(event);
         }
+        Ok(events)
     }
 
-    fn fold(events: &[Self::Event]) -> Self {
+    fn apply(&mut self, event: &Self::Event) {
+        self.messages.push(event.clone());
+        match event {
+            ChatEvent::UserMessage { .. } => self.waiting_for_agent = true,
+            ChatEvent::AgentMessage { .. } => self.waiting_for_agent = false,
+        }
+    }
+}
+
+impl ChatSession {
+    fn handle_send_message(&self, content: String) -> Result<Vec<ChatEvent>, ChatError> {
+        if self.waiting_for_agent {
+            return Err(ChatError::AgentProcessing);
+        }
+        Ok(vec![ChatEvent::UserMessage { content }])
+    }
+
+    fn handle_agent_respond(&self, content: String) -> Result<Vec<ChatEvent>, ChatError> {
+        if !self.waiting_for_agent {
+            return Err(ChatError::NoUserMessage);
+        }
+        Ok(vec![ChatEvent::AgentMessage { content }])
+    }
+
+    pub fn fold(events: &[ChatEvent]) -> Self {
         let mut session = Self::new();
         for event in events {
-            session.messages.push(event.clone());
-            match event {
-                ChatEvent::UserMessage { .. } => {
-                    session.waiting_for_agent = true;
-                }
-                ChatEvent::AgentMessage { .. } => {
-                    session.waiting_for_agent = false;
-                }
-            }
+            session.apply(event);
         }
         session
     }
