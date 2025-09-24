@@ -1,4 +1,4 @@
-use crate::llm::{Completion, CompletionResponse, LLMClient};
+use crate::llm::{Completion, CompletionResponse, LLMClient, WithRetryExt};
 use crate::{Aggregate, Event, Processor};
 use dabgent_mq::{EventDb, EventStore, Query};
 use eyre::Result;
@@ -191,6 +191,7 @@ impl<T: LLMClient, E: EventStore> ThreadProcessor<T, E> {
         if let Some(ref tools) = thread.tools {
             completion = completion.tools(tools.clone());
         }
-        self.llm.completion(completion).await
+        let llm = self.llm.clone().with_retry();
+        llm.completion(completion).await
     }
 }
