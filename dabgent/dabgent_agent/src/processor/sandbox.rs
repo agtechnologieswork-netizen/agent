@@ -18,7 +18,6 @@ pub struct ToolProcessor<E: EventStore> {
 
 impl<E: EventStore> Processor<Event> for ToolProcessor<E> {
     async fn run(&mut self, event: &EventDb<Event>) -> eyre::Result<()> {
-        let _query = Query::stream(&event.stream_id).aggregate(&event.aggregate_id);
         match &event.data {
             Event::SeedSandboxFromTemplate { template_path, base_path } => {
                 // Seed sandbox from template on host filesystem
@@ -61,7 +60,6 @@ impl<E: EventStore> Processor<Event> for ToolProcessor<E> {
                 && recipient.eq(&self.recipient) =>
             {
                 let tool_results = self.run_tools(&response, &event.stream_id, &event.aggregate_id).await?;
-
                 let tool_result_event = Event::ToolResult(tool_results);
 
                 self.event_store.push_event(
