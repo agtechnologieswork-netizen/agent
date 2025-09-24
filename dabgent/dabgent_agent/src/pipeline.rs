@@ -1,30 +1,40 @@
-use crate::agent::{ToolWorker, Worker};
-use crate::handler::Handler;
+use crate::event::Event;
 use crate::llm::LLMClient;
-use crate::thread::{self, Event, Thread};
+use crate::processor::{
+    Aggregate, Pipeline as ProcessorPipeline, Processor, ThreadProcessor, ToolProcessor,
+    thread::{self},
+};
 use crate::toolbox::ToolDyn;
-use dabgent_mq::{EventStore, db::Query};
+use dabgent_mq::{
+    EventStore,
+    db::{Metadata, Query},
+};
 use dabgent_sandbox::SandboxDyn;
 use eyre::{OptionExt, Result};
+use std::marker::PhantomData;
+
+const DEFAULT_TEMPERATURE: f64 = 0.0;
+const DEFAULT_MAX_TOKENS: u64 = 4_096;
 
 pub struct PipelineBuilder<T, S>
 where
-    T: LLMClient,
+    T: LLMClient + 'static,
     S: EventStore,
 {
     llm: Option<T>,
     store: Option<S>,
+    sandbox: Option<Box<dyn SandboxDyn>>,
     model: Option<String>,
     preamble: Option<String>,
-    sandbox: Option<Box<dyn SandboxDyn>>,
+    temperature: Option<f64>,
+    max_tokens: Option<u64>,
+    recipient: Option<String>,
     tools: Vec<Box<dyn ToolDyn>>,
-    _worker_marker: std::marker::PhantomData<Worker<T, S>>,
-    _sandbox_marker: std::marker::PhantomData<Box<dyn SandboxDyn>>,
 }
 
 impl<T, S> PipelineBuilder<T, S>
 where
-    T: LLMClient,
+    T: LLMClient + 'static,
     S: EventStore,
 {
     pub fn new() -> Self {
@@ -34,9 +44,10 @@ where
             sandbox: None,
             model: None,
             preamble: None,
+            temperature: None,
+            max_tokens: None,
+            recipient: None,
             tools: Vec::new(),
-            _worker_marker: std::marker::PhantomData,
-            _sandbox_marker: std::marker::PhantomData,
         }
     }
 
@@ -65,6 +76,21 @@ where
         self
     }
 
+    pub fn temperature(mut self, temperature: f64) -> Self {
+        self.temperature = Some(temperature);
+        self
+    }
+
+    pub fn max_tokens(mut self, max_tokens: u64) -> Self {
+        self.max_tokens = Some(max_tokens);
+        self
+    }
+
+    pub fn recipient(mut self, recipient: String) -> Self {
+        self.recipient = Some(recipient);
+        self
+    }
+
     pub fn tool(mut self, tool: Box<dyn ToolDyn>) -> Self {
         self.tools.push(tool);
         self
@@ -78,82 +104,110 @@ where
     pub fn build(self) -> Result<Pipeline<T, S>> {
         let llm = self.llm.ok_or_eyre("LLM Client not provided")?;
         let store = self.store.ok_or_eyre("Event Store not provided")?;
-        let model = self.model.ok_or_eyre("Model not provided")?;
-        let preamble = self.preamble.ok_or_eyre("Preamble not provided")?;
         let sandbox = self.sandbox.ok_or_eyre("Sandbox not provided")?;
+        let model = self.model.ok_or_eyre("Model not provided")?;
+        let temperature = self.temperature.unwrap_or(DEFAULT_TEMPERATURE);
+        let max_tokens = self.max_tokens.unwrap_or(DEFAULT_MAX_TOKENS);
+        let preamble = self.preamble;
+        let recipient = self.recipient;
 
-        let tool_defs = self.tools.iter().map(|tool| tool.definition()).collect();
-        let llm_worker = Worker::new(llm, store.clone(), model, preamble, tool_defs);
-        let tool_worker = ToolWorker::new(sandbox, store.clone(), self.tools);
+        let tool_definitions = if self.tools.is_empty() {
+            Vec::new()
+        } else {
+            self.tools.iter().map(|tool| tool.definition()).collect()
+        };
 
-        Ok(Pipeline::new(store, llm_worker, tool_worker))
+        let thread_processor = ThreadProcessor::new(llm, store.clone());
+        let tool_processor =
+            ToolProcessor::new(sandbox, store.clone(), self.tools, recipient.clone());
+        let processors = vec![thread_processor.boxed(), tool_processor.boxed()];
+        let pipeline = ProcessorPipeline::new(store.clone(), processors);
+
+        Ok(Pipeline {
+            store,
+            pipeline,
+            config: ThreadConfig {
+                model,
+                preamble,
+                temperature,
+                max_tokens,
+                tools: tool_definitions,
+                recipient,
+            },
+            _marker: PhantomData,
+        })
     }
+}
+
+struct ThreadConfig {
+    model: String,
+    preamble: Option<String>,
+    temperature: f64,
+    max_tokens: u64,
+    tools: Vec<rig::completion::ToolDefinition>,
+    recipient: Option<String>,
 }
 
 pub struct Pipeline<T, S>
 where
-    T: LLMClient,
+    T: LLMClient + 'static,
     S: EventStore,
 {
     store: S,
-    llm_worker: Worker<T, S>,
-    tool_worker: ToolWorker<S>,
+    pipeline: ProcessorPipeline<S, Event>,
+    config: ThreadConfig,
+    _marker: PhantomData<T>,
 }
 
 impl<T, S> Pipeline<T, S>
 where
-    T: LLMClient,
+    T: LLMClient + 'static,
     S: EventStore,
 {
-    pub fn new(store: S, llm_worker: Worker<T, S>, tool_worker: ToolWorker<S>) -> Self {
-        Self {
-            store,
-            llm_worker,
-            tool_worker,
-        }
-    }
-
     pub async fn run(self, stream_id: String, aggregate_id: String) -> Result<()> {
-        let Self {
-            store,
-            llm_worker,
-            mut tool_worker,
-        } = self;
-        tokio::select! {
-            res = llm_worker.run(&stream_id, &aggregate_id) => {
-                tracing::error!("LLM worker failed: {:?}", res);
-                res
-            },
-            res = tool_worker.run(&stream_id, &aggregate_id) => {
-                tracing::error!("Tool worker failed: {:?}", res);
-                res
-            },
-            res = Self::subscriber(&store, &stream_id, &aggregate_id) => res,
-        }
+        self.initialize_thread(&stream_id, &aggregate_id).await?;
+        let pipeline = self.pipeline;
+        pipeline.run(stream_id).await
     }
 
-    pub async fn subscriber(store: &S, stream_id: &str, aggregate_id: &str) -> Result<()> {
-        let query = Query {
-            stream_id: stream_id.to_owned(),
-            event_type: None,
-            aggregate_id: Some(aggregate_id.to_owned()),
-        };
-        let mut receiver = store.subscribe::<Event>(&query)?;
-        let mut events = store.load_events(&query, None).await?;
-        while let Some(event) = receiver.next().await {
-            let event = event?;
-            events.push(event.clone());
-            let thread = Thread::fold(&events);
-            tracing::info!(?thread.state, ?event, "event");
-            match thread.state {
-                thread::State::Done => break,
-                thread::State::UserWait => {
-                    tracing::info!("Waiting for user input");
-                    continue;
-                }
-                _ => continue,
-            }
+    async fn initialize_thread(&self, stream_id: &str, aggregate_id: &str) -> Result<()> {
+        let query = Query::stream(stream_id).aggregate(aggregate_id);
+        let events = self.store.load_events::<Event>(&query, None).await?;
+        if events
+            .iter()
+            .any(|event| matches!(event, Event::LLMConfig { .. }))
+        {
+            return Ok(());
         }
-        Ok(())
+
+        let mut thread = thread::Thread::default();
+        let events = thread.process(thread::Command::Setup {
+            model: self.config.model.clone(),
+            temperature: self.config.temperature,
+            max_tokens: self.config.max_tokens,
+            preamble: self.config.preamble.clone(),
+            tools: if self.config.tools.is_empty() {
+                None
+            } else {
+                Some(self.config.tools.clone())
+            },
+            recipient: self.config.recipient.clone(),
+        })?;
+        persist_events(&self.store, stream_id, aggregate_id, events).await
     }
+}
+
+async fn persist_events<S: EventStore>(
+    store: &S,
+    stream_id: &str,
+    aggregate_id: &str,
+    events: Vec<Event>,
+) -> Result<()> {
+    let metadata = Metadata::default();
+    for event in events.iter() {
+        store
+            .push_event(stream_id, aggregate_id, event, &metadata)
+            .await?;
+    }
+    Ok(())
 }

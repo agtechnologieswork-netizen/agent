@@ -40,7 +40,7 @@ impl PostgresStore {
         }
 
         if let Some(last_seq) = last_sequence {
-            conditions.push(format!("sequence > ${param_counter}"));
+            conditions.push(format!("sequence > ${param_counter}::bigint"));
             params.push(last_seq.to_string());
         }
 
@@ -107,9 +107,11 @@ impl EventStore for PostgresStore {
     ) -> Result<Vec<Event<JsonValue>>, Error> {
         let (sql, params) = Self::build_query(query, sequence);
         let mut sqlx_query = sqlx::query_as::<_, Event<JsonValue>>(&sql);
+
         for param in params.iter() {
             sqlx_query = sqlx_query.bind(param);
         }
+
         let events = sqlx_query
             .fetch_all(&self.pool)
             .await

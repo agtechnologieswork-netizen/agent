@@ -65,6 +65,26 @@ pub struct Query {
     pub aggregate_id: Option<String>,
 }
 
+impl Query {
+    pub fn stream<T: AsRef<str>>(stream_id: T) -> Self {
+        Self {
+            stream_id: stream_id.as_ref().to_string(),
+            event_type: None,
+            aggregate_id: None,
+        }
+    }
+
+    pub fn aggregate<T: AsRef<str>>(mut self, aggregate_id: T) -> Self {
+        self.aggregate_id = Some(aggregate_id.as_ref().to_string());
+        self
+    }
+
+    pub fn event_type<T: AsRef<str>>(mut self, event_type: T) -> Self {
+        self.event_type = Some(event_type.as_ref().to_string());
+        self
+    }
+}
+
 type SubscriberMap<T> = HashMap<Query, Vec<mpsc::UnboundedSender<T>>>;
 
 pub trait EventStore: Clone + Send + Sync + 'static {

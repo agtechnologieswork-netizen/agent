@@ -147,30 +147,6 @@ impl DataAppsValidator {
         Ok(())
     }
 
-    async fn export_requirements(&self, sandbox: &mut Box<dyn SandboxDyn>) -> Result<(), String> {
-        tracing::info!("Starting requirements export...");
-
-        let result = sandbox.exec("cd /app/backend && uv export --no-hashes --format requirements-txt --output-file requirements.txt --no-dev")
-            .await.map_err(|e| {
-                let error = format!("Failed to run uv export: {}", e);
-                tracing::error!("{}", error);
-                error
-            })?;
-
-        if result.exit_code != 0 {
-            let error_msg = format!(
-                "uv export command failed (exit code {}): stderr: {} stdout: {}",
-                result.exit_code,
-                result.stderr,
-                result.stdout
-            );
-            tracing::info!("Requirements export failed: {}", error_msg);
-            return Err(error_msg);
-        }
-
-        tracing::info!("Requirements export passed");
-        Ok(())
-    }
 }
 
 impl Validator for DataAppsValidator {
@@ -180,14 +156,16 @@ impl Validator for DataAppsValidator {
             Ok(_) => (),
             Err(e) => return Ok(Err(format!("Failed to run uv sync: {}", e))),
         }
-        tracing::info!("Sandbox is ready. Starting validation steps...");
+        let mut sandbox_for_tests = sandbox.fork().await?;
+        let mut sandbox_for_linting = sandbox.fork().await?;
+        let mut sandbox_for_frontend = sandbox.fork().await?;
 
-        // Run all validation checks sequentially and collect results
-        let deps_result = self.check_python_dependencies(sandbox).await;
-        let tests_result = self.check_tests(sandbox).await;
-        let linting_result = self.check_linting(sandbox).await;
-        let frontend_result = self.check_frontend_build(sandbox).await;
-        let requirements_result = self.export_requirements(sandbox).await;
+        let (deps_result, tests_result, linting_result, frontend_result) = tokio::join!(
+            self.check_python_dependencies(sandbox),
+            self.check_tests(&mut sandbox_for_tests),
+            self.check_linting(&mut sandbox_for_linting),
+            self.check_frontend_build(&mut sandbox_for_frontend),
+        );
 
         // Collect all errors
         let mut errors = Vec::new();
@@ -206,10 +184,6 @@ impl Validator for DataAppsValidator {
 
         if let Err(e) = frontend_result {
             errors.push(format!("Frontend: {}", e));
-        }
-
-        if let Err(e) = requirements_result {
-            errors.push(format!("Requirements export: {}", e));
         }
 
         if errors.is_empty() {

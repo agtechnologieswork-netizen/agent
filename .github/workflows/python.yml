@@ -1,10 +1,14 @@
-name: CI Pipeline
+name: CI Pipeline (Python)
 
 on:
   push:
     branches:
       - main
+    paths:
+      - "agent/**"
   pull_request:
+    paths:
+      - "agent/**"
 
 env:
   CONTAINER_NAME: agent-apiserver-1
@@ -306,7 +310,16 @@ jobs:
     name: Build and Push Docker Image
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    needs: [build-template, unit-tests, health-check, e2e-tests, lint, rust-checks, rust-tests]
+    needs:
+      [
+        build-template,
+        unit-tests,
+        health-check,
+        e2e-tests,
+        lint,
+        rust-checks,
+        rust-tests,
+      ]
     steps:
       - name: Checkout repository
         uses: actions/checkout@v3
