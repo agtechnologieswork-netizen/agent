@@ -1,6 +1,7 @@
 use dabgent_agent::processor::{CompactProcessor, FinishProcessor, Pipeline, Processor, ThreadProcessor, ToolProcessor};
 use dabgent_agent::toolbox::ToolDyn;
 use dabgent_fastapi::{toolset::dataapps_toolset, validator::DataAppsValidator, artifact_preparer::DataAppsArtifactPreparer};
+use dabgent_fastapi::templates::{EMBEDDED_TEMPLATES, DEFAULT_TEMPLATE_PATH};
 use dabgent_mq::{EventStore, create_store, StoreConfig};
 use dabgent_sandbox::{Sandbox, dagger::{ConnectOpts, Sandbox as DaggerSandbox}};
 use eyre::Result;
@@ -27,7 +28,15 @@ async fn main() {
         let finish_processor_tools = dataapps_toolset(DataAppsValidator::new());
 
         push_llm_config(&store, STREAM_ID, AGGREGATE_ID, &tool_processor_tools).await?;
-        push_seed_sandbox_from_template(&store, STREAM_ID, AGGREGATE_ID, "../dataapps/template_minimal", "/app").await?;
+
+        // Use embedded templates in release mode, filesystem in debug mode
+        let template_path = if cfg!(debug_assertions) {
+            DEFAULT_TEMPLATE_PATH
+        } else {
+            EMBEDDED_TEMPLATES
+        };
+
+        push_seed_sandbox(&store, STREAM_ID, AGGREGATE_ID, template_path, "/app").await?;
         push_prompt(&store, STREAM_ID, AGGREGATE_ID, USER_PROMPT).await?;
 
         tracing::info!("Starting DataApps pipeline with model: {}", MODEL);
@@ -173,14 +182,14 @@ async fn push_llm_config<S: EventStore>(
         .map_err(Into::into)
 }
 
-async fn push_seed_sandbox_from_template<S: EventStore>(
+async fn push_seed_sandbox<S: EventStore>(
     store: &S,
     stream_id: &str,
     aggregate_id: &str,
     template_path: &str,
     base_path: &str,
 ) -> Result<()> {
-    tracing::info!("Pushing seed sandbox event to event store...");
+    tracing::info!("Pushing seed sandbox event: {}", template_path);
     let event = dabgent_agent::event::Event::SeedSandboxFromTemplate {
         template_path: template_path.to_owned(),
         base_path: base_path.to_owned(),
