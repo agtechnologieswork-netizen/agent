@@ -626,6 +626,7 @@ dependencies = [
  "dotenvy",
  "eyre",
  "hex",
+ "regex",
  "rig-core",
  "serde",
  "serde_json",
