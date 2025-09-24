@@ -37,7 +37,7 @@ async fn main() {
     tracing_subscriber::fmt::init();
 
     const STREAM_ID: &str = "planning-pipeline";
-    let prompt = "Build a weather app that fetches and displays weather for a given city using an API";
+    let prompt = "Build an app that creates sample random dataset of CSV files and builds a UI to display it";
 
     let store = store().await;
 
@@ -216,7 +216,6 @@ pub async fn planning_pipeline(stream_id: &str, store: impl EventStore + Clone, 
                 vec![execution_thread.boxed(), execution_tool_processor.boxed()],
             );
 
-            // Run execution briefly
             println!("Executing tasks...");
             let exec_handle = tokio::spawn({
                 let stream_id = stream_id.clone();
@@ -225,7 +224,26 @@ pub async fn planning_pipeline(stream_id: &str, store: impl EventStore + Clone, 
                 }
             });
 
-            tokio::time::sleep(tokio::time::Duration::from_secs(30)).await;
+            let mut completed_tasks = 0;
+            loop {
+                tokio::time::sleep(tokio::time::Duration::from_millis(1)).await;
+
+                let query = dabgent_mq::Query::stream(&stream_id);
+                let events = store.load_events::<dabgent_agent::event::Event>(&query, None).await?;
+
+                let current_event_count = events.len();
+                completed_tasks = events.iter()
+                    .filter(|e| matches!(e, dabgent_agent::event::Event::TaskCompleted { .. }))
+                    .count();
+
+                println!("Progress: {}/{} tasks completed", completed_tasks, tasks.len());
+
+                if completed_tasks >= tasks.len() {
+                    println!("✓ All tasks completed successfully!");
+                    break;
+                }
+            }
+
             exec_handle.abort();
         } else {
             println!("No plan was created.");
