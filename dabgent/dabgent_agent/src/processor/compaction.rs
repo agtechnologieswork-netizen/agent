@@ -58,7 +58,7 @@ Focus on the core issue and location. Remove implementation details that don't h
 
 pub struct CompactProcessor<E: EventStore> {
     event_store: E,
-    compaction_threshold: usize,
+    compaction_threshold: usize, // Character threshold to trigger compaction
     compaction_model: String,
 }
 
@@ -66,9 +66,17 @@ impl<E: EventStore> Processor<Event> for CompactProcessor<E> {
     async fn run(&mut self, event: &EventDb<Event>) -> eyre::Result<()> {
         match &event.data {
             Event::ToolResult(content) if self.is_done_tool_result(content) && self.should_compact(content) => {
+                tracing::info!(
+                    "Compaction triggered for aggregate {}",
+                    event.aggregate_id,
+                );
                 self.handle_compaction_request(event, content).await?;
             }
             Event::AgentMessage { response, recipient } if recipient.as_deref() == Some("compact_worker") => {
+                tracing::info!(
+                    "Compaction received for aggregate {}",
+                    event.aggregate_id,
+                );
                 self.handle_compaction_response(event, response).await?;
             }
             Event::ToolResult(content) if !self.is_done_tool_result(content) || !self.should_compact(content) => {
@@ -112,7 +120,7 @@ impl<E: EventStore> CompactProcessor<E> {
                 &Event::LLMConfig {
                     model: self.compaction_model.clone(),
                     temperature: 0.0,
-                    max_tokens: 1000,
+                    max_tokens: 8192,
                     preamble: Some(COMPACTION_SYSTEM_PROMPT.to_string()),
                     tools: None,
                     recipient: Some("compact_worker".to_string()),

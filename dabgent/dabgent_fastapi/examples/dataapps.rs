@@ -48,7 +48,7 @@ async fn main() {
         // Create CompactProcessor with small threshold for testing
         let compact_processor = CompactProcessor::new(
             store.clone(),
-            500,  // Small threshold to trigger compaction easily for testing
+            2048,
             "gemini-2.5-flash".to_string(),  // Use same model as main pipeline
         );
 
