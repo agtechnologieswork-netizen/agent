@@ -108,7 +108,7 @@ pub async fn planning_pipeline(stream_id: &str, store: impl EventStore + Clone, 
             vec![planning_thread.boxed(), planning_tool_processor.boxed()],
         );
 
-        // Run planning pipeline briefly
+        // Run planning pipeline
         println!("Creating plan...");
         let pipeline_handle = tokio::spawn({
             let stream_id = stream_id.clone();
@@ -117,8 +117,26 @@ pub async fn planning_pipeline(stream_id: &str, store: impl EventStore + Clone, 
             }
         });
 
-        // Wait for plan to be created
-        tokio::time::sleep(tokio::time::Duration::from_secs(10)).await;
+        // Wait for PlanCreated event
+        let mut plan_created = false;
+        let start_time = std::time::Instant::now();
+        while !plan_created && start_time.elapsed() < std::time::Duration::from_secs(30) {
+            tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+
+            // Check for PlanCreated event
+            let query = dabgent_mq::Query::stream(&stream_id).aggregate("planner");
+            let events = store.load_events::<dabgent_agent::event::Event>(&query, None).await?;
+
+            for event in events.iter() {
+                if matches!(event, dabgent_agent::event::Event::PlanCreated { .. }) {
+                    plan_created = true;
+                    println!("✓ Plan created!");
+                    break;
+                }
+            }
+        }
+
+        // Stop the planning pipeline
         pipeline_handle.abort();
 
         // === PHASE 2: EXECUTION ===
@@ -226,7 +244,7 @@ async fn sandbox(client: &dagger_sdk::DaggerConn) -> Result<DaggerSandbox> {
         .build()?;
     let ctr = client
         .container()
-        .build_opts(client.host().directory("./examples"), opts);
+        .build_opts(client.host().directory("./dabgent_agent/examples"), opts);
     ctr.sync().await?;
     let sandbox = DaggerSandbox::from_container(ctr, client.clone());
     Ok(sandbox)

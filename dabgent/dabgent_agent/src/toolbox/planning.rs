@@ -63,6 +63,8 @@ impl<S: EventStore + Clone + Send + Sync> NoSandboxTool for CreatePlanTool<S> {
         &self,
         args: Self::Args,
     ) -> Result<Result<Self::Output, Self::Error>> {
+        tracing::info!("CreatePlanTool called with {} tasks", args.tasks.len());
+
         // Create PlanCreated event
         let event = crate::event::Event::PlanCreated {
             tasks: args.tasks.clone(),
@@ -72,7 +74,9 @@ impl<S: EventStore + Clone + Send + Sync> NoSandboxTool for CreatePlanTool<S> {
         match self.store
             .push_event(&self.stream_id, "planner", &event, &Default::default())
             .await {
-            Ok(_) => {},
+            Ok(_) => {
+                tracing::info!("PlanCreated event pushed to store successfully");
+            },
             Err(e) => return Ok(Err(e.to_string())),
         }
 
