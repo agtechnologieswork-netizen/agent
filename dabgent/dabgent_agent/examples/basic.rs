@@ -38,11 +38,8 @@ pub async fn pipeline_fn(stream_id: &str, store: impl EventStore) -> Result<()> 
         let thread_processor = ThreadProcessor::new(
             llm.clone(),
             store.clone(),
-            MODEL.to_owned(),
-            SYSTEM_PROMPT.to_owned(),
-            tools.iter().map(|tool| tool.definition()).collect(),
         );
-        let tool_processor = ToolProcessor::new(sandbox.boxed(), store.clone(), tools);
+        let tool_processor = ToolProcessor::new(sandbox.boxed(), store.clone(), tools, None);
         let pipeline = Pipeline::new(
             store.clone(),
             vec![thread_processor.boxed(), tool_processor.boxed()],
@@ -81,7 +78,8 @@ async fn push_prompt<S: EventStore>(
     aggregate_id: &str,
     prompt: &str,
 ) -> Result<()> {
-    let event = dabgent_agent::event::Event::Prompted(prompt.to_owned());
+    let user_content = rig::message::UserContent::Text(rig::message::Text { text: prompt.to_owned() });
+    let event = dabgent_agent::event::Event::UserMessage(rig::OneOrMany::one(user_content));
     store
         .push_event(stream_id, aggregate_id, &event, &Default::default())
         .await

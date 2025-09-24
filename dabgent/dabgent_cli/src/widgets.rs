@@ -53,6 +53,10 @@ pub fn event_as_text(event: &AgentEvent) -> Text<'_> {
         AgentEvent::AgentMessage { response, .. } => render_agent_message(response),
         AgentEvent::UserMessage(content) => render_user_message(content),
         AgentEvent::ArtifactsCollected(artifacts) => render_artifacts_collected(artifacts),
+        AgentEvent::TaskCompleted { .. } => Text::raw("Task completed"),
+        AgentEvent::SeedSandboxFromTemplate { .. } => Text::raw("Sandbox seeded from template"),
+        AgentEvent::SandboxSeeded { .. } => Text::raw("Sandbox seeded"),
+        AgentEvent::PipelineShutdown => Text::raw("Pipeline shutdown"),
     }
 }
 
