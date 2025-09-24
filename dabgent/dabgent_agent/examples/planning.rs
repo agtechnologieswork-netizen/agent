@@ -1,7 +1,7 @@
 use dabgent_agent::processor::{Pipeline, Processor, ThreadProcessor, ToolProcessor};
 use dabgent_agent::toolbox::{self, basic::toolset, planning::planning_toolset};
 use dabgent_mq::db::sqlite::SqliteStore;
-use dabgent_mq::{Event as _, EventStore};
+use dabgent_mq::EventStore;
 use dabgent_sandbox::dagger::{ConnectOpts, Sandbox as DaggerSandbox};
 use dabgent_sandbox::{Sandbox, SandboxDyn};
 use eyre::Result;
@@ -45,8 +45,6 @@ async fn main() {
     planning_pipeline(STREAM_ID, store, prompt)
         .await
         .expect("Pipeline failed");
-
-    println!("\n✨ Planning example completed!");
 }
 
 pub async fn planning_pipeline(stream_id: &str, store: impl EventStore + Clone, task: &str) -> Result<()> {
@@ -55,15 +53,11 @@ pub async fn planning_pipeline(stream_id: &str, store: impl EventStore + Clone, 
 
     let opts = ConnectOpts::default();
     opts.connect(|client| async move {
-        println!("=== EVENT-DRIVEN PLANNING PIPELINE ===\n");
-        println!("Task: {}\n", task);
 
         let llm = rig::providers::anthropic::Client::from_env();
 
-        // === PHASE 1: PLANNING ===
-        println!("=== PHASE 1: PLANNING ===");
+        // Phase 1: Planning
 
-        // Configure and run the planning agent
         let planning_config = dabgent_agent::event::Event::LLMConfig {
             model: MODEL.to_string(),
             temperature: 0.7,
@@ -81,7 +75,6 @@ pub async fn planning_pipeline(stream_id: &str, store: impl EventStore + Clone, 
             .push_event(&stream_id, "planner", &planning_config, &Default::default())
             .await?;
 
-        // Send task to planner
         let user_message = dabgent_agent::event::Event::UserMessage(
             rig::OneOrMany::one(rig::message::UserContent::Text(rig::message::Text {
                 text: format!("Please create a plan for the following task: {}", task),
@@ -91,7 +84,6 @@ pub async fn planning_pipeline(stream_id: &str, store: impl EventStore + Clone, 
             .push_event(&stream_id, "planner", &user_message, &Default::default())
             .await?;
 
-        // Create planning pipeline with tools
         let planning_sandbox = DummySandbox::new();
         let planning_tools = planning_toolset(store.clone(), stream_id.clone());
 
@@ -100,7 +92,7 @@ pub async fn planning_pipeline(stream_id: &str, store: impl EventStore + Clone, 
             planning_sandbox.boxed(),
             store.clone(),
             planning_tools,
-            Some("planner".to_string()),  // Only process planner messages
+            Some("planner".to_string()),
         );
 
         let planning_pipeline = Pipeline::new(
@@ -108,8 +100,6 @@ pub async fn planning_pipeline(stream_id: &str, store: impl EventStore + Clone, 
             vec![planning_thread.boxed(), planning_tool_processor.boxed()],
         );
 
-        // Run planning pipeline
-        println!("Creating plan...");
         let pipeline_handle = tokio::spawn({
             let stream_id = stream_id.clone();
             async move {
@@ -130,7 +120,6 @@ pub async fn planning_pipeline(stream_id: &str, store: impl EventStore + Clone, 
             for event in events.iter() {
                 if matches!(event, dabgent_agent::event::Event::PlanCreated { .. }) {
                     plan_created = true;
-                    println!("✓ Plan created!");
                     break;
                 }
             }
@@ -139,14 +128,11 @@ pub async fn planning_pipeline(stream_id: &str, store: impl EventStore + Clone, 
         // Stop the planning pipeline
         pipeline_handle.abort();
 
-        // === PHASE 2: EXECUTION ===
-        println!("\n=== PHASE 2: EXECUTION ===");
+        // Phase 2: Execution
 
-        // Load events to get the plan
         let query = dabgent_mq::Query::stream(&stream_id).aggregate("planner");
         let events = store.load_events::<dabgent_agent::event::Event>(&query, None).await?;
 
-        // Find the most recent plan
         let mut plan_tasks: Option<Vec<String>> = None;
         for event in events.iter() {
             match event {
@@ -159,19 +145,16 @@ pub async fn planning_pipeline(stream_id: &str, store: impl EventStore + Clone, 
         }
 
         if let Some(tasks) = plan_tasks {
-            println!("Executing {} tasks sequentially:\n", tasks.len());
 
-            // Create sandbox for execution
             let execution_sandbox = sandbox(&client).await?;
             let execution_tools = toolset(Validator);
 
-            // Create execution pipeline
             let execution_thread = ThreadProcessor::new(llm.clone(), store.clone());
             let execution_tool_processor = ToolProcessor::new(
                 execution_sandbox.boxed(),
                 store.clone(),
                 execution_tools,
-                None,  // Process all non-planner messages
+                None,
             );
 
             let execution_pipeline = Pipeline::new(
@@ -179,7 +162,6 @@ pub async fn planning_pipeline(stream_id: &str, store: impl EventStore + Clone, 
                 vec![execution_thread.boxed(), execution_tool_processor.boxed()],
             );
 
-            // Start the execution pipeline
             let exec_handle = tokio::spawn({
                 let stream_id = stream_id.clone();
                 async move {
@@ -187,13 +169,9 @@ pub async fn planning_pipeline(stream_id: &str, store: impl EventStore + Clone, 
                 }
             });
 
-            // Execute tasks one by one
             for (i, task_desc) in tasks.iter().enumerate() {
                 let thread_id = format!("task-{}", i);
-                println!("Task {}/{}: {}", i + 1, tasks.len(), task_desc);
-                println!("  Executing on thread: {}", thread_id);
 
-                // Configure the worker thread
                 let worker_config = dabgent_agent::event::Event::LLMConfig {
                     model: MODEL.to_string(),
                     temperature: 0.7,
@@ -211,7 +189,6 @@ pub async fn planning_pipeline(stream_id: &str, store: impl EventStore + Clone, 
                     .push_event(&stream_id, &thread_id, &worker_config, &Default::default())
                     .await?;
 
-                // Send task to worker
                 let task_message = dabgent_agent::event::Event::UserMessage(
                     rig::OneOrMany::one(rig::message::UserContent::Text(rig::message::Text {
                         text: format!("{}\nWhen complete, call the 'done' tool to mark this task as finished.", task_desc),
@@ -221,15 +198,13 @@ pub async fn planning_pipeline(stream_id: &str, store: impl EventStore + Clone, 
                     .push_event(&stream_id, &thread_id, &task_message, &Default::default())
                     .await?;
 
-                // Wait for this specific task to complete
-                let task_timeout = std::time::Duration::from_secs(60); // 1 minute per task
+                let task_timeout = std::time::Duration::from_secs(60);
                 let task_start = std::time::Instant::now();
                 let mut task_completed = false;
 
                 while !task_completed && task_start.elapsed() < task_timeout {
                     tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
 
-                    // Check for TaskCompleted events
                     let query = dabgent_mq::Query::stream(&stream_id);
                     let events = store.load_events::<dabgent_agent::event::Event>(&query, None).await?;
 
@@ -239,38 +214,18 @@ pub async fn planning_pipeline(stream_id: &str, store: impl EventStore + Clone, 
 
                     if completed_count > i {
                         task_completed = true;
-                        println!("  ✓ Task completed\n");
                     }
                 }
 
                 if !task_completed {
-                    println!("  ⚠ Task timed out after 1 minute\n");
                     // Continue to next task anyway
                 }
             }
 
-            // Stop the execution pipeline
             exec_handle.abort();
 
-            // Final summary
-            let query = dabgent_mq::Query::stream(&stream_id);
-            let events = store.load_events::<dabgent_agent::event::Event>(&query, None).await?;
-            let final_completed = events.iter()
-                .filter(|e| matches!(e, dabgent_agent::event::Event::TaskCompleted { .. }))
-                .count();
-
-            println!("=== EXECUTION SUMMARY ===");
-            println!("Completed: {}/{} tasks", final_completed, tasks.len());
-            if final_completed == tasks.len() {
-                println!("✓ All tasks completed successfully!");
-            } else {
-                println!("⚠ Some tasks did not complete");
-            }
-        } else {
-            println!("No plan was created.");
         }
 
-        println!("\n✅ Pipeline execution complete!");
         Ok(())
     })
     .await
