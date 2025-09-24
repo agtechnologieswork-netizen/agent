@@ -66,14 +66,12 @@ async fn main() {
             vec![
                 thread_processor.boxed(),
                 tool_processor.boxed(),
-                compact_processor.boxed(),  // Add CompactProcessor to the pipeline
+                compact_processor.boxed(),
                 finish_processor.boxed(),
             ],
         );
 
         tracing::info!("Artifacts will be exported to: {}", export_path);
-        tracing::info!("Error compaction enabled with threshold: 500 characters");
-
         tracing::info!("Pipeline configured, starting execution...");
 
         pipeline.run(STREAM_ID.to_owned()).await?;
