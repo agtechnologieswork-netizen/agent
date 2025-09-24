@@ -109,11 +109,9 @@ pub async fn planning_pipeline(stream_id: &str, store: impl EventStore + Clone, 
 
         // Wait for PlanCreated event
         let mut plan_created = false;
-        let start_time = std::time::Instant::now();
-        while !plan_created && start_time.elapsed() < std::time::Duration::from_secs(30) {
+        while !plan_created {
             tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
 
-            // Check for PlanCreated event
             let query = dabgent_mq::Query::stream(&stream_id).aggregate("planner");
             let events = store.load_events::<dabgent_agent::event::Event>(&query, None).await?;
 
@@ -198,11 +196,8 @@ pub async fn planning_pipeline(stream_id: &str, store: impl EventStore + Clone, 
                     .push_event(&stream_id, &thread_id, &task_message, &Default::default())
                     .await?;
 
-                let task_timeout = std::time::Duration::from_secs(60);
-                let task_start = std::time::Instant::now();
-                let mut task_completed = false;
-
-                while !task_completed && task_start.elapsed() < task_timeout {
+                // Wait for task completion
+                loop {
                     tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
 
                     let query = dabgent_mq::Query::stream(&stream_id);
@@ -213,12 +208,8 @@ pub async fn planning_pipeline(stream_id: &str, store: impl EventStore + Clone, 
                         .count();
 
                     if completed_count > i {
-                        task_completed = true;
+                        break;
                     }
-                }
-
-                if !task_completed {
-                    // Continue to next task anyway
                 }
             }
 
