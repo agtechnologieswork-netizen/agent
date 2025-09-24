@@ -1,5 +1,5 @@
 use super::{Aggregate, Processor};
-use crate::event::{Event, ParentAggregate};
+use crate::event::{Event, ParentAggregate, TypedToolResult, ToolKind};
 use crate::processor::thread;
 use dabgent_mq::{EventDb, EventStore, Query};
 use regex::Regex;
@@ -104,13 +104,13 @@ impl<E: EventStore> CompactProcessor<E> {
     async fn handle_compaction_request(
         &mut self,
         event: &EventDb<Event>,
-        content: &[rig::message::ToolResult],
+        content: &[TypedToolResult],
     ) -> eyre::Result<()> {
         // Create compaction thread
         let compact_thread_id = format!("compact_{}", Uuid::new_v4());
 
         // Extract original tool_id for restoration later
-        let original_tool_id = content.first().map(|result| result.id.clone());
+        let original_tool_id = content.first().map(|t| t.result.id.clone());
 
         // Send LLMConfig first with parent tracking
         self.event_store
@@ -170,17 +170,20 @@ impl<E: EventStore> CompactProcessor<E> {
                 // Extract compacted content from LLM response
                 let compacted_text = self.extract_compacted_content(response);
 
-                // Create compacted ToolResult with original tool_id
-                let compacted_result = vec![rig::message::ToolResult {
-                    id: tool_id.clone(),
-                    call_id: None,
-                    content: rig::OneOrMany::one(rig::message::ToolResultContent::Text(
-                        compacted_text.into()
-                    )),
+                // Create compacted ToolResult with original tool_id, wrapped as TypedToolResult
+                let compacted_result = vec![TypedToolResult {
+                    tool_name: ToolKind::Done,
+                    result: rig::message::ToolResult {
+                        id: tool_id.clone(),
+                        call_id: None,
+                        content: rig::OneOrMany::one(rig::message::ToolResultContent::Text(
+                            compacted_text.into()
+                        )),
+                    },
                 }];
 
                 // Convert compacted ToolResult directly to UserMessage for original thread
-                let tools = compacted_result.iter().map(|r| rig::message::UserContent::ToolResult(r.clone()));
+                let tools = compacted_result.iter().map(|t| rig::message::UserContent::ToolResult(t.result.clone()));
                 let user_content = rig::OneOrMany::many(tools)?;
 
                 // Load original thread state and process
@@ -208,10 +211,10 @@ impl<E: EventStore> CompactProcessor<E> {
     async fn handle_passthrough_tool_result(
         &mut self,
         event: &EventDb<Event>,
-        content: &[rig::message::ToolResult],
+        content: &[TypedToolResult],
     ) -> eyre::Result<()> {
         // Convert to UserMessage for original thread (same aggregate)
-        let tools = content.iter().map(|r| rig::message::UserContent::ToolResult(r.clone()));
+        let tools = content.iter().map(|t| rig::message::UserContent::ToolResult(t.result.clone()));
         let user_content = rig::OneOrMany::many(tools)?;
 
         // Load original thread state and process
@@ -234,34 +237,20 @@ impl<E: EventStore> CompactProcessor<E> {
         Ok(())
     }
 
-    fn is_done_tool_result(&self, results: &[rig::message::ToolResult]) -> bool {
-        // Check if any of the tool results look like they came from DoneTool
-        // DoneTool returns "success" on success or "validation error: ..." on failure
-        results.iter().any(|result| {
-            result.content.iter().any(|content| {
-                if let rig::message::ToolResultContent::Text(text) = content {
-                    let text_content = &text.text;
-                    // Check for patterns typical of DoneTool output
-                    text_content == "success"
-                        || text_content.starts_with("validation error:")
-                        || text_content.contains("validation error")
-                } else {
-                    false
-                }
-            })
-        })
+    fn is_done_tool_result(&self, results: &[TypedToolResult]) -> bool {
+        results.iter().any(|t| t.tool_name == ToolKind::Done)
     }
 
-    fn should_compact(&self, results: &[rig::message::ToolResult]) -> bool {
+    fn should_compact(&self, results: &[TypedToolResult]) -> bool {
         let size = self.calculate_text_size(results);
         size > self.compaction_threshold
     }
 
-    fn calculate_text_size(&self, results: &[rig::message::ToolResult]) -> usize {
+    fn calculate_text_size(&self, results: &[TypedToolResult]) -> usize {
         results
             .iter()
             .map(|result| {
-                result
+                result.result
                     .content
                     .iter()
                     .map(|content| match content {
@@ -274,11 +263,11 @@ impl<E: EventStore> CompactProcessor<E> {
     }
 
 
-    fn extract_text_content(&self, results: &[rig::message::ToolResult]) -> String {
+    fn extract_text_content(&self, results: &[TypedToolResult]) -> String {
         results
             .iter()
             .flat_map(|result| {
-                result.content.iter().filter_map(|content| match content {
+                result.result.content.iter().filter_map(|content| match content {
                     rig::message::ToolResultContent::Text(text) => Some(text.text.clone()),
                     _ => None, // Skip non-text content
                 })
@@ -287,7 +276,7 @@ impl<E: EventStore> CompactProcessor<E> {
             .join("\n")
     }
 
-    fn build_compaction_prompt(&self, content: &[rig::message::ToolResult]) -> rig::message::Text {
+    fn build_compaction_prompt(&self, content: &[TypedToolResult]) -> rig::message::Text {
         let text_content = self.extract_text_content(content);
         rig::message::Text {
             text: format!(
