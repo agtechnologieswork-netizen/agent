@@ -1,2 +1,3 @@
 This file tests the Rust main workflow trigger.
 Created for CI testing purposes.
+Updated to test path filtering.
