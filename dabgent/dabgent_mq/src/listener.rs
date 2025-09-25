@@ -4,34 +4,17 @@ use std::collections::HashMap;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::sync::{Mutex, broadcast};
+use tokio::sync::{Mutex, broadcast, mpsc};
 
 pub trait Callback<A: Aggregate>: Send {
     fn process(&mut self, event: &Envelope<A>) -> impl Future<Output = Result<()>> + Send;
     fn boxed(self) -> Box<dyn CallbackDyn<A>>
     where
-        A: 'static,
         Self: Sized + 'static,
     {
         Box::new(self)
     }
 }
-
-// pub trait CallbackDyn<A: Aggregate>: Send {
-//     fn process(
-//         &mut self,
-//         event: Envelope<A>,
-//     ) -> Pin<Box<dyn Future<Output = Result<()>> + Send + '_>>;
-// }
-
-// impl<A: Aggregate + 'static, T: Callback<A>> CallbackDyn<A> for T {
-//     fn process(
-//         &mut self,
-//         event: Envelope<A>,
-//     ) -> Pin<Box<dyn Future<Output = Result<()>> + Send + '_>> {
-//         Box::pin(self.process(event))
-//     }
-// }
 
 pub trait CallbackDyn<A: Aggregate>: Send {
     fn process<'a>(
@@ -51,6 +34,7 @@ impl<A: Aggregate, T: Callback<A>> CallbackDyn<A> for T {
 
 #[derive(Clone)]
 pub struct Wake {
+    aggregate_type: &'static str,
     aggregate_id: String,
     current_sequence: i64,
 }
@@ -69,6 +53,7 @@ impl<ES: EventStore> EventStore for PollingQueue<ES> {
         context: crate::AggregateContext<A>,
     ) -> Result<Vec<Envelope<A>>, crate::db::Error> {
         let wake = Wake {
+            aggregate_type: A::TYPE,
             aggregate_id: context.aggregate_id.clone(),
             current_sequence: context.current_sequence,
         };
@@ -110,7 +95,7 @@ impl<ES: EventStore> EventStore for PollingQueue<ES> {
 
 type ArcCallback<A> = Arc<Mutex<dyn CallbackDyn<A>>>;
 
-pub struct Listener<A: Aggregate, ES: EventStore> {
+pub struct Listener<A: Aggregate + 'static, ES: EventStore> {
     store: ES,
     wake_rx: broadcast::Receiver<Wake>,
     callbacks: Vec<ArcCallback<A>>,
@@ -118,7 +103,7 @@ pub struct Listener<A: Aggregate, ES: EventStore> {
     poll_interval: Duration,
 }
 
-impl<A: Aggregate, ES: EventStore> Listener<A, ES> {
+impl<A: Aggregate + 'static, ES: EventStore> Listener<A, ES> {
     pub fn new(
         store: ES,
         wake_rx: broadcast::Receiver<Wake>,
@@ -139,89 +124,76 @@ impl<A: Aggregate, ES: EventStore> Listener<A, ES> {
     }
 
     pub async fn run(&mut self) -> eyre::Result<()> {
-        // let mut task_set = tokio::task::JoinSet::new();
+        let store = self.store.clone();
+        let callbacks = self.callbacks.clone();
+        let (task_tx, mut task_rx) = mpsc::unbounded_channel::<(String, i64, i64)>();
+        tokio::spawn(async move {
+            while let Some((aggregate_id, from, to)) = task_rx.recv().await {
+                let envelopes = store.load_latest_events(&aggregate_id, from).await?;
+                for envelope in envelopes.iter().filter(|e| e.sequence <= to) {
+                    Self::run_callbacks(&envelope, &callbacks).await?;
+                }
+            }
+            Ok::<_, eyre::Error>(())
+        });
+
         let mut interval = tokio::time::interval(self.poll_interval);
         loop {
-            let mut update_set = Vec::new();
             tokio::select! {
+                Ok(wake) = self.wake_rx.recv() => {
+                    if wake.aggregate_type != A::TYPE {
+                        continue;
+                    }
+                    if let Some(from) = self.process_from(&wake.aggregate_id, wake.current_sequence) {
+                        self.send_task(&task_tx, &wake.aggregate_id, from, wake.current_sequence)?;
+                    }
+                },
                 _ = interval.tick() => {
                     let candidates = self.store.load_sequence_nums::<A>().await?;
-                    update_set = candidates.into_iter().filter_map(|(id, seq)| match self.offsets.get(&id) {
-                        Some(&offset) if offset < seq => Some((id, offset)),
-                        None => Some((id, 0)),
-                        _ => None,
-                    }).collect();
+                    for (aggregate_id, to) in candidates.iter() {
+                        if let Some(from) = self.process_from(&aggregate_id, *to) {
+                            self.send_task(&task_tx, &aggregate_id, from, *to)?;
+                        }
+                    }
+                },
+                else => {
+                    continue;
                 }
-                _ = self.wake_rx.recv() => {
-                    // todo
-                }
-                // res = task_set.join_next() => match res {
-                //     _ => {} // todo
-                // }
-            }
-            // for (id, offset) in update_set.into_iter() {
-            //     let store = self.store.clone();
-            //     let callbacks = self.callbacks.clone();
-            //     task_set.spawn(async move {
-            //         let events = store.load_latest_events::<A>(&id, offset).await?;
-            //         let sequence = events.iter().map(|e| e.sequence).max().unwrap();
-            //         for event in events.iter() {
-            //             let mut local = tokio::task::JoinSet::new();
-            //             for callback in callbacks.iter().cloned() {
-            //                 let event = event.clone();
-            //                 local.spawn(async move {
-            //                     let mut lock = callback.lock().await;
-            //                     lock.process(&event).await;
-            //                 });
-            //             }
-            //             local.join_all().await;
-            //         }
-            //         Ok::<_, eyre::ErrReport>((id, sequence))
-            //     });
-            // }
+            };
         }
-        // while let Some(envelope) = self.receiver.recv().await {
-        //     for callback in self.callbacks.iter_mut() {
-        //         callback.process(&envelope)?;
-        //     }
-        // }
+    }
+
+    pub async fn run_callbacks(event: &Envelope<A>, callbacks: &[ArcCallback<A>]) -> Result<()> {
+        let mut set = tokio::task::JoinSet::new();
+        for c in callbacks.iter().cloned() {
+            let event = event.clone();
+            set.spawn(async move { c.lock().await.process(&event).await });
+        }
+        while let Some(result) = set.join_next().await {
+            result??;
+        }
         Ok(())
     }
 
-    // async fn execute_callbacks(
-    //     &self,
-    //     aggregate_id: &str,
-    //     last_sequence: i64,
-    // ) -> eyre::Result<(String, i64)> {
-    //     let events = self
-    //         .store
-    //         .load_latest_events::<A>(aggregate_id, last_sequence)
-    //         .await?;
-    //     let sequence = match events.iter().map(|e| e.sequence).max() {
-    //         Some(sequence) => sequence,
-    //         None => return Ok(()),
-    //     };
-    //     for event in events.iter() {
-    //         for callback in self.callbacks.iter_mut() {
-    //             callback.process(event).await?;
-    //         }
-    //     }
-    //     self.offsets.insert(aggregate_id.to_owned(), sequence);
-    //     Ok((aggregate_id.to_owned(), sequence))
-    // }
-}
+    fn process_from(&self, aggregate_id: &str, sequence: i64) -> Option<i64> {
+        let current = *self.offsets.get(aggregate_id).unwrap_or(&0);
+        if sequence > current {
+            return Some(current);
+        }
+        None
+    }
 
-pub async fn run_callbacks<A: Aggregate>(
-    event: Envelope<A>,
-    callbacks: &[ArcCallback<A>],
-) -> Result<()> {
-    let mut set = tokio::task::JoinSet::new();
-    for c in callbacks.iter().cloned() {
-        let event = event.clone();
-        set.spawn(async move { c.lock().await.process(&event).await });
+    fn send_task(
+        &mut self,
+        tx: &mpsc::UnboundedSender<(String, i64, i64)>,
+        aggregate_id: &str,
+        from: i64,
+        to: i64,
+    ) -> Result<()> {
+        if tx.send((aggregate_id.to_string(), from, to)).is_err() {
+            eyre::bail!("Callback processor task is dead")
+        }
+        self.offsets.insert(aggregate_id.to_string(), to);
+        Ok(())
     }
-    while let Some(result) = set.join_next().await {
-        result??;
-    }
-    Ok(())
 }
