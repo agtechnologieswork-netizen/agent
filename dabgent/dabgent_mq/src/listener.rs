@@ -6,6 +6,8 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::{Mutex, broadcast, mpsc};
 
+const WAKE_CHANNEL_SIZE: usize = 100;
+
 pub trait Callback<A: Aggregate>: Send {
     fn process(&mut self, event: &Envelope<A>) -> impl Future<Output = Result<()>> + Send;
     fn boxed(self) -> Box<dyn CallbackDyn<A>>
@@ -93,6 +95,17 @@ impl<ES: EventStore> EventStore for PollingQueue<ES> {
     }
 }
 
+impl<ES: EventStore> PollingQueue<ES> {
+    pub fn new(store: ES) -> Self {
+        let (wake_tx, _) = broadcast::channel(WAKE_CHANNEL_SIZE);
+        Self { store, wake_tx }
+    }
+
+    pub fn listener<A: Aggregate + 'static>(&self) -> Listener<A, ES> {
+        Listener::new(self.store.clone(), self.wake_tx.subscribe())
+    }
+}
+
 type ArcCallback<A> = Arc<Mutex<dyn CallbackDyn<A>>>;
 
 pub struct Listener<A: Aggregate + 'static, ES: EventStore> {
@@ -104,15 +117,11 @@ pub struct Listener<A: Aggregate + 'static, ES: EventStore> {
 }
 
 impl<A: Aggregate + 'static, ES: EventStore> Listener<A, ES> {
-    pub fn new(
-        store: ES,
-        wake_rx: broadcast::Receiver<Wake>,
-        callbacks: Vec<ArcCallback<A>>,
-    ) -> Self {
+    pub fn new(store: ES, wake_rx: broadcast::Receiver<Wake>) -> Self {
         Self {
             store,
             wake_rx,
-            callbacks,
+            callbacks: Vec::new(),
             offsets: HashMap::new(),
             poll_interval: Duration::from_secs(1),
         }
@@ -121,6 +130,10 @@ impl<A: Aggregate + 'static, ES: EventStore> Listener<A, ES> {
     pub fn with_poll_interval(mut self, interval: Duration) -> Self {
         self.poll_interval = interval;
         self
+    }
+
+    pub fn register<C: Callback<A> + 'static>(&mut self, callback: C) {
+        self.callbacks.push(Arc::new(Mutex::new(callback)));
     }
 
     pub async fn run(&mut self) -> eyre::Result<()> {
