@@ -1,5 +1,5 @@
 use super::Processor;
-use crate::event::Event;
+use crate::event::{Event, TypedToolResult, ToolKind};
 use crate::llm::{CompletionResponse, FinishReason};
 use crate::toolbox::{ToolCallExt, ToolDyn};
 use dabgent_mq::{EventDb, EventStore, Query};
@@ -96,7 +96,7 @@ impl<E: EventStore> ToolProcessor<E> {
         response: &CompletionResponse,
         stream_id: &str,
         aggregate_id: &str,
-    ) -> Result<Vec<rig::message::ToolResult>> {
+    ) -> Result<Vec<TypedToolResult>> {
         let mut results = Vec::new();
         for content in response.choice.iter() {
             if let rig::message::AssistantContent::ToolCall(call) = content {
@@ -126,7 +126,7 @@ impl<E: EventStore> ToolProcessor<E> {
                         Err(serde_json::json!(error))
                     }
                 };
-                results.push(call.to_result(result));
+                results.push(TypedToolResult { tool_name: match call.function.name.as_str() { "done" => ToolKind::Done, other => ToolKind::Other(other.to_string()) }, result: call.to_result(result) });
             }
         }
 

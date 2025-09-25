@@ -8,6 +8,18 @@ pub struct ParentAggregate {
     pub tool_id: Option<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub enum ToolKind {
+    Done,
+    Other(String),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TypedToolResult {
+    pub tool_name: ToolKind,
+    pub result: rig::message::ToolResult,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Event {
     LLMConfig {
@@ -24,7 +36,7 @@ pub enum Event {
         recipient: Option<String>,
     },
     UserMessage(rig::OneOrMany<rig::message::UserContent>),
-    ToolResult(Vec<rig::message::ToolResult>),
+    ToolResult(Vec<TypedToolResult>),
     ArtifactsCollected(HashMap<String, String>),
     TaskCompleted {
         success: bool,
@@ -56,7 +68,7 @@ impl dabgent_mq::Event for Event {
             Event::LLMConfig { .. } => "llm_config",
             Event::AgentMessage { .. } => "agent_message",
             Event::UserMessage(..) => "user_message",
-            Event::ToolResult { .. } => "tool_result",
+            Event::ToolResult(..) => "tool_result",
             Event::ArtifactsCollected(..) => "artifacts_collected",
             Event::TaskCompleted { .. } => "task_completed",
             Event::SeedSandboxFromTemplate { .. } => "seed_sandbox_from_template",
