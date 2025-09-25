@@ -46,10 +46,6 @@ struct TableSummary {
     table_type: Option<String>,
     owner: Option<String>,
     comment: Option<String>,
-    #[allow(dead_code)]
-    created_at: Option<i64>,
-    #[allow(dead_code)]
-    updated_at: Option<i64>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -61,13 +57,6 @@ struct CatalogsListResponse {
 #[derive(Debug, Deserialize)]
 struct CatalogSummary {
     name: String,
-    #[serde(rename = "type")]
-    #[allow(dead_code)]
-    catalog_type: Option<String>,
-    #[allow(dead_code)]
-    owner: Option<String>,
-    #[allow(dead_code)]
-    comment: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -79,12 +68,6 @@ struct SchemasListResponse {
 #[derive(Debug, Deserialize)]
 struct SchemaSummary {
     name: String,
-    #[allow(dead_code)]
-    catalog_name: String,
-    #[allow(dead_code)]
-    owner: Option<String>,
-    #[allow(dead_code)]
-    comment: Option<String>,
 }
 
 #[derive(Debug)]
