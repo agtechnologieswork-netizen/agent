@@ -1,10 +1,12 @@
 pub mod basic;
 pub mod planning;
+pub mod databricks;
 use dabgent_sandbox::SandboxDyn;
 use eyre::Result;
 use serde::{Deserialize, Serialize};
 use std::future::Future;
 use std::pin::Pin;
+use std::marker::PhantomData;
 
 pub trait Tool: Send + Sync {
     type Args: for<'a> Deserialize<'a> + Serialize + Send + Sync;
@@ -164,6 +166,63 @@ impl<T: NoSandboxTool> Tool for NoSandboxAdapter<T> {
 
     fn needs_replay(&self) -> bool {
         false // NoSandbox tools don't need replay as they don't modify sandbox
+    }
+
+    async fn call(
+        &self,
+        args: Self::Args,
+        _sandbox: &mut Box<dyn SandboxDyn>,
+    ) -> Result<Result<Self::Output, Self::Error>> {
+        self.inner.call(args).await
+    }
+}
+
+// Trait for tools that need a client but no sandbox access
+pub trait ClientTool<C>: Send + Sync {
+    type Args: for<'a> Deserialize<'a> + Serialize + Send + Sync;
+    type Output: Serialize + Send + Sync;
+    type Error: Serialize + Send + Sync;
+
+    fn name(&self) -> String;
+    fn definition(&self) -> rig::completion::ToolDefinition;
+    fn client(&self) -> &C;
+
+    fn call(
+        &self,
+        args: Self::Args,
+    ) -> impl Future<Output = Result<Result<Self::Output, Self::Error>>> + Send;
+}
+
+// Adapter to make ClientTool compatible with Tool trait
+pub struct ClientToolAdapter<T: ClientTool<C>, C> {
+    inner: T,
+    _phantom: PhantomData<C>,
+}
+
+impl<T: ClientTool<C>, C> ClientToolAdapter<T, C> {
+    pub fn new(inner: T) -> Self {
+        Self {
+            inner,
+            _phantom: PhantomData,
+        }
+    }
+}
+
+impl<T: ClientTool<C>, C: Send + Sync> Tool for ClientToolAdapter<T, C> {
+    type Args = T::Args;
+    type Output = T::Output;
+    type Error = T::Error;
+
+    fn name(&self) -> String {
+        self.inner.name()
+    }
+
+    fn definition(&self) -> rig::completion::ToolDefinition {
+        self.inner.definition()
+    }
+
+    fn needs_replay(&self) -> bool {
+        false // Client tools don't need replay as they don't modify sandbox
     }
 
     async fn call(
