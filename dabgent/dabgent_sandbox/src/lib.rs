@@ -1,4 +1,7 @@
 pub mod dagger;
+pub mod noop;
+
+pub use noop::NoOpSandbox;
 use eyre::Result;
 use serde::{Deserialize, Serialize};
 use std::pin::Pin;

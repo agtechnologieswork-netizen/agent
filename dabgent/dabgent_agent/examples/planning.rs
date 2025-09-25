@@ -3,7 +3,7 @@ use dabgent_agent::toolbox::{self, basic::toolset, planning::planning_toolset};
 use dabgent_mq::db::sqlite::SqliteStore;
 use dabgent_mq::EventStore;
 use dabgent_sandbox::dagger::{ConnectOpts, Sandbox as DaggerSandbox};
-use dabgent_sandbox::{Sandbox, SandboxDyn};
+use dabgent_sandbox::{NoOpSandbox, Sandbox, SandboxDyn};
 use eyre::Result;
 use rig::client::ProviderClient;
 
@@ -84,7 +84,7 @@ pub async fn planning_pipeline(stream_id: &str, store: impl EventStore + Clone, 
             .push_event(&stream_id, "planner", &user_message, &Default::default())
             .await?;
 
-        let planning_sandbox = DummySandbox::new();
+        let planning_sandbox = NoOpSandbox::new();
         let planning_tools = planning_toolset(store.clone(), stream_id.clone());
 
         let planning_thread = ThreadProcessor::new(llm.clone(), store.clone());
@@ -242,57 +242,6 @@ async fn store() -> SqliteStore {
     let store = SqliteStore::new(pool);
     store.migrate().await;
     store
-}
-
-/// Dummy sandbox for planning tools that don't need actual execution
-struct DummySandbox;
-
-impl DummySandbox {
-    fn new() -> Self {
-        Self
-    }
-}
-
-impl Sandbox for DummySandbox {
-    async fn exec(&mut self, _command: &str) -> Result<dabgent_sandbox::ExecResult> {
-        Ok(dabgent_sandbox::ExecResult {
-            exit_code: 0,
-            stdout: String::new(),
-            stderr: String::new(),
-        })
-    }
-
-    async fn write_file(&mut self, _path: &str, _content: &str) -> Result<()> {
-        Ok(())
-    }
-
-    async fn write_files(&mut self, _files: Vec<(&str, &str)>) -> Result<()> {
-        Ok(())
-    }
-
-    async fn read_file(&self, _path: &str) -> Result<String> {
-        Ok(String::new())
-    }
-
-    async fn delete_file(&mut self, _path: &str) -> Result<()> {
-        Ok(())
-    }
-
-    async fn list_directory(&self, _path: &str) -> Result<Vec<String>> {
-        Ok(Vec::new())
-    }
-
-    async fn set_workdir(&mut self, _path: &str) -> Result<()> {
-        Ok(())
-    }
-
-    async fn export_directory(&self, _container_path: &str, _host_path: &str) -> Result<String> {
-        Ok(String::new())
-    }
-
-    async fn fork(&self) -> Result<DummySandbox> {
-        Ok(DummySandbox)
-    }
 }
 
 pub struct Validator;
