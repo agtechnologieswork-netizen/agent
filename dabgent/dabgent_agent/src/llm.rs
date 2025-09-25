@@ -1,6 +1,17 @@
 use rig::{client::CompletionClient, completion::CompletionModel};
 use serde::{Deserialize, Serialize};
 use std::pin::Pin;
+use std::time::Duration;
+use tokio::time::sleep;
+
+const MAX_COMPLETION_ATTEMPTS: usize = 4;
+const BASE_BACKOFF_MS: u64 = 250;
+const MAX_BACKOFF_MS: u64 = 5000;
+
+fn backoff_delay_ms(attempt: usize) -> u64 {
+    let exp = BASE_BACKOFF_MS.saturating_mul(1 << (attempt.saturating_sub(1)));
+    exp.min(MAX_BACKOFF_MS)
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Completion {
@@ -138,6 +149,87 @@ impl<T: LLMClient> LLMClientDyn for T {
     }
 }
 
+#[derive(Clone)]
+pub struct RetryingLLM<C: LLMClient> {
+    inner: C,
+    max_attempts: usize,
+    jitter: bool,
+}
+
+impl<C: LLMClient> RetryingLLM<C> {
+    pub fn new(inner: C) -> Self {
+        Self {
+            inner,
+            max_attempts: MAX_COMPLETION_ATTEMPTS,
+            jitter: true,
+        }
+    }
+
+    pub fn with_max_attempts(mut self, max_attempts: usize) -> Self {
+        self.max_attempts = max_attempts;
+        self
+    }
+
+    pub fn with_jitter(mut self, jitter: bool) -> Self {
+        self.jitter = jitter;
+        self
+    }
+}
+
+impl<C: LLMClient> LLMClient for RetryingLLM<C> {
+    async fn completion(&self, completion: Completion) -> eyre::Result<CompletionResponse> {
+        for attempt in 1..=self.max_attempts {
+            match self.inner.completion(completion.clone()).await {
+                Ok(resp) => return Ok(resp),
+                Err(err) => {
+                    if attempt < self.max_attempts {
+                        let base = backoff_delay_ms(attempt);
+                        let delay_ms = if self.jitter { jitter_ms(base) } else { base };
+                        tracing::warn!(
+                            attempt = attempt,
+                            max_attempts = self.max_attempts,
+                            delay_ms = delay_ms,
+                            model = %completion.model,
+                            error = %err,
+                            "LLM completion failed, retrying with backoff"
+                        );
+                        sleep(Duration::from_millis(delay_ms)).await;
+                        continue;
+                    } else {
+                        tracing::error!(
+                            attempt = attempt,
+                            max_attempts = self.max_attempts,
+                            model = %completion.model,
+                            error = %err,
+                            "LLM completion failed, giving up"
+                        );
+                        return Err(err);
+                    }
+                }
+            }
+        }
+        unreachable!()
+    }
+}
+
+pub trait WithRetryExt: LLMClient + Sized {
+    fn with_retry(self) -> RetryingLLM<Self> {
+        RetryingLLM::new(self)
+    }
+}
+
+impl<T: LLMClient> WithRetryExt for T {}
+
+fn jitter_ms(base_ms: u64) -> u64 {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default();
+    let nanos = now.subsec_nanos() as u64;
+    // 50% - 150% jitter
+    let pct = 50 + (nanos % 101);
+    let jittered = base_ms.saturating_mul(pct).saturating_div(100);
+    jittered.min(MAX_BACKOFF_MS)
+}
+
 impl LLMClient for rig::providers::anthropic::Client {
     async fn completion(&self, completion: Completion) -> eyre::Result<CompletionResponse> {
         let model = self.completion_model(&completion.model);
@@ -179,11 +271,19 @@ impl LLMClient for rig::providers::gemini::Client {
         };
         let result = model.completion(completion.into()).await.map(|response| {
             let finish_reason = response.raw_response.candidates[0].finish_reason.as_ref();
-            let finish_reason = finish_reason.map_or(FinishReason::None, |reason| match reason {
+            let mut finish_reason = finish_reason.map_or(FinishReason::None, |reason| match reason {
                 gemini_api_types::FinishReason::Stop => FinishReason::Stop,
                 gemini_api_types::FinishReason::MaxTokens => FinishReason::MaxTokens,
                 _ => FinishReason::Other(format!("{reason:?}")),
             });
+            // If the model emitted tool calls, treat finish as ToolUse to drive the tool executor
+            if response
+                .choice
+                .iter()
+                .any(|c| matches!(c, &rig::message::AssistantContent::ToolCall(..)))
+            {
+                finish_reason = FinishReason::ToolUse;
+            }
             let output_tokens = response
                 .raw_response
                 .usage_metadata

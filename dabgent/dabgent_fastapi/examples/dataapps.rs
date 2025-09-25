@@ -1,14 +1,16 @@
-use dabgent_agent::pipeline::PipelineBuilder;
-use dabgent_fastapi::{toolset::dataapps_toolset, validator::DataAppsValidator};
-use dabgent_mq::{EventStore, db::sqlite::SqliteStore};
-use dabgent_sandbox::dagger::{ConnectOpts, Sandbox as DaggerSandbox};
-use dabgent_sandbox::Sandbox;
+use dabgent_agent::processor::{CompactProcessor, FinishProcessor, Pipeline, Processor, ThreadProcessor, ToolProcessor};
+use dabgent_agent::toolbox::ToolDyn;
+use dabgent_fastapi::{toolset::dataapps_toolset, validator::DataAppsValidator, artifact_preparer::DataAppsArtifactPreparer};
+use dabgent_fastapi::templates::{EMBEDDED_TEMPLATES, DEFAULT_TEMPLATE_PATH};
+use dabgent_mq::{EventStore, create_store, StoreConfig};
+use dabgent_sandbox::{Sandbox, dagger::{ConnectOpts, Sandbox as DaggerSandbox}};
 use eyre::Result;
 use rig::client::ProviderClient;
-use std::path::Path;
+
 
 #[tokio::main]
 async fn main() {
+    dotenvy::dotenv().ok();
     tracing_subscriber::fmt()
         .with_max_level(tracing::Level::INFO)
         .init();
@@ -16,32 +18,73 @@ async fn main() {
     const STREAM_ID: &str = "dataapps";
     const AGGREGATE_ID: &str = "thread";
 
-    println!("🔧 Setting up Dagger connection...");
     let opts = ConnectOpts::default();
     opts.connect(|client| async move {
-        let llm = rig::providers::anthropic::Client::from_env();
-        let sandbox = sandbox(&client).await?;
-        let store = store().await;
-        let tools = dataapps_toolset(DataAppsValidator::new());
+        let llm = rig::providers::gemini::Client::from_env();
+        let store = create_store(Some(StoreConfig::from_env())).await?;
+        tracing::info!("Event store initialized successfully");
+        let sandbox = create_sandbox(&client).await?;
+        let tool_processor_tools = dataapps_toolset(DataAppsValidator::new());
+        let finish_processor_tools = dataapps_toolset(DataAppsValidator::new());
 
+        push_llm_config(&store, STREAM_ID, AGGREGATE_ID, &tool_processor_tools).await?;
+
+        // Use embedded templates in release mode, filesystem in debug mode
+        let template_path = if cfg!(debug_assertions) {
+            DEFAULT_TEMPLATE_PATH
+        } else {
+            EMBEDDED_TEMPLATES
+        };
+
+        push_seed_sandbox(&store, STREAM_ID, AGGREGATE_ID, template_path, "/app").await?;
         push_prompt(&store, STREAM_ID, AGGREGATE_ID, USER_PROMPT).await?;
 
         tracing::info!("Starting DataApps pipeline with model: {}", MODEL);
 
-        let pipeline = PipelineBuilder::new()
-            .llm(llm)
-            .store(store)
-            .sandbox(sandbox.boxed())
-            .model(MODEL.to_owned())
-            .preamble(SYSTEM_PROMPT.to_owned())
-            .tools(tools)
-            .build()?;
+        let thread_processor = ThreadProcessor::new(llm.clone(), store.clone());
 
+        // Create export directory path with timestamp
+        let timestamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        let export_path = format!("/tmp/dataapps_output_{}", timestamp);
+
+        // Fork sandbox for completion processor
+        let completion_sandbox = sandbox.fork().await?;
+        let tool_processor = ToolProcessor::new(dabgent_sandbox::Sandbox::boxed(sandbox), store.clone(), tool_processor_tools, None);
+
+        // Create CompactProcessor with small threshold for testing
+        let compact_processor = CompactProcessor::new(
+            store.clone(),
+            2048,
+            "gemini-2.5-flash".to_string(),  // Use same model as main pipeline
+        );
+
+        // FixMe: FinishProcessor should have no state, including export path
+        let finish_processor = FinishProcessor::new_with_preparer(
+            dabgent_sandbox::Sandbox::boxed(completion_sandbox),
+            store.clone(),
+            export_path.clone(),
+            finish_processor_tools,
+            DataAppsArtifactPreparer,
+        );
+
+        let pipeline = Pipeline::new(
+            store.clone(),
+            vec![
+                thread_processor.boxed(),
+                tool_processor.boxed(),
+                compact_processor.boxed(),
+                finish_processor.boxed(),
+            ],
+        );
+
+        tracing::info!("Artifacts will be exported to: {}", export_path);
         tracing::info!("Pipeline configured, starting execution...");
 
-        pipeline
-            .run(STREAM_ID.to_owned(), AGGREGATE_ID.to_owned())
-            .await
+        pipeline.run(STREAM_ID.to_owned()).await?;
+        Ok(())
     })
     .await
     .unwrap();
@@ -76,6 +119,7 @@ Quality Requirements:
 - Run all linters and tests before completion
 
 Start by exploring the current project structure, then implement the required features.
+Use the tools available to you as needed.
 ";
 
 const USER_PROMPT: &str = "
@@ -86,12 +130,12 @@ Create a simple DataApp with:
 3. Include debug logging in both backend and frontend
 4. Make sure the React Admin data provider can fetch and display the items
 
-The app should be functional with proper error handling and logging.
+The app should be functional.
 ";
 
-const MODEL: &str = "claude-sonnet-4-20250514";
+const MODEL: &str = "gemini-2.5-flash";
 
-async fn sandbox(client: &dagger_sdk::DaggerConn) -> Result<DaggerSandbox> {
+async fn create_sandbox(client: &dagger_sdk::DaggerConn) -> Result<DaggerSandbox> {
     tracing::info!("Setting up sandbox with DataApps template...");
 
     // Build container from fastapi.Dockerfile
@@ -104,25 +148,56 @@ async fn sandbox(client: &dagger_sdk::DaggerConn) -> Result<DaggerSandbox> {
         .build_opts(client.host().directory("./dabgent_fastapi"), opts);
 
     ctr.sync().await?;
-    let mut sandbox = DaggerSandbox::from_container(ctr, client.clone());
-
-    // Seed template files
-    tracing::info!("Seeding template_minimal files to sandbox...");
-    seed_dataapps_template(&mut sandbox).await?;
-
+    let sandbox = DaggerSandbox::from_container(ctr, client.clone());
     tracing::info!("Sandbox ready for DataApps development");
     Ok(sandbox)
 }
 
-async fn store() -> SqliteStore {
-    tracing::info!("Initializing SQLite event store...");
-    let pool = sqlx::SqlitePool::connect(":memory:")
-        .await
-        .expect("Failed to create in-memory SQLite pool");
-    let store = SqliteStore::new(pool);
-    store.migrate().await;
-    tracing::info!("Event store initialized");
+async fn push_llm_config<S: EventStore>(
+    store: &S,
+    stream_id: &str,
+    aggregate_id: &str,
+    tools: &[Box<dyn ToolDyn>],
+) -> Result<()> {
+    tracing::info!("Pushing LLM configuration to event store...");
+
+    // Extract tool definitions from the tools
+    let tool_definitions: Vec<rig::completion::ToolDefinition> = tools
+        .iter()
+        .map(|tool| tool.definition())
+        .collect();
+
+    let event = dabgent_agent::event::Event::LLMConfig {
+        model: MODEL.to_owned(),
+        temperature: 0.0,
+        max_tokens: 8192,
+        preamble: Some(SYSTEM_PROMPT.to_owned()),
+        tools: Some(tool_definitions),
+        recipient: None,
+        parent: None,
+    };
     store
+        .push_event(stream_id, aggregate_id, &event, &Default::default())
+        .await
+        .map_err(Into::into)
+}
+
+async fn push_seed_sandbox<S: EventStore>(
+    store: &S,
+    stream_id: &str,
+    aggregate_id: &str,
+    template_path: &str,
+    base_path: &str,
+) -> Result<()> {
+    tracing::info!("Pushing seed sandbox event: {}", template_path);
+    let event = dabgent_agent::event::Event::SeedSandboxFromTemplate {
+        template_path: template_path.to_owned(),
+        base_path: base_path.to_owned(),
+    };
+    store
+        .push_event(stream_id, aggregate_id, &event, &Default::default())
+        .await
+        .map_err(Into::into)
 }
 
 async fn push_prompt<S: EventStore>(
@@ -132,71 +207,10 @@ async fn push_prompt<S: EventStore>(
     prompt: &str,
 ) -> Result<()> {
     tracing::info!("Pushing initial prompt to event store...");
-    let event = dabgent_agent::thread::Event::Prompted(prompt.to_owned());
+    let content = rig::message::UserContent::Text(rig::message::Text { text: prompt.to_owned() });
+    let event = dabgent_agent::event::Event::UserMessage(rig::OneOrMany::one(content));
     store
         .push_event(stream_id, aggregate_id, &event, &Default::default())
         .await
         .map_err(Into::into)
 }
-
-async fn seed_dataapps_template(sandbox: &mut DaggerSandbox) -> Result<()> {
-    // Path to template_minimal relative to dabgent directory
-    let template_path = Path::new("../dataapps/template_minimal");
-
-    if !template_path.exists() {
-        return Err(eyre::eyre!("Template path does not exist: {:?}", template_path));
-    }
-
-    tracing::info!("Collecting template files from {:?}", template_path);
-    let files = collect_files_recursive(template_path, "/app")?;
-
-    tracing::info!("Writing {} files to sandbox", files.len());
-    let files_refs: Vec<(&str, &str)> = files.iter().map(|(p, c)| (p.as_str(), c.as_str())).collect();
-    sandbox.write_files(files_refs).await?;
-
-    Ok(())
-}
-
-fn collect_files_recursive(template_path: &Path, base_sandbox_path: &str) -> Result<Vec<(String, String)>> {
-    use std::fs;
-
-    let mut files = Vec::new();
-    let skip_dirs = ["node_modules", ".git", ".venv", "target", "dist", "build"];
-
-    fn collect_dir(
-        dir_path: &Path,
-        template_root: &Path,
-        base_sandbox_path: &str,
-        files: &mut Vec<(String, String)>,
-        skip_dirs: &[&str],
-    ) -> Result<()> {
-        for entry in fs::read_dir(dir_path)? {
-            let entry = entry?;
-            let path = entry.path();
-
-            if path.is_dir() {
-                let dir_name = path.file_name().unwrap().to_string_lossy();
-                if skip_dirs.contains(&dir_name.as_ref()) {
-                    continue;
-                }
-                collect_dir(&path, template_root, base_sandbox_path, files, skip_dirs)?;
-            } else if path.is_file() {
-                // Get relative path from template root
-                let rel_path = path.strip_prefix(template_root)?;
-                let sandbox_path = format!("{}/{}", base_sandbox_path, rel_path.to_string_lossy());
-
-                // Read file content if it's a text file
-                if let Ok(content) = fs::read_to_string(&path) {
-                    files.push((sandbox_path, content));
-                } else {
-                    tracing::warn!("Skipping binary file: {:?}", path);
-                }
-            }
-        }
-        Ok(())
-    }
-
-    collect_dir(template_path, template_path, base_sandbox_path, &mut files, &skip_dirs)?;
-    Ok(files)
-}
-

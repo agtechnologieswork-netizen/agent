@@ -14,6 +14,9 @@ Program will be run using uv run main.py command.
 ";
 
 const MODEL: &str = "claude-sonnet-4-20250514";
+const RECIPIENT: &str = "sandbox";
+const DEFAULT_TEMPERATURE: f64 = 0.0;
+const DEFAULT_MAX_TOKENS: u64 = 4_096;
 
 pub async fn run_pipeline(store: impl EventStore, stream_id: String) {
     const AGGREGATE_ID: &str = "thread";
@@ -23,13 +26,15 @@ pub async fn run_pipeline(store: impl EventStore, stream_id: String) {
         let llm = rig::providers::anthropic::Client::from_env();
         let sandbox = sandbox(&client).await?;
         let tools = toolset(Validator);
-
         let pipeline = PipelineBuilder::new()
             .llm(llm)
             .store(store)
             .sandbox(sandbox.boxed())
             .model(MODEL.to_owned())
+            .temperature(DEFAULT_TEMPERATURE)
+            .max_tokens(DEFAULT_MAX_TOKENS)
             .preamble(SYSTEM_PROMPT.to_owned())
+            .recipient(RECIPIENT.to_owned())
             .tools(tools)
             .build()?;
 
@@ -47,7 +52,7 @@ async fn sandbox(client: &dagger_sdk::DaggerConn) -> Result<DaggerSandbox> {
         .build()?;
     let ctr = client
         .container()
-        .build_opts(client.host().directory("./dabgent_agent/examples"), opts);
+        .build_opts(client.host().directory("./examples"), opts);
     ctr.sync().await?;
     let sandbox = DaggerSandbox::from_container(ctr, client.clone());
     Ok(sandbox)

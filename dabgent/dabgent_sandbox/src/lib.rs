@@ -1,4 +1,7 @@
 pub mod dagger;
+pub mod noop;
+
+pub use noop::NoOpSandbox;
 use eyre::Result;
 use serde::{Deserialize, Serialize};
 use std::pin::Pin;
@@ -22,6 +25,13 @@ pub trait Sandbox {
     fn list_directory(&self, path: &str) -> impl Future<Output = Result<Vec<String>>> + Send;
     fn set_workdir(&mut self, path: &str) -> impl Future<Output = Result<()>> + Send;
     fn export_directory(&self, container_path: &str, host_path: &str) -> impl Future<Output = Result<String>> + Send;
+
+    fn fork(&self) -> impl Future<Output = Result<Self>> + Send
+    where
+        Self: Sized,
+    {
+        async { Err(eyre::eyre!("Fork not supported")) }
+    }
 
     fn boxed(self) -> Box<dyn SandboxDyn>
     where
@@ -66,9 +76,10 @@ pub trait SandboxDyn: Send + Sync {
         container_path: &'a str,
         host_path: &'a str,
     ) -> Pin<Box<dyn Future<Output = Result<String>> + Send + 'a>>;
+    fn fork(&self) -> Pin<Box<dyn Future<Output = Result<Box<dyn SandboxDyn>>> + Send + '_>>;
 }
 
-impl<T: Sandbox + Send + Sync> SandboxDyn for T {
+impl<T: Sandbox + Send + Sync + 'static> SandboxDyn for T {
     fn exec<'a>(
         &'a mut self,
         command: &'a str,
@@ -126,27 +137,8 @@ impl<T: Sandbox + Send + Sync> SandboxDyn for T {
     ) -> Pin<Box<dyn Future<Output = Result<String>> + Send + 'a>> {
         Box::pin(self.export_directory(container_path, host_path))
     }
-}
 
-pub trait SandboxFork: Send + Sync {
-    fn fork(&self) -> impl Future<Output = Result<Self>> + Send
-    where
-        Self: Sized;
-
-    fn boxed(self) -> Box<dyn SandboxForkDyn>
-    where
-        Self: Sized + 'static,
-    {
-        Box::new(self)
-    }
-}
-
-pub trait SandboxForkDyn {
-    fn fork(&self) -> Pin<Box<dyn Future<Output = Result<Box<dyn SandboxForkDyn>>> + Send + '_>>;
-}
-
-impl<T: SandboxFork + 'static> SandboxForkDyn for T {
-    fn fork(&self) -> Pin<Box<dyn Future<Output = Result<Box<dyn SandboxForkDyn>>> + Send + '_>> {
+    fn fork(&self) -> Pin<Box<dyn Future<Output = Result<Box<dyn SandboxDyn>>> + Send + '_>> {
         Box::pin(async move { self.fork().await.map(|fork| fork.boxed()) })
     }
 }
