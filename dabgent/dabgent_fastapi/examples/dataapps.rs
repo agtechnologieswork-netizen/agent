@@ -1,4 +1,4 @@
-use dabgent_agent::processor::{CompactProcessor, FinishProcessor, Pipeline, Processor, ThreadProcessor, ToolProcessor};
+use dabgent_agent::processor::{CompactProcessor, DelegationProcessor, FinishProcessor, Pipeline, Processor, ThreadProcessor, ToolProcessor};
 use dabgent_agent::toolbox::ToolDyn;
 use dabgent_fastapi::{toolset::dataapps_toolset, validator::DataAppsValidator, artifact_preparer::DataAppsArtifactPreparer};
 use dabgent_fastapi::templates::{EMBEDDED_TEMPLATES, DEFAULT_TEMPLATE_PATH};
@@ -61,6 +61,12 @@ async fn main() {
             "gemini-2.5-flash".to_string(),  // Use same model as main pipeline
         );
 
+        // Create DelegationProcessor for Databricks exploration
+        let delegation_processor = DelegationProcessor::new(
+            store.clone(),
+            "gemini-2.5-flash".to_string(),
+        );
+
         // FixMe: FinishProcessor should have no state, including export path
         let finish_processor = FinishProcessor::new_with_preparer(
             dabgent_sandbox::Sandbox::boxed(completion_sandbox),
@@ -75,6 +81,7 @@ async fn main() {
             vec![
                 thread_processor.boxed(),
                 tool_processor.boxed(),
+                delegation_processor.boxed(),
                 compact_processor.boxed(),
                 finish_processor.boxed(),
             ],
@@ -99,16 +106,24 @@ Workspace Setup:
 - Frontend is in /app/frontend with React Admin and TypeScript
 - Use 'uv run' for all Python commands (e.g., 'uv run python main.py')
 
+Data Sources:
+- You have access to Databricks Unity Catalog with bakery business data
+- Use the 'explore_databricks_catalog' tool to discover available tables and schemas
+- The catalog contains real business data about products, sales, customers, and orders
+- Once you explore the data, use the actual schema and sample data for your API design
+
 Your Task:
-1. Create a simple data API with one endpoint that returns sample data
-2. Configure React Admin UI to display this data in a table
-3. Add proper logging and debugging throughout
-4. Ensure CORS is properly configured for React Admin
+1. First, explore the Databricks catalog to understand available bakery data
+2. Create a data API that serves real data from Databricks tables
+3. Configure React Admin UI to display this data in tables
+4. Add proper logging and debugging throughout
+5. Ensure CORS is properly configured for React Admin
 
 Implementation Details:
-- Add /api/items endpoint in backend/main.py that returns a list of sample items
-- Each item should have: id, name, description, category, created_at fields
-- Update frontend/src/App.tsx to add a Resource for items with ListGuesser
+- Start by exploring the Databricks catalog to find relevant tables
+- Design API endpoints based on the actual data structure you discover
+- Each endpoint should return data with fields matching the Databricks schema
+- Update frontend/src/App.tsx to add Resources for the discovered data
 - Include X-Total-Count header for React Admin pagination
 - Add debug logging in both backend (print/logging) and frontend (console.log)
 
@@ -116,21 +131,23 @@ Quality Requirements:
 - Follow React Admin patterns for data providers
 - Use proper REST API conventions (/api/resource)
 - Handle errors gracefully with clear messages
+- Design APIs around real data structures from Databricks
 - Run all linters and tests before completion
 
-Start by exploring the current project structure, then implement the required features.
+Start by exploring the Databricks catalog, then implement the required features based on the actual data you find.
 Use the tools available to you as needed.
 ";
 
 const USER_PROMPT: &str = "
-Create a simple DataApp with:
+Create a bakery business DataApp by:
 
-1. Backend API endpoint `/api/items` that returns a list of sample items (each item should have id, name, description, category, created_at fields)
-2. React Admin frontend that displays these items in a table with proper columns
-3. Include debug logging in both backend and frontend
-4. Make sure the React Admin data provider can fetch and display the items
+1. First, explore the Databricks catalog to discover available bakery data tables
+2. Based on what you find, create backend API endpoints that serve the real data
+3. Build React Admin frontend that displays the discovered data in tables
+4. Include debug logging in both backend and frontend
+5. Make sure the React Admin data provider can fetch and display the data properly
 
-The app should be functional.
+Focus on creating a functional DataApp that showcases real bakery business data from Databricks.
 ";
 
 const MODEL: &str = "gemini-2.5-flash";

@@ -119,6 +119,32 @@ impl<E: EventStore> ToolProcessor<E> {
                                 )
                                 .await?;
                         }
+
+                        // Check if this is a delegation tool call
+                        if call.function.name == "explore_databricks_catalog" && tool_result.is_ok() {
+                            tracing::info!("Databricks exploration requested, emitting DelegateWork event");
+
+                            let catalog = call.function.arguments.get("catalog")
+                                .and_then(|v| v.as_str())
+                                .unwrap_or("main");
+                            let prompt = call.function.arguments.get("prompt")
+                                .and_then(|v| v.as_str())
+                                .unwrap_or("Explore the catalog for relevant data");
+
+                            let delegate_event = Event::DelegateWork {
+                                agent_type: "databricks_explorer".to_string(),
+                                prompt: format!("Explore catalog '{}': {}", catalog, prompt),
+                                parent_tool_id: call.id.clone(),
+                            };
+                            self.event_store
+                                .push_event(
+                                    stream_id,
+                                    aggregate_id,
+                                    &delegate_event,
+                                    &Default::default(),
+                                )
+                                .await?;
+                        }
                         tool_result
                     }
                     None => {
