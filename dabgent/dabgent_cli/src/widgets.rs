@@ -1,5 +1,6 @@
 use dabgent_agent::event::Event as AgentEvent;
 use dabgent_agent::llm::CompletionResponse;
+use dabgent_mq::db::Event as StoreEvent;
 use ratatui::{
     buffer::Buffer,
     layout::Rect,
@@ -12,11 +13,11 @@ use rig::completion::message::{
 };
 
 pub struct EventList<'a> {
-    events: &'a [AgentEvent],
+    events: &'a [StoreEvent<AgentEvent>],
 }
 
 impl<'a> EventList<'a> {
-    pub fn new(events: &'a [AgentEvent]) -> Self {
+    pub fn new(events: &'a [StoreEvent<AgentEvent>]) -> Self {
         Self { events }
     }
 }
@@ -28,7 +29,7 @@ impl Widget for EventList<'_> {
         let items: Vec<ListItem> = self
             .events
             .iter()
-            .map(|event| ListItem::new(event_as_text(event)))
+            .map(|event| ListItem::new(event_as_text(&event.aggregate_id, &event.data)))
             .collect();
 
         let list = List::new(items)
@@ -40,8 +41,8 @@ impl Widget for EventList<'_> {
     }
 }
 
-pub fn event_as_text(event: &AgentEvent) -> Text<'_> {
-    match event {
+pub fn event_as_text<'a>(aggregate_id: &'a str, event: &'a AgentEvent) -> Text<'a> {
+    let text = match event {
         AgentEvent::LLMConfig {
             model,
             temperature,
@@ -61,7 +62,47 @@ pub fn event_as_text(event: &AgentEvent) -> Text<'_> {
         AgentEvent::ToolResult(_) => Text::raw("Tool result"),
         AgentEvent::PlanCreated { tasks } => render_plan_created(tasks),
         AgentEvent::PlanUpdated { tasks } => render_plan_updated(tasks),
+        AgentEvent::UserInputRequested { prompt, context } => {
+            render_user_input_requested(prompt, context)
+        }
+    };
+
+    let mut lines: Vec<Line> = text.into_iter().collect();
+    lines.insert(
+        0,
+        Line::from(vec![Span::styled(
+            format!("[{aggregate_id}]"),
+            Style::new().bold(),
+        )]),
+    );
+    Text::from(lines)
+}
+
+pub fn render_user_input_requested<'a>(
+    prompt: &'a str,
+    context: &'a Option<serde_json::Value>,
+) -> Text<'a> {
+    let mut lines = vec![Line::from(vec![Span::styled(
+        "User input requested",
+        Style::new().bold(),
+    )])];
+    lines.push(Line::from(prompt.to_owned()));
+
+    if let Some(context) = context {
+        match serde_json::to_string_pretty(context) {
+            Ok(pretty) => {
+                lines.push(Line::from("Context:"));
+                for line in pretty.lines() {
+                    lines.push(Line::from(line.to_owned()));
+                }
+            }
+            Err(_) => {
+                lines.push(Line::from(format!("Context: {context}")));
+            }
+        }
     }
+
+    Text::from(lines)
 }
 
 pub fn render_artifacts_collected(

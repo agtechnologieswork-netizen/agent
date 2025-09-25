@@ -3,7 +3,7 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use dabgent_agent::Aggregate;
 use dabgent_agent::event::Event as AgentEvent;
 use dabgent_agent::processor::thread::{self};
-use dabgent_mq::db::{EventStore, Metadata, Query};
+use dabgent_mq::db::{Event as StoreEvent, EventStore, Metadata, Query};
 use ratatui::widgets::ListState;
 use rig::OneOrMany;
 use rig::message::{Text, UserContent};
@@ -12,23 +12,21 @@ pub struct App<S: EventStore> {
     store: S,
     query: Query,
     pub thread: thread::Thread,
-    pub history: Vec<AgentEvent>,
+    pub history: Vec<StoreEvent<AgentEvent>>,
     pub input_buffer: String,
     pub running: bool,
     pub events: EventHandler,
     pub list_state: ListState,
     pub auto_scroll: bool,
+    pub pending_prompt: Option<String>,
+    pub pending_prompt_target: Option<String>,
 }
 
 impl<S: EventStore> App<S> {
     pub fn new(store: S, stream_id: String) -> color_eyre::Result<Self> {
-        let query = Query {
-            stream_id: stream_id.clone(),
-            event_type: None,
-            aggregate_id: Some("thread".to_owned()),
-        };
+        let query = Query::stream(stream_id.clone()).aggregate("thread");
 
-        let event_stream = store.subscribe::<AgentEvent>(&query)?;
+        let event_stream = store.subscribe::<AgentEvent>(&Query::stream(stream_id.clone()))?;
         let events = EventHandler::new(event_stream);
         let thread = thread::Thread::new();
 
@@ -42,6 +40,8 @@ impl<S: EventStore> App<S> {
             events,
             list_state: ListState::default(),
             auto_scroll: true,
+            pending_prompt: None,
+            pending_prompt_target: None,
         })
     }
 
@@ -57,6 +57,14 @@ impl<S: EventStore> App<S> {
                     _ => {}
                 },
                 UiEvent::Thread(event) => {
+                    let aggregate_id = event.aggregate_id.clone();
+                    if let dabgent_agent::event::Event::UserInputRequested { prompt, .. } =
+                        &event.data
+                    {
+                        self.pending_prompt = Some(prompt.clone());
+                        self.pending_prompt_target = Some(aggregate_id.clone());
+                    }
+
                     self.history.push(event);
 
                     // Auto-scroll to bottom if enabled
@@ -64,7 +72,15 @@ impl<S: EventStore> App<S> {
                         self.list_state.select(Some(self.history.len() - 1));
                     }
 
-                    self.fold_thread().await?;
+                    if self
+                        .query
+                        .aggregate_id
+                        .as_ref()
+                        .map(|agg| aggregate_id == *agg)
+                        .unwrap_or(false)
+                    {
+                        self.fold_thread().await?;
+                    }
                 }
                 UiEvent::App(app_event) => match app_event {
                     AppEvent::Confirm => self.confirm().await?,
@@ -159,22 +175,40 @@ impl<S: EventStore> App<S> {
         Ok(())
     }
 
-    async fn send_message(&mut self, content: String) -> color_eyre::Result<()> {
+    async fn send_message_to(
+        &mut self,
+        aggregate_id: &str,
+        content: String,
+    ) -> color_eyre::Result<()> {
         let text = UserContent::Text(Text { text: content });
         let message = OneOrMany::one(text);
-        let command = thread::Command::User(message);
-        let events = self.thread.process(command)?;
         let metadata = Metadata::default();
-        for event in events {
-            self.store
-                .push_event(
-                    &self.query.stream_id,
-                    self.query.aggregate_id.as_ref().unwrap(),
-                    &event,
-                    &metadata,
-                )
-                .await?;
+
+        if self
+            .query
+            .aggregate_id
+            .as_ref()
+            .map(|current| current == aggregate_id)
+            .unwrap_or(false)
+        {
+            let events = self.thread.process(thread::Command::User(message))?;
+            for event in events {
+                self.store
+                    .push_event(&self.query.stream_id, aggregate_id, &event, &metadata)
+                    .await?;
+            }
+        } else {
+            let query = Query::stream(&self.query.stream_id).aggregate(aggregate_id);
+            let events = self.store.load_events::<AgentEvent>(&query, None).await?;
+            let mut thread = thread::Thread::fold(&events);
+            let events = thread.process(thread::Command::User(message))?;
+            for event in events {
+                self.store
+                    .push_event(&self.query.stream_id, aggregate_id, &event, &metadata)
+                    .await?;
+            }
         }
+
         Ok(())
     }
 
@@ -192,8 +226,20 @@ impl<S: EventStore> App<S> {
 
     pub async fn confirm(&mut self) -> color_eyre::Result<()> {
         if !self.input_buffer.is_empty() {
-            self.send_message(self.input_buffer.clone()).await?;
+            let aggregate_id = self
+                .pending_prompt_target
+                .clone()
+                .or_else(|| self.query.aggregate_id.clone())
+                .unwrap_or_else(|| "thread".to_string());
+
+            self.send_message_to(&aggregate_id, self.input_buffer.clone())
+                .await?;
             self.input_buffer.clear();
+
+            if self.pending_prompt_target.is_some() {
+                self.pending_prompt = None;
+                self.pending_prompt_target = None;
+            }
         }
         Ok(())
     }

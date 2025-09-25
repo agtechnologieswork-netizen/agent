@@ -33,7 +33,7 @@ impl<S: EventStore> App<S> {
         let items: Vec<ListItem> = self
             .history
             .iter()
-            .map(|event| ListItem::new(event_as_text(event)))
+            .map(|event| ListItem::new(event_as_text(&event.aggregate_id, &event.data)))
             .collect();
 
         let title = if self.auto_scroll {
@@ -51,13 +51,21 @@ impl<S: EventStore> App<S> {
     }
 
     fn draw_input(&self, area: Rect, buf: &mut Buffer) {
+        let mut title = if let Some(prompt) = &self.pending_prompt {
+            format!("Input (Enter to send) - {prompt}")
+        } else {
+            "Input (Enter to send)".to_string()
+        };
+
+        const MAX_TITLE_LEN: usize = 80;
+        if title.len() > MAX_TITLE_LEN {
+            title.truncate(MAX_TITLE_LEN);
+            title.push('…');
+        }
+
         let input = Paragraph::new(self.input_buffer.as_str())
             .style(Style::default())
-            .block(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .title("Input (Enter to send)"),
-            );
+            .block(Block::default().borders(Borders::ALL).title(title));
 
         input.render(area, buf);
     }

@@ -1,5 +1,6 @@
 use crate::llm::CompletionResponse;
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use std::collections::HashMap;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -58,6 +59,10 @@ pub enum Event {
     PlanUpdated {
         tasks: Vec<String>,
     },
+    UserInputRequested {
+        prompt: String,
+        context: Option<Value>,
+    },
 }
 
 impl dabgent_mq::Event for Event {
@@ -76,6 +81,7 @@ impl dabgent_mq::Event for Event {
             Event::PipelineShutdown => "pipeline_shutdown",
             Event::PlanCreated { .. } => "plan_created",
             Event::PlanUpdated { .. } => "plan_updated",
+            Event::UserInputRequested { .. } => "user_input_requested",
         }
     }
 }
