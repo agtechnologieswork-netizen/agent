@@ -33,6 +33,7 @@ pub trait Aggregate: Default + Send {
     }
 }
 
+#[derive(Clone)]
 pub struct Handler<A: Aggregate, ES: EventStore> {
     store: ES,
     services: A::Services,
