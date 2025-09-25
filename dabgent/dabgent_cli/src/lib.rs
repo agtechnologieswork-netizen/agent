@@ -9,3 +9,4 @@ pub use app::App;
 pub use emulator::CliEmulator;
 pub use events::{Event, EventHandler};
 pub use session::{ChatCommand, ChatEvent, ChatSession};
+pub use agent::PlanningAgent;

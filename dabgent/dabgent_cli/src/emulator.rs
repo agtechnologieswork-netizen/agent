@@ -307,10 +307,22 @@ impl<S: EventStore + Clone + Send + Sync + 'static> CliEmulator<S> {
 
         // After pipeline stops, load ALL events from the store to ensure we get everything
         let all_events = self.store.load_events::<AgentEvent>(&self.query, None).await?;
-        println!("DEBUG: Total events loaded from store: {}", all_events.len());
+        println!("DEBUG: Total events loaded from store with aggregate_id 'thread': {}", all_events.len());
 
-        // Check for planning events in the loaded events
-        for event in &all_events {
+        // Also load events from planner aggregate since planning tools use that
+        let planner_query = Query {
+            stream_id: self.stream_id.clone(),
+            event_type: None,
+            aggregate_id: Some("planner".to_owned()),
+        };
+        let planner_events = self.store.load_events::<AgentEvent>(&planner_query, None).await?;
+        println!("DEBUG: Total events loaded from store with aggregate_id 'planner': {}", planner_events.len());
+
+        // Check for planning events in both thread and planner events
+        let mut combined_events = all_events.clone();
+        combined_events.extend(planner_events);
+
+        for event in &combined_events {
             match event {
                 AgentEvent::PlanCreated { tasks } => {
                     plan_created = true;
@@ -325,7 +337,7 @@ impl<S: EventStore + Clone + Send + Sync + 'static> CliEmulator<S> {
         }
 
         // Update history with all events
-        self.history = all_events;
+        self.history = combined_events;
 
         Ok(EmulatorResult {
             command,
