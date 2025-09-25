@@ -2,7 +2,7 @@ use super::Processor;
 use crate::event::Event;
 use crate::llm::{CompletionResponse, FinishReason};
 use crate::toolbox::{ToolCallExt, ToolDyn};
-use dabgent_mq::{EventDb, EventStore, Query};
+use dabgent_mq::{EventDb, EventStore};
 use dabgent_sandbox::SandboxDyn;
 use eyre::Result;
 use std::path::Path;
