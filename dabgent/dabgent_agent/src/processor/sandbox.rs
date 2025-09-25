@@ -60,6 +60,40 @@ impl<E: EventStore> Processor<Event> for ToolProcessor<E> {
                 && recipient.eq(&self.recipient) =>
             {
                 let tool_results = self.run_tools(&response, &event.stream_id, &event.aggregate_id).await?;
+
+                // Check for delegation tools and emit DelegateWork events
+                for typed_result in &tool_results {
+                    if let ToolKind::Other(tool_name) = &typed_result.tool_name {
+                        if tool_name == "explore_databricks_catalog" {
+                            // Extract arguments from the original tool call in the response
+                            if let Some(tool_call) = self.find_tool_call_by_id(&response, &typed_result.result.id) {
+                                tracing::info!("Databricks exploration requested, emitting DelegateWork event");
+
+                                let catalog = tool_call.function.arguments.get("catalog")
+                                    .and_then(|v| v.as_str())
+                                    .unwrap_or("main");
+                                let prompt = tool_call.function.arguments.get("prompt")
+                                    .and_then(|v| v.as_str())
+                                    .unwrap_or("Explore the catalog for relevant data");
+
+                                let delegate_event = Event::DelegateWork {
+                                    agent_type: "databricks_explorer".to_string(),
+                                    prompt: format!("Explore catalog '{}': {}", catalog, prompt),
+                                    parent_tool_id: typed_result.result.id.clone(),
+                                };
+                                self.event_store
+                                    .push_event(
+                                        &event.stream_id,
+                                        &event.aggregate_id,
+                                        &delegate_event,
+                                        &Default::default(),
+                                    )
+                                    .await?;
+                            }
+                        }
+                    }
+                }
+
                 let tool_result_event = Event::ToolResult(tool_results);
 
                 self.event_store.push_event(
@@ -109,7 +143,18 @@ impl<E: EventStore> ToolProcessor<E> {
                         // Check if this is a successful DoneTool call
                         if call.function.name == "done" && tool_result.is_ok() {
                             tracing::info!("Task completed successfully, emitting TaskCompleted event");
-                            let task_completed_event = Event::TaskCompleted { success: true };
+
+                            // Extract summary from Done tool arguments
+                            let summary = call.function.arguments
+                                .get("summary")
+                                .and_then(|v| v.as_str())
+                                .unwrap_or("Task completed")
+                                .to_string();
+
+                            let task_completed_event = Event::TaskCompleted {
+                                success: true,
+                                summary
+                            };
                             self.event_store
                                 .push_event(
                                     stream_id,
@@ -120,31 +165,6 @@ impl<E: EventStore> ToolProcessor<E> {
                                 .await?;
                         }
 
-                        // Check if this is a delegation tool call
-                        if call.function.name == "explore_databricks_catalog" && tool_result.is_ok() {
-                            tracing::info!("Databricks exploration requested, emitting DelegateWork event");
-
-                            let catalog = call.function.arguments.get("catalog")
-                                .and_then(|v| v.as_str())
-                                .unwrap_or("main");
-                            let prompt = call.function.arguments.get("prompt")
-                                .and_then(|v| v.as_str())
-                                .unwrap_or("Explore the catalog for relevant data");
-
-                            let delegate_event = Event::DelegateWork {
-                                agent_type: "databricks_explorer".to_string(),
-                                prompt: format!("Explore catalog '{}': {}", catalog, prompt),
-                                parent_tool_id: call.id.clone(),
-                            };
-                            self.event_store
-                                .push_event(
-                                    stream_id,
-                                    aggregate_id,
-                                    &delegate_event,
-                                    &Default::default(),
-                                )
-                                .await?;
-                        }
                         tool_result
                     }
                     None => {
@@ -152,10 +172,30 @@ impl<E: EventStore> ToolProcessor<E> {
                         Err(serde_json::json!(error))
                     }
                 };
-                results.push(TypedToolResult { tool_name: match call.function.name.as_str() { "done" => ToolKind::Done, other => ToolKind::Other(other.to_string()) }, result: call.to_result(result) });
+                results.push(TypedToolResult {
+                    tool_name: match call.function.name.as_str() {
+                        "done" => ToolKind::Done,
+                        other => ToolKind::Other(other.to_string())
+                    },
+                    result: call.to_result(result)
+                });
             }
         }
 
         Ok(results)
+    }
+
+    fn find_tool_call_by_id<'a>(&self, response: &'a CompletionResponse, tool_id: &str) -> Option<&'a rig::message::ToolCall> {
+        response.choice.iter().find_map(|content| {
+            if let rig::message::AssistantContent::ToolCall(call) = content {
+                if call.id == tool_id {
+                    Some(call)
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        })
     }
 }

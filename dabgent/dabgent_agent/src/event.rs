@@ -40,6 +40,7 @@ pub enum Event {
     ArtifactsCollected(HashMap<String, String>),
     TaskCompleted {
         success: bool,
+        summary: String,
     },
     SeedSandboxFromTemplate {
         template_path: String,

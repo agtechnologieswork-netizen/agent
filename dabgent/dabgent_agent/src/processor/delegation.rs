@@ -30,6 +30,15 @@ Provide your findings in a structured markdown format with:
 3. **Key Tables**: Detailed breakdown with columns and sample data
 4. **Recommendations**: Which tables/columns would work well for a DataApp API
 
+## Completion
+When you have completed your exploration and analysis, call the `done` tool with a comprehensive summary of your findings. The summary should include:
+- A brief overview of what you discovered
+- Key schemas and table counts
+- Most relevant tables for DataApp APIs
+- Specific recommendations with table/column details
+
+Example: `done(summary="Explored catalog 'main': Found 3 relevant schemas for bakery business. Key tables: sales.transactions (50K records, daily sales data), inventory.products (500 items, product catalog with pricing), customers.profiles (10K customers with purchase history). Recommended starting with sales.transactions for revenue analytics API.")`
+
 Be thorough but concise. Focus on data that would be useful for creating REST APIs.
 "#;
 
@@ -49,12 +58,20 @@ impl<E: EventStore> Processor<Event> for DelegationProcessor<E> {
                 );
                 self.handle_delegate_work(event, agent_type, prompt, parent_tool_id).await?;
             }
-            Event::AgentMessage { response, recipient } if recipient.as_deref() == Some("databricks_worker") => {
-                tracing::info!(
-                    "Databricks exploration completed for aggregate {}",
-                    event.aggregate_id,
-                );
-                self.handle_work_completion(event, response).await?;
+            Event::TaskCompleted { success, summary } if self.is_delegated_thread(&event.aggregate_id) => {
+                if *success {
+                    tracing::info!(
+                        "Delegated work completed successfully for aggregate {}",
+                        event.aggregate_id,
+                    );
+                    self.handle_work_completion(event, summary).await?;
+                } else {
+                    tracing::warn!(
+                        "Delegated work failed for aggregate {}",
+                        event.aggregate_id,
+                    );
+                    // TODO: Handle failed delegation
+                }
             }
             _ => {}
         }
@@ -70,6 +87,11 @@ impl<E: EventStore> DelegationProcessor<E> {
         }
     }
 
+    fn is_delegated_thread(&self, aggregate_id: &str) -> bool {
+        // Check if this is a delegated thread (starts with known prefixes)
+        aggregate_id.starts_with("databricks_")
+    }
+
     async fn handle_delegate_work(
         &mut self,
         event: &EventDb<Event>,
@@ -80,8 +102,19 @@ impl<E: EventStore> DelegationProcessor<E> {
         // Create task thread
         let task_thread_id = format!("databricks_{}", Uuid::new_v4());
 
-        // Get Databricks tools
-        let tools = databricks_toolset().map_err(|e| eyre::eyre!("Failed to get databricks tools: {}", e))?;
+        // Get Databricks tools and add Done tool for completion signaling
+        let mut tools = databricks_toolset().map_err(|e| eyre::eyre!("Failed to get databricks tools: {}", e))?;
+
+        // Simple validator that always passes for delegation completion
+        struct AlwaysPassValidator;
+        impl crate::toolbox::Validator for AlwaysPassValidator {
+            async fn run(&self, _sandbox: &mut Box<dyn dabgent_sandbox::SandboxDyn>) -> Result<Result<(), String>, eyre::Error> {
+                Ok(Ok(()))
+            }
+        }
+
+        tools.push(Box::new(crate::toolbox::basic::DoneTool::new(AlwaysPassValidator)));
+
         let tool_definitions: Vec<rig::completion::ToolDefinition> = tools
             .iter()
             .map(|tool| tool.definition())
@@ -128,7 +161,7 @@ impl<E: EventStore> DelegationProcessor<E> {
     async fn handle_work_completion(
         &mut self,
         event: &EventDb<Event>,
-        response: &crate::llm::CompletionResponse,
+        summary: &str,
     ) -> eyre::Result<()> {
         // Load task thread to get parent info from LLMConfig
         let task_query = Query::stream(&event.stream_id).aggregate(&event.aggregate_id);
@@ -142,21 +175,10 @@ impl<E: EventStore> DelegationProcessor<E> {
             });
 
         if let Some(parent) = parent_info {
-            // Extract the exploration results from the LLM response
-            let result = response
-                .choice
-                .iter()
-                .filter_map(|c| match c {
-                    rig::message::AssistantContent::Text(t) => Some(t.text.clone()),
-                    _ => None,
-                })
-                .collect::<Vec<_>>()
-                .join("\n");
-
-            // Create a user message with the results for the parent thread
+            // Use the summary directly from the Done tool
             let result_content = format!(
                 "## Databricks Exploration Results\n\n{}\n\n*This data was discovered from your Databricks catalog and can be used to build your DataApp API.*",
-                result
+                summary
             );
 
             let user_content = rig::OneOrMany::one(rig::message::UserContent::Text(

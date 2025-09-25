@@ -127,7 +127,7 @@ impl<E: EventStore, P: ArtifactPreparer> FinishProcessor<E, P> {
 impl<E: EventStore, P: ArtifactPreparer> Processor<Event> for FinishProcessor<E, P> {
     async fn run(&mut self, event: &EventDb<Event>) -> eyre::Result<()> {
         match &event.data {
-            Event::TaskCompleted { success: true } => {
+            Event::TaskCompleted { success: true, .. } => {
                 // Check event-sourced shutdown guard: if PipelineShutdown already exists, skip
                 let query = Query::stream(&event.stream_id).aggregate(&event.aggregate_id);
                 let prior_events = self.event_store.load_events::<Event>(&query, None).await?;
@@ -178,7 +178,7 @@ impl<E: EventStore, P: ArtifactPreparer> Processor<Event> for FinishProcessor<E,
                     }
                 }
             }
-            Event::TaskCompleted { success: false } => {
+            Event::TaskCompleted { success: false, .. } => {
                 tracing::warn!("Task completed with failure, skipping export and shutting down");
                 let shutdown_event = Event::PipelineShutdown;
                 self.event_store

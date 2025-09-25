@@ -118,13 +118,12 @@ impl Tool for SpawnDatabricksExploration {
         args: Self::Args,
         _sandbox: &mut Box<dyn SandboxDyn>,
     ) -> Result<Result<Self::Output, Self::Error>> {
-        let SpawnDatabricksExplorationArgs { catalog, prompt } = args;
+        let SpawnDatabricksExplorationArgs { catalog, prompt: _ } = args;
 
-        // This tool should trigger delegation via proper event sourcing
-        // For now, return a clear message that delegation is being initiated
+        // This tool triggers delegation to an independent Databricks exploration agent
         Ok(Ok(format!(
-            "Initiating Databricks exploration for catalog '{}' with prompt: '{}'",
-            catalog, prompt
+            "✅ Delegated work: Exploring Databricks catalog '{}' for bakery data. An independent agent will analyze the catalog and report back with findings.",
+            catalog
         )))
     }
 }
