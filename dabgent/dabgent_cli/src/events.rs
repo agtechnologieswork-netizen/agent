@@ -1,7 +1,7 @@
 use color_eyre::eyre::OptionExt;
 use crossterm::event::Event as CrosstermEvent;
 use dabgent_agent::event::Event as AgentEvent;
-use dabgent_mq::db::EventStream;
+use dabgent_mq::db::{Event as StoreEvent, EventStream};
 use std::time::Duration;
 use tokio::sync::mpsc;
 use tokio_stream::StreamExt;
@@ -20,7 +20,7 @@ pub enum AppEvent {
 pub enum Event {
     Tick,
     Crossterm(CrosstermEvent),
-    Thread(AgentEvent),
+    Thread(StoreEvent<AgentEvent>),
     App(AppEvent),
 }
 
@@ -62,7 +62,7 @@ impl StoreTask {
     }
 
     pub async fn run(mut self) -> color_eyre::Result<()> {
-        while let Some(event) = self.receiver.next().await {
+        while let Some(event) = self.receiver.next_full().await {
             match event {
                 Ok(event) => {
                     let _ = self.sender.send(Event::Thread(event));

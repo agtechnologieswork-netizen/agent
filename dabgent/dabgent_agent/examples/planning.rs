@@ -1,7 +1,8 @@
-use dabgent_agent::processor::{Pipeline, Processor, ThreadProcessor, ToolProcessor};
+use dabgent_agent::Aggregate;
+use dabgent_agent::processor::{Pipeline, Processor, ThreadProcessor, ToolProcessor, thread};
 use dabgent_agent::toolbox::{self, basic::toolset, planning::planning_toolset};
-use dabgent_mq::db::sqlite::SqliteStore;
 use dabgent_mq::EventStore;
+use dabgent_mq::db::sqlite::SqliteStore;
 use dabgent_sandbox::dagger::{ConnectOpts, Sandbox as DaggerSandbox};
 use dabgent_sandbox::{NoOpSandbox, Sandbox, SandboxDyn};
 use eyre::Result;
@@ -47,7 +48,11 @@ async fn main() {
         .expect("Pipeline failed");
 }
 
-pub async fn planning_pipeline(stream_id: &str, store: impl EventStore + Clone, task: &str) -> Result<()> {
+pub async fn planning_pipeline(
+    stream_id: &str,
+    store: impl EventStore + Clone,
+    task: &str,
+) -> Result<()> {
     let stream_id = stream_id.to_owned();
     let task = task.to_owned();
 
@@ -70,6 +75,7 @@ pub async fn planning_pipeline(stream_id: &str, store: impl EventStore + Clone, 
                     .collect()
             ),
             recipient: Some("planner".to_string()),
+            parent: None,
         };
         store
             .push_event(&stream_id, "planner", &planning_config, &Default::default())
@@ -109,6 +115,7 @@ pub async fn planning_pipeline(stream_id: &str, store: impl EventStore + Clone, 
 
         // Wait for PlanCreated event
         let mut plan_created = false;
+        let mut feedback_sent = false;
         while !plan_created {
             tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
 
@@ -116,9 +123,29 @@ pub async fn planning_pipeline(stream_id: &str, store: impl EventStore + Clone, 
             let events = store.load_events::<dabgent_agent::event::Event>(&query, None).await?;
 
             for event in events.iter() {
-                if matches!(event, dabgent_agent::event::Event::PlanCreated { .. }) {
-                    plan_created = true;
-                    break;
+                match event {
+                    dabgent_agent::event::Event::PlanCreated { .. } => {
+                        plan_created = true;
+                        break;
+                    }
+                    dabgent_agent::event::Event::UserInputRequested { prompt, context }
+                        if !feedback_sent =>
+                    {
+                        println!("Planner requested feedback: {prompt}");
+                        if let Some(context) = context {
+                            if let Ok(pretty) = serde_json::to_string_pretty(context) {
+                                println!("Context: {pretty}");
+                            }
+                        }
+                        send_planner_feedback(
+                            &store,
+                            &stream_id,
+                            "Looks good, please proceed with the execution plan.",
+                        )
+                        .await?;
+                        feedback_sent = true;
+                    }
+                    _ => {}
                 }
             }
         }
@@ -182,6 +209,7 @@ pub async fn planning_pipeline(stream_id: &str, store: impl EventStore + Clone, 
                             .collect()
                     ),
                     recipient: None,
+                    parent: None,
                 };
                 store
                     .push_event(&stream_id, &thread_id, &worker_config, &Default::default())
@@ -221,6 +249,34 @@ pub async fn planning_pipeline(stream_id: &str, store: impl EventStore + Clone, 
     })
     .await
     .map_err(Into::into)
+}
+
+async fn send_planner_feedback<S: EventStore>(
+    store: &S,
+    stream_id: &str,
+    feedback: &str,
+) -> Result<()> {
+    let query = dabgent_mq::Query::stream(stream_id).aggregate("planner");
+    let events = store
+        .load_events::<dabgent_agent::event::Event>(&query, None)
+        .await?;
+    let mut planner_thread = thread::Thread::fold(&events);
+
+    let message = rig::OneOrMany::one(rig::message::UserContent::Text(rig::message::Text {
+        text: feedback.to_string(),
+    }));
+
+    let new_events = planner_thread
+        .process(thread::Command::User(message))
+        .map_err(|err: thread::Error| eyre::eyre!(err))?;
+
+    for event in new_events {
+        store
+            .push_event(stream_id, "planner", &event, &Default::default())
+            .await?;
+    }
+
+    Ok(())
 }
 
 async fn sandbox(client: &dagger_sdk::DaggerConn) -> Result<DaggerSandbox> {

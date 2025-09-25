@@ -1,7 +1,8 @@
+use super::{NoSandboxAdapter, NoSandboxTool};
 use dabgent_mq::EventStore;
 use eyre::Result;
 use serde::{Deserialize, Serialize};
-use super::{NoSandboxTool, NoSandboxAdapter};
+use serde_json::json;
 
 /// Tool for creating a plan from task descriptions
 pub struct CreatePlanTool<S: EventStore> {
@@ -11,10 +12,7 @@ pub struct CreatePlanTool<S: EventStore> {
 
 impl<S: EventStore + Clone> CreatePlanTool<S> {
     pub fn new(store: S, stream_id: String) -> Self {
-        Self {
-            store,
-            stream_id,
-        }
+        Self { store, stream_id }
     }
 }
 
@@ -41,7 +39,8 @@ impl<S: EventStore + Clone + Send + Sync> NoSandboxTool for CreatePlanTool<S> {
     fn definition(&self) -> rig::completion::ToolDefinition {
         rig::completion::ToolDefinition {
             name: self.name(),
-            description: "Create a plan by breaking down a task into concrete, actionable steps.".to_string(),
+            description: "Create a plan by breaking down a task into concrete, actionable steps."
+                .to_string(),
             parameters: serde_json::json!({
                 "type": "object",
                 "properties": {
@@ -59,32 +58,57 @@ impl<S: EventStore + Clone + Send + Sync> NoSandboxTool for CreatePlanTool<S> {
         }
     }
 
-    async fn call(
-        &self,
-        args: Self::Args,
-    ) -> Result<Result<Self::Output, Self::Error>> {
+    async fn call(&self, args: Self::Args) -> Result<Result<Self::Output, Self::Error>> {
         tracing::info!("CreatePlanTool called with {} tasks", args.tasks.len());
 
         // Create PlanCreated event
-        let event = crate::event::Event::PlanCreated {
+        let plan_created = crate::event::Event::PlanCreated {
             tasks: args.tasks.clone(),
         };
 
         // Push event to store
-        match self.store
-            .push_event(&self.stream_id, "planner", &event, &Default::default())
-            .await {
+        match self
+            .store
+            .push_event(
+                &self.stream_id,
+                "planner",
+                &plan_created,
+                &Default::default(),
+            )
+            .await
+        {
             Ok(_) => {
                 tracing::info!("PlanCreated event pushed to store successfully");
-            },
+            }
             Err(e) => return Ok(Err(e.to_string())),
+        }
+
+        let feedback_event = crate::event::Event::UserInputRequested {
+            prompt: "Please review the generated plan and share any feedback or adjustments."
+                .to_string(),
+            context: Some(json!({
+                "tasks": args.tasks.clone(),
+            })),
+        };
+
+        if let Err(e) = self
+            .store
+            .push_event(
+                &self.stream_id,
+                "planner",
+                &feedback_event,
+                &Default::default(),
+            )
+            .await
+        {
+            return Ok(Err(e.to_string()));
         }
 
         let message = format!("Created plan with {} tasks", args.tasks.len());
 
         Ok(Ok(CreatePlanOutput {
             tasks: args.tasks,
-            message
+            message,
         }))
     }
 }
@@ -142,28 +166,52 @@ impl<S: EventStore + Send + Sync> NoSandboxTool for UpdatePlanTool<S> {
         }
     }
 
-    async fn call(
-        &self,
-        args: Self::Args,
-    ) -> Result<Result<Self::Output, Self::Error>> {
+    async fn call(&self, args: Self::Args) -> Result<Result<Self::Output, Self::Error>> {
         // Create PlanUpdated event
-        let event = crate::event::Event::PlanUpdated {
+        let plan_updated = crate::event::Event::PlanUpdated {
             tasks: args.tasks.clone(),
         };
 
         // Push event to store
-        match self.store
-            .push_event(&self.stream_id, "planner", &event, &Default::default())
-            .await {
-            Ok(_) => {},
+        match self
+            .store
+            .push_event(
+                &self.stream_id,
+                "planner",
+                &plan_updated,
+                &Default::default(),
+            )
+            .await
+        {
+            Ok(_) => {}
             Err(e) => return Ok(Err(e.to_string())),
+        }
+
+        let feedback_event = crate::event::Event::UserInputRequested {
+            prompt: "The plan has been updated. Please review the latest steps and respond with any changes.".to_string(),
+            context: Some(json!({
+                "tasks": args.tasks.clone(),
+            })),
+        };
+
+        if let Err(e) = self
+            .store
+            .push_event(
+                &self.stream_id,
+                "planner",
+                &feedback_event,
+                &Default::default(),
+            )
+            .await
+        {
+            return Ok(Err(e.to_string()));
         }
 
         let message = format!("Updated plan with {} tasks", args.tasks.len());
 
         Ok(Ok(UpdatePlanOutput {
             tasks: args.tasks,
-            message
+            message,
         }))
     }
 }
@@ -221,15 +269,14 @@ impl<S: EventStore + Send + Sync> NoSandboxTool for AddTaskTool<S> {
         }
     }
 
-    async fn call(
-        &self,
-        args: Self::Args,
-    ) -> Result<Result<Self::Output, Self::Error>> {
+    async fn call(&self, args: Self::Args) -> Result<Result<Self::Output, Self::Error>> {
         // Load current plan
         let query = dabgent_mq::Query::stream(&self.stream_id).aggregate("planner");
-        let events = match self.store
+        let events = match self
+            .store
             .load_events::<crate::event::Event>(&query, None)
-            .await {
+            .await
+        {
             Ok(events) => events,
             Err(e) => return Ok(Err(e.to_string())),
         };
@@ -238,8 +285,8 @@ impl<S: EventStore + Send + Sync> NoSandboxTool for AddTaskTool<S> {
         let mut current_tasks: Option<Vec<String>> = None;
         for event in events.iter() {
             match event {
-                crate::event::Event::PlanCreated { tasks } |
-                crate::event::Event::PlanUpdated { tasks } => {
+                crate::event::Event::PlanCreated { tasks }
+                | crate::event::Event::PlanUpdated { tasks } => {
                     current_tasks = Some(tasks.clone());
                 }
                 _ => {}
@@ -254,7 +301,11 @@ impl<S: EventStore + Send + Sync> NoSandboxTool for AddTaskTool<S> {
         // Add the new task at the specified position or at the end
         if let Some(pos) = args.position {
             if pos > tasks.len() {
-                return Ok(Err(format!("Position {} is out of bounds (plan has {} tasks)", pos, tasks.len())));
+                return Ok(Err(format!(
+                    "Position {} is out of bounds (plan has {} tasks)",
+                    pos,
+                    tasks.len()
+                )));
             }
             tasks.insert(pos, args.task.clone());
         } else {
@@ -267,19 +318,18 @@ impl<S: EventStore + Send + Sync> NoSandboxTool for AddTaskTool<S> {
         };
 
         // Push event to store
-        match self.store
+        match self
+            .store
             .push_event(&self.stream_id, "planner", &event, &Default::default())
-            .await {
-            Ok(_) => {},
+            .await
+        {
+            Ok(_) => {}
             Err(e) => return Ok(Err(e.to_string())),
         }
 
         let message = format!("Added task '{}' to plan", args.task);
 
-        Ok(Ok(AddTaskOutput {
-            tasks,
-            message,
-        }))
+        Ok(Ok(AddTaskOutput { tasks, message }))
     }
 }
 
@@ -331,15 +381,14 @@ impl<S: EventStore + Send + Sync> NoSandboxTool for CompleteTaskTool<S> {
         }
     }
 
-    async fn call(
-        &self,
-        args: Self::Args,
-    ) -> Result<Result<Self::Output, Self::Error>> {
+    async fn call(&self, args: Self::Args) -> Result<Result<Self::Output, Self::Error>> {
         // Load current plan to validate task exists
         let query = dabgent_mq::Query::stream(&self.stream_id).aggregate("planner");
-        let events = match self.store
+        let events = match self
+            .store
             .load_events::<crate::event::Event>(&query, None)
-            .await {
+            .await
+        {
             Ok(events) => events,
             Err(e) => return Ok(Err(e.to_string())),
         };
@@ -348,8 +397,8 @@ impl<S: EventStore + Send + Sync> NoSandboxTool for CompleteTaskTool<S> {
         let mut current_tasks: Option<Vec<String>> = None;
         for event in events.iter() {
             match event {
-                crate::event::Event::PlanCreated { tasks } |
-                crate::event::Event::PlanUpdated { tasks } => {
+                crate::event::Event::PlanCreated { tasks }
+                | crate::event::Event::PlanUpdated { tasks } => {
                     current_tasks = Some(tasks.clone());
                 }
                 _ => {}
@@ -377,19 +426,18 @@ impl<S: EventStore + Send + Sync> NoSandboxTool for CompleteTaskTool<S> {
 
         // Push event to store with the appropriate thread_id
         let thread_id = format!("task-{}", args.task_index);
-        match self.store
+        match self
+            .store
             .push_event(&self.stream_id, &thread_id, &event, &Default::default())
-            .await {
-            Ok(_) => {},
+            .await
+        {
+            Ok(_) => {}
             Err(e) => return Ok(Err(e.to_string())),
         }
 
         let message = format!("Marked task {} as completed: '{}'", args.task_index, task);
 
-        Ok(Ok(CompleteTaskOutput {
-            task,
-            message,
-        }))
+        Ok(Ok(CompleteTaskOutput { task, message }))
     }
 }
 
@@ -443,15 +491,14 @@ impl<S: EventStore + Send + Sync> NoSandboxTool for GetPlanStatusTool<S> {
         }
     }
 
-    async fn call(
-        &self,
-        _args: Self::Args,
-    ) -> Result<Result<Self::Output, Self::Error>> {
+    async fn call(&self, _args: Self::Args) -> Result<Result<Self::Output, Self::Error>> {
         // Load events to find the latest plan
         let query = dabgent_mq::Query::stream(&self.stream_id).aggregate("planner");
-        let events = match self.store
+        let events = match self
+            .store
             .load_events::<crate::event::Event>(&query, None)
-            .await {
+            .await
+        {
             Ok(events) => events,
             Err(e) => return Ok(Err(e.to_string())),
         };
@@ -460,8 +507,8 @@ impl<S: EventStore + Send + Sync> NoSandboxTool for GetPlanStatusTool<S> {
         let mut current_tasks: Option<Vec<String>> = None;
         for event in events.iter() {
             match event {
-                crate::event::Event::PlanCreated { tasks } |
-                crate::event::Event::PlanUpdated { tasks } => {
+                crate::event::Event::PlanCreated { tasks }
+                | crate::event::Event::PlanUpdated { tasks } => {
                     current_tasks = Some(tasks.clone());
                 }
                 _ => {}
@@ -474,12 +521,13 @@ impl<S: EventStore + Send + Sync> NoSandboxTool for GetPlanStatusTool<S> {
         };
 
         // Convert to task status with thread IDs
-        let task_statuses: Vec<TaskStatus> = tasks.iter()
+        let task_statuses: Vec<TaskStatus> = tasks
+            .iter()
             .enumerate()
             .map(|(i, desc)| TaskStatus {
                 description: desc.clone(),
                 thread_id: format!("task-{}", i),
-                completed: false,  // Would need to track completion events
+                completed: false, // Would need to track completion events
             })
             .collect();
 
@@ -499,11 +547,25 @@ pub fn planning_toolset<S: EventStore + Clone + Send + Sync + 'static>(
     stream_id: String,
 ) -> Vec<Box<dyn super::ToolDyn>> {
     vec![
-        Box::new(NoSandboxAdapter::new(CreatePlanTool::new(store.clone(), stream_id.clone()))),
-        Box::new(NoSandboxAdapter::new(UpdatePlanTool::new(store.clone(), stream_id.clone()))),
-        Box::new(NoSandboxAdapter::new(AddTaskTool::new(store.clone(), stream_id.clone()))),
-        Box::new(NoSandboxAdapter::new(CompleteTaskTool::new(store.clone(), stream_id.clone()))),
-        Box::new(NoSandboxAdapter::new(GetPlanStatusTool::new(store, stream_id))),
+        Box::new(NoSandboxAdapter::new(CreatePlanTool::new(
+            store.clone(),
+            stream_id.clone(),
+        ))),
+        Box::new(NoSandboxAdapter::new(UpdatePlanTool::new(
+            store.clone(),
+            stream_id.clone(),
+        ))),
+        Box::new(NoSandboxAdapter::new(AddTaskTool::new(
+            store.clone(),
+            stream_id.clone(),
+        ))),
+        Box::new(NoSandboxAdapter::new(CompleteTaskTool::new(
+            store.clone(),
+            stream_id.clone(),
+        ))),
+        Box::new(NoSandboxAdapter::new(GetPlanStatusTool::new(
+            store, stream_id,
+        ))),
     ]
 }
 
@@ -533,7 +595,11 @@ mod tests {
 
         // Create a plan with structured tasks
         let args = CreatePlanArgs {
-            tasks: vec!["Task 1".to_string(), "Task 2".to_string(), "Task 3".to_string()],
+            tasks: vec![
+                "Task 1".to_string(),
+                "Task 2".to_string(),
+                "Task 3".to_string(),
+            ],
         };
 
         let result = tool.call(args).await.unwrap().unwrap();
@@ -577,7 +643,11 @@ mod tests {
         // Create a plan first
         let create_tool = CreatePlanTool::new(store.clone(), "test-stream".to_string());
         let create_args = CreatePlanArgs {
-            tasks: vec!["Task A".to_string(), "Task B".to_string(), "Task C".to_string()],
+            tasks: vec![
+                "Task A".to_string(),
+                "Task B".to_string(),
+                "Task C".to_string(),
+            ],
         };
         create_tool.call(create_args).await.unwrap().unwrap();
 
@@ -689,9 +759,7 @@ mod tests {
 
         // Mark task 1 (index 1) as completed
         let tool = CompleteTaskTool::new(store.clone(), "test-stream".to_string());
-        let args = CompleteTaskArgs {
-            task_index: 1,
-        };
+        let args = CompleteTaskArgs { task_index: 1 };
         let result = tool.call(args).await.unwrap().unwrap();
 
         assert_eq!(result.task, "Task 2");
@@ -699,9 +767,14 @@ mod tests {
 
         // Verify TaskCompleted event was created
         let query = dabgent_mq::Query::stream("test-stream").aggregate("task-1");
-        let events = store.load_events::<crate::event::Event>(&query, None).await.unwrap();
+        let events = store
+            .load_events::<crate::event::Event>(&query, None)
+            .await
+            .unwrap();
 
-        let has_completed = events.iter().any(|e| matches!(e, crate::event::Event::TaskCompleted { success: true }));
+        let has_completed = events
+            .iter()
+            .any(|e| matches!(e, crate::event::Event::TaskCompleted { success: true }));
         assert!(has_completed);
     }
 
@@ -718,9 +791,7 @@ mod tests {
 
         // Try to complete task at index 5 (out of bounds)
         let tool = CompleteTaskTool::new(store.clone(), "test-stream".to_string());
-        let args = CompleteTaskArgs {
-            task_index: 5,
-        };
+        let args = CompleteTaskArgs { task_index: 5 };
         let result = tool.call(args).await.unwrap();
 
         assert!(result.is_err());
