@@ -10,6 +10,8 @@ use tokio::time::sleep;
 const SQL_WAREHOUSES_ENDPOINT: &str = "/api/2.0/sql/warehouses";
 const SQL_STATEMENTS_ENDPOINT: &str = "/api/2.0/sql/statements";
 const UNITY_CATALOG_TABLES_ENDPOINT: &str = "/api/2.1/unity-catalog/tables";
+const UNITY_CATALOG_CATALOGS_ENDPOINT: &str = "/api/2.1/unity-catalog/catalogs";
+const UNITY_CATALOG_SCHEMAS_ENDPOINT: &str = "/api/2.1/unity-catalog/schemas";
 const DEFAULT_WAIT_TIMEOUT: &str = "30s";
 const MAX_POLL_ATTEMPTS: usize = 30;
 
@@ -30,6 +32,44 @@ struct TableColumn {
     comment: Option<String>,
 }
 
+#[derive(Debug, Deserialize)]
+struct TablesListResponse {
+    tables: Option<Vec<TableSummary>>,
+    next_page_token: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct TableSummary {
+    name: String,
+    catalog_name: String,
+    schema_name: String,
+    table_type: Option<String>,
+    owner: Option<String>,
+    comment: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct CatalogsListResponse {
+    catalogs: Option<Vec<CatalogSummary>>,
+    next_page_token: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct CatalogSummary {
+    name: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct SchemasListResponse {
+    schemas: Option<Vec<SchemaSummary>>,
+    next_page_token: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct SchemaSummary {
+    name: String,
+}
+
 #[derive(Debug)]
 pub struct TableDetails {
     pub full_name: String,
@@ -47,6 +87,17 @@ pub struct TableDetails {
 pub struct ColumnMetadata {
     pub name: String,
     pub data_type: String,
+    pub comment: Option<String>,
+}
+
+#[derive(Debug)]
+pub struct TableInfo {
+    pub name: String,
+    pub catalog_name: String,
+    pub schema_name: String,
+    pub full_name: String,
+    pub table_type: String,
+    pub owner: Option<String>,
     pub comment: Option<String>,
 }
 
@@ -434,6 +485,173 @@ impl DatabricksRestClient {
             sample_data,
             row_count,
         })
+    }
+
+    pub async fn list_catalogs(&self) -> Result<Vec<String>> {
+        let mut all_catalogs = Vec::new();
+        let mut next_page_token: Option<String> = None;
+
+        loop {
+            let mut url = format!("{}{}", self.host, UNITY_CATALOG_CATALOGS_ENDPOINT);
+            let mut query_params = Vec::new();
+
+            if let Some(token) = &next_page_token {
+                query_params.push(format!("page_token={}", urlencoding::encode(token)));
+            }
+
+            if !query_params.is_empty() {
+                url.push('?');
+                url.push_str(&query_params.join("&"));
+            }
+
+            let response: CatalogsListResponse = self
+                .api_request(reqwest::Method::GET, &url, None::<&()>)
+                .await?;
+
+            if let Some(catalogs) = response.catalogs {
+                for catalog in catalogs {
+                    all_catalogs.push(catalog.name);
+                }
+            }
+
+            if response.next_page_token.is_some() {
+                next_page_token = response.next_page_token;
+            } else {
+                break;
+            }
+        }
+
+        Ok(all_catalogs)
+    }
+
+    pub async fn list_schemas(&self, catalog_name: &str) -> Result<Vec<String>> {
+        let mut all_schemas = Vec::new();
+        let mut next_page_token: Option<String> = None;
+
+        loop {
+            let mut url = format!("{}{}", self.host, UNITY_CATALOG_SCHEMAS_ENDPOINT);
+            let mut query_params = vec![format!("catalog_name={}", urlencoding::encode(catalog_name))];
+
+            if let Some(token) = &next_page_token {
+                query_params.push(format!("page_token={}", urlencoding::encode(token)));
+            }
+
+            url.push('?');
+            url.push_str(&query_params.join("&"));
+
+            let response: SchemasListResponse = self
+                .api_request(reqwest::Method::GET, &url, None::<&()>)
+                .await?;
+
+            if let Some(schemas) = response.schemas {
+                for schema in schemas {
+                    all_schemas.push(schema.name);
+                }
+            }
+
+            if response.next_page_token.is_some() {
+                next_page_token = response.next_page_token;
+            } else {
+                break;
+            }
+        }
+
+        Ok(all_schemas)
+    }
+
+    pub async fn list_tables(
+        &self,
+        catalog: &str,
+        schema: &str,
+        exclude_inaccessible: bool,
+    ) -> Result<Vec<TableInfo>> {
+        let mut all_tables = Vec::new();
+
+        // Get catalog names - expand wildcard if needed
+        let catalog_names = if catalog == "*" {
+            self.list_catalogs().await?
+        } else {
+            vec![catalog.to_string()]
+        };
+
+        // For each catalog, get schemas and then tables
+        for catalog_name in catalog_names {
+            let schema_names = if schema == "*" {
+                self.list_schemas(&catalog_name).await?
+            } else {
+                vec![schema.to_string()]
+            };
+
+            // For each schema, get tables
+            for schema_name in schema_names {
+                match self.list_tables_for_catalog_schema(&catalog_name, &schema_name, exclude_inaccessible).await {
+                    Ok(mut tables) => {
+                        all_tables.append(&mut tables);
+                    }
+                    Err(e) => {
+                        // Log error but continue with other schemas
+                        debug!("Failed to list tables for {}.{}: {}", catalog_name, schema_name, e);
+                    }
+                }
+            }
+        }
+
+        Ok(all_tables)
+    }
+
+    pub async fn list_tables_for_catalog_schema(
+        &self,
+        catalog_name: &str,
+        schema_name: &str,
+        exclude_inaccessible: bool,
+    ) -> Result<Vec<TableInfo>> {
+        let mut tables = Vec::new();
+        let mut next_page_token: Option<String> = None;
+
+        loop {
+            let mut url = format!("{}{}", self.host, UNITY_CATALOG_TABLES_ENDPOINT);
+            let mut query_params = vec![
+                format!("catalog_name={}", urlencoding::encode(catalog_name)),
+                format!("schema_name={}", urlencoding::encode(schema_name)),
+            ];
+
+            if exclude_inaccessible {
+                query_params.push("include_browse=false".to_string());
+            }
+
+            if let Some(token) = &next_page_token {
+                query_params.push(format!("page_token={}", urlencoding::encode(token)));
+            }
+
+            url.push('?');
+            url.push_str(&query_params.join("&"));
+
+            let response: TablesListResponse = self
+                .api_request(reqwest::Method::GET, &url, None::<&()>)
+                .await?;
+
+            if let Some(table_list) = response.tables {
+                for table in table_list {
+                    tables.push(TableInfo {
+                        name: table.name.clone(),
+                        catalog_name: table.catalog_name.clone(),
+                        schema_name: table.schema_name.clone(),
+                        full_name: format!("{}.{}.{}", table.catalog_name, table.schema_name, table.name),
+                        table_type: table.table_type.unwrap_or_else(|| "UNKNOWN".to_string()),
+                        owner: table.owner,
+                        comment: table.comment,
+                    });
+                }
+            }
+
+            if response.next_page_token.is_some() {
+                next_page_token = response.next_page_token;
+            } else {
+                break;
+            }
+        }
+
+        Ok(tables)
     }
 
     pub fn format_value(value: &Value) -> String {
