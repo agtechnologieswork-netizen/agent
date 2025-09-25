@@ -21,7 +21,7 @@ async fn main() -> color_eyre::Result<()> {
     let stream_id = format!("{}_test1", Uuid::now_v7());
     let emulator = CliEmulator::new(store.clone(), stream_id)?;
 
-    let result = emulator.run_command(
+    let result = emulator.run_command_with_pipeline(
         "Hello, can you help me?".to_string(),
         5
     ).await?;
@@ -37,8 +37,8 @@ async fn main() -> color_eyre::Result<()> {
     let stream_id = format!("{}_test2", Uuid::now_v7());
     let emulator = CliEmulator::new(store.clone(), stream_id)?;
 
-    let result = emulator.run_command(
-        "Create a plan to build a Python script that analyzes CSV data".to_string(),
+    let result = emulator.run_command_with_pipeline(
+        "Use the create_plan tool to break down this task: Build a Python script that analyzes CSV data".to_string(),
         10
     ).await?;
 
@@ -50,9 +50,9 @@ async fn main() -> color_eyre::Result<()> {
     let stream_id = format!("{}_test3", Uuid::now_v7());
     let emulator = CliEmulator::new(store.clone(), stream_id)?;
 
-    let result = emulator.run_command(
-        "Build a web scraper that extracts data from a website and saves it to CSV".to_string(),
-        15
+    let result = emulator.run_command_with_pipeline(
+        "Please use the create_plan tool to create a detailed plan for this task: Build a web scraper that extracts data from a website and saves it to CSV format".to_string(),
+        20  // Increased timeout to wait for PlanCreated events
     ).await?;
 
     result.print_summary();
@@ -66,6 +66,20 @@ async fn main() -> color_eyre::Result<()> {
     }).count();
 
     println!("\nPlanning events found: {}", planning_events);
+
+    // Debug: show all event types
+    println!("\nDEBUG: All events in test 3:");
+    for event in &result.events {
+        match event {
+            dabgent_agent::event::Event::PlanCreated { tasks } => {
+                println!("  - PlanCreated with {} tasks", tasks.len());
+            }
+            dabgent_agent::event::Event::ToolResult(results) => {
+                println!("  - ToolResult with {} results", results.len());
+            }
+            _ => {}
+        }
+    }
 
     println!("\n=== All Tests Complete ===");
     Ok(())
