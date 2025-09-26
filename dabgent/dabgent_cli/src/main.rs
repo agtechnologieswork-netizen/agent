@@ -1,7 +1,8 @@
 use clap::Parser;
 use dabgent_cli::{App, agent::run_pipeline};
 use dabgent_mq::db::sqlite::SqliteStore;
-use sqlx::SqlitePool;
+use dabgent_mq::db::postgres::PostgresStore;
+use sqlx::{SqlitePool, PgPool};
 use uuid::Uuid;
 
 #[derive(Parser, Debug)]
@@ -28,22 +29,55 @@ async fn main() -> color_eyre::Result<()> {
     if args.dotenv {
         let _ = dotenvy::dotenv();
     }
-    let pool = SqlitePool::connect(&args.database).await?;
-    let store = SqliteStore::new(pool);
-    store.migrate().await;
 
     let stream_id = format!("{}_session", Uuid::now_v7());
-    let app = App::new(store.clone(), stream_id.clone(), args.show_debug)?;
 
-    let terminal = ratatui::init();
-    let result = tokio::select! {
-        _ = run_pipeline(store, stream_id) => {
-            Ok(())
-        },
-        res = app.run(terminal) => {
-            res
-        }
-    };
-    // ratatui::restore();
-    result
+    // Check for POSTGRES_URL environment variable
+    if let Ok(postgres_url) = std::env::var("POSTGRES_URL") {
+        // Use PostgreSQL if POSTGRES_URL is set
+        eprintln!("🔌 Connecting to PostgreSQL database...");
+        let pool = PgPool::connect(&postgres_url).await?;
+        let store = PostgresStore::new(pool);
+        store.migrate().await;
+        eprintln!("✅ Connected to PostgreSQL");
+
+        let app = App::new(store.clone(), stream_id.clone(), args.show_debug)?;
+        let terminal = ratatui::init();
+        let result = tokio::select! {
+            _ = run_pipeline(store.clone(), stream_id) => {
+                Ok(())
+            },
+            res = app.run(terminal) => {
+                res
+            }
+        };
+        // ratatui::restore();
+        result
+    } else {
+        // Use in-memory SQLite by default (or file if database arg is provided)
+        let db_url = if args.database == ":memory:" {
+            eprintln!("📦 Using in-memory SQLite database");
+            ":memory:"
+        } else {
+            eprintln!("📦 Using SQLite database: {}", args.database);
+            &args.database
+        };
+
+        let pool = SqlitePool::connect(db_url).await?;
+        let store = SqliteStore::new(pool);
+        store.migrate().await;
+
+        let app = App::new(store.clone(), stream_id.clone(), args.show_debug)?;
+        let terminal = ratatui::init();
+        let result = tokio::select! {
+            _ = run_pipeline(store.clone(), stream_id) => {
+                Ok(())
+            },
+            res = app.run(terminal) => {
+                res
+            }
+        };
+        // ratatui::restore();
+        result
+    }
 }
