@@ -1,21 +1,31 @@
 use dabgent_agent::Aggregate;
 use dabgent_agent::processor::{Pipeline, Processor, ThreadProcessor, ToolProcessor, thread};
-use dabgent_agent::toolbox::{self, basic::toolset, planning::planning_toolset};
-use dabgent_mq::EventStore;
-use dabgent_mq::db::sqlite::SqliteStore;
+use dabgent_agent::toolbox::planning::planning_toolset;
+use dabgent_agent::pipeline_config::{
+    PipelineConfig, create_python_toolset,
+    DEFAULT_MODEL, PYTHON_SYSTEM_PROMPT
+};
+use dabgent_mq::{EventStore, db::sqlite::SqliteStore};
 use dabgent_sandbox::dagger::{ConnectOpts, Sandbox as DaggerSandbox};
-use dabgent_sandbox::{NoOpSandbox, Sandbox, SandboxDyn};
+use dabgent_sandbox::{NoOpSandbox, Sandbox};
 use eyre::Result;
 use rig::client::ProviderClient;
 
-const MODEL: &str = "claude-sonnet-4-20250514";
-
-const SYSTEM_PROMPT: &str = "
-You are a python software engineer.
-Workspace is already set up using uv init.
-Use uv package manager if you need to add extra libraries.
-Program will be run using uv run main.py command.
-";
+// Helper function for creating Dagger sandboxes
+async fn create_dagger_sandbox(
+    client: &dagger_sdk::DaggerConn,
+    examples_path: &str,
+) -> Result<DaggerSandbox> {
+    let opts = dagger_sdk::ContainerBuildOptsBuilder::default()
+        .dockerfile("Dockerfile")
+        .build()?;
+    let ctr = client
+        .container()
+        .build_opts(client.host().directory(examples_path), opts);
+    ctr.sync().await?;
+    let sandbox = DaggerSandbox::from_container(ctr, client.clone());
+    Ok(sandbox)
+}
 
 const PLANNING_PROMPT: &str = "
 You are a planning assistant that breaks down complex tasks into actionable steps.
@@ -40,7 +50,7 @@ async fn main() {
     const STREAM_ID: &str = "planning-pipeline";
     let prompt = "Create a hello world Python script that prints a greeting";
 
-    let store = store().await;
+    let store = create_store().await;
 
     // Run the planning and execution pipeline
     planning_pipeline(STREAM_ID, store, prompt)
@@ -64,7 +74,7 @@ pub async fn planning_pipeline(
         // Phase 1: Planning
 
         let planning_config = dabgent_agent::event::Event::LLMConfig {
-            model: MODEL.to_string(),
+            model: DEFAULT_MODEL.to_string(),
             temperature: 0.7,
             max_tokens: 4096,
             preamble: Some(PLANNING_PROMPT.to_string()),
@@ -208,8 +218,9 @@ pub async fn planning_pipeline(
 
         if let Some(tasks) = plan_tasks {
 
-            let execution_sandbox = sandbox(&client).await?;
-            let execution_tools = toolset(Validator);
+            let config = PipelineConfig::for_examples();
+            let execution_sandbox = create_dagger_sandbox(&client, &config.examples_path).await?;
+            let execution_tools = create_python_toolset();
 
             let execution_thread = ThreadProcessor::new(llm.clone(), store.clone());
             let execution_tool_processor = ToolProcessor::new(
@@ -235,12 +246,12 @@ pub async fn planning_pipeline(
                 let thread_id = format!("task-{}", i);
 
                 let worker_config = dabgent_agent::event::Event::LLMConfig {
-                    model: MODEL.to_string(),
+                    model: DEFAULT_MODEL.to_string(),
                     temperature: 0.7,
                     max_tokens: 4096,
-                    preamble: Some(SYSTEM_PROMPT.to_string()),
+                    preamble: Some(PYTHON_SYSTEM_PROMPT.to_string()),
                     tools: Some(
-                        toolset(Validator)
+                        create_python_toolset()
                             .iter()
                             .map(|tool| tool.definition())
                             .collect()
@@ -316,19 +327,7 @@ async fn send_planner_feedback<S: EventStore>(
     Ok(())
 }
 
-async fn sandbox(client: &dagger_sdk::DaggerConn) -> Result<DaggerSandbox> {
-    let opts = dagger_sdk::ContainerBuildOptsBuilder::default()
-        .dockerfile("Dockerfile")
-        .build()?;
-    let ctr = client
-        .container()
-        .build_opts(client.host().directory("./examples"), opts);
-    ctr.sync().await?;
-    let sandbox = DaggerSandbox::from_container(ctr, client.clone());
-    Ok(sandbox)
-}
-
-async fn store() -> SqliteStore {
+async fn create_store() -> SqliteStore {
     let pool = sqlx::SqlitePool::connect(":memory:")
         .await
         .expect("Failed to create in-memory SQLite pool");
@@ -337,19 +336,3 @@ async fn store() -> SqliteStore {
     store
 }
 
-pub struct Validator;
-
-impl toolbox::Validator for Validator {
-    async fn run(&self, sandbox: &mut Box<dyn SandboxDyn>) -> Result<Result<(), String>> {
-        sandbox.exec("uv run main.py").await.map(|result| {
-            if result.exit_code == 0 {
-                Ok(())
-            } else {
-                Err(format!(
-                    "code: {}\nstdout: {}\nstderr: {}",
-                    result.exit_code, result.stdout, result.stderr
-                ))
-            }
-        })
-    }
-}
