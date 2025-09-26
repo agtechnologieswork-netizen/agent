@@ -52,12 +52,18 @@ impl<E: EventStore> Processor<Event> for ToolProcessor<E> {
                 }
             }
             // Phase 1: AgentMessage with ToolUse -> emit ToolResult
+            // IMPORTANT: We check if self.recipient is None OR matches the event's recipient
+            // This is crucial because:
+            // 1. Some ToolProcessors (like for task execution) have recipient: None to process all tools
+            // 2. Others (like the planner) have a specific recipient to filter events
+            // Without the is_none() check, ToolProcessors with recipient: None would never process
+            // any tool calls, breaking task execution in planning mode
             Event::AgentMessage {
                 response,
                 recipient,
                 ..
             } if response.finish_reason == FinishReason::ToolUse
-                && recipient.eq(&self.recipient) =>
+                && (self.recipient.is_none() || recipient.eq(&self.recipient)) =>
             {
                 let tool_results = self.run_tools(&response, &event.stream_id, &event.aggregate_id).await?;
                 let tool_result_event = Event::ToolResult(tool_results);

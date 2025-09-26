@@ -15,6 +15,10 @@ struct Args {
     /// Load environment from .env file
     #[arg(long, default_value = "true")]
     dotenv: bool,
+
+    /// Enable planning mode where the agent creates and executes plans
+    #[arg(long, default_value = "false")]
+    planning: bool,
 }
 
 #[tokio::main]
@@ -37,10 +41,10 @@ async fn main() -> color_eyre::Result<()> {
         store.migrate().await;
         eprintln!("✅ Connected to PostgreSQL");
 
-        let app = App::new(store.clone(), stream_id.clone())?;
+        let app = App::new(store.clone(), stream_id.clone(), args.planning)?;
         let terminal = ratatui::init();
         let result = tokio::select! {
-            _ = run_pipeline(store.clone(), stream_id) => {
+            _ = run_pipeline(store.clone(), stream_id, args.planning) => {
                 Ok(())
             },
             res = app.run(terminal) => {
@@ -63,10 +67,10 @@ async fn main() -> color_eyre::Result<()> {
         let store = SqliteStore::new(pool);
         store.migrate().await;
 
-        let app = App::new(store.clone(), stream_id.clone())?;
+        let app = App::new(store.clone(), stream_id.clone(), args.planning)?;
         let terminal = ratatui::init();
         let result = tokio::select! {
-            _ = run_pipeline(store.clone(), stream_id) => {
+            _ = run_pipeline(store.clone(), stream_id, args.planning) => {
                 Ok(())
             },
             res = app.run(terminal) => {

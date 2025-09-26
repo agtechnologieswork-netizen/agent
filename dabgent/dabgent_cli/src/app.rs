@@ -20,8 +20,9 @@ pub struct App<S: EventStore> {
 }
 
 impl<S: EventStore> App<S> {
-    pub fn new(store: S, stream_id: String) -> color_eyre::Result<Self> {
-        let query = Query::stream(stream_id.clone()).aggregate("thread");
+    pub fn new(store: S, stream_id: String, planning: bool) -> color_eyre::Result<Self> {
+        let aggregate_id = if planning { "planner" } else { "thread" };
+        let query = Query::stream(stream_id.clone()).aggregate(aggregate_id);
 
         let event_stream = store.subscribe::<AgentEvent>(&Query::stream(stream_id.clone()))?;
         let events = EventHandler::new(event_stream);
