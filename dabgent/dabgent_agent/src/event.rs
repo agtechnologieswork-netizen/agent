@@ -63,6 +63,11 @@ pub enum Event {
         prompt: String,
         context: Option<Value>,
     },
+    Debug {
+        message: String,
+        context: Option<Value>,
+        target: String,
+    },
 }
 
 impl dabgent_mq::Event for Event {
@@ -82,6 +87,7 @@ impl dabgent_mq::Event for Event {
             Event::PlanCreated { .. } => "plan_created",
             Event::PlanUpdated { .. } => "plan_updated",
             Event::UserInputRequested { .. } => "user_input_requested",
+            Event::Debug { .. } => "debug",
         }
     }
 }
