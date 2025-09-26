@@ -1,6 +1,5 @@
 use dabgent_agent::processor::{CompactProcessor, DelegationProcessor, FinishProcessor, Pipeline, Processor, ThreadProcessor, ToolProcessor};
 use dabgent_agent::toolbox::ToolDyn;
-use dabgent_agent::toolbox::databricks::databricks_toolset;
 use dabgent_fastapi::{toolset::dataapps_toolset, validator::DataAppsValidator, artifact_preparer::DataAppsArtifactPreparer};
 use dabgent_fastapi::templates::{EMBEDDED_TEMPLATES, DEFAULT_TEMPLATE_PATH};
 use dabgent_mq::{EventStore, create_store, StoreConfig};
