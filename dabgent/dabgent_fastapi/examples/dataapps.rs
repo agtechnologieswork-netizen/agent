@@ -73,7 +73,8 @@ async fn main() {
 
         let delegation_processor = DelegationProcessor::new(
             store.clone(),
-            "gemini-flash-lite-latest".to_string(),
+            "gemini-flash-latest".to_string(),
+            vec![Box::new(dabgent_agent::processor::delegation::databricks::DatabricksHandler::new())],
         );
 
         // FixMe: FinishProcessor should have no state, including export path
