@@ -1,6 +1,8 @@
 use super::DelegationHandler;
+use async_trait::async_trait;
 use crate::event::{Event, ParentAggregate};
-use crate::toolbox::databricks::databricks_toolset;
+use crate::toolbox::{databricks::databricks_toolset, ToolDyn};
+use dabgent_sandbox::{SandboxDyn, NoOpSandbox, Sandbox};
 use eyre::Result;
 use uuid::Uuid;
 
@@ -53,54 +55,22 @@ pub const TRIGGER_TOOL: &str = "explore_databricks_catalog";
 pub const THREAD_PREFIX: &str = "databricks_";
 pub const WORKER_NAME: &str = "databricks_worker";
 
-pub fn create_databricks_delegation(
-    catalog: &str,
-    prompt_arg: &str,
-    model: &str,
-    parent_aggregate_id: &str,
-    parent_tool_id: &str,
-) -> Result<(String, Event, Event)> {
-    let task_thread_id = format!("databricks_{}", Uuid::new_v4());
-    let prompt = format!("Explore catalog '{}': {}", catalog, prompt_arg);
 
-    // Get Databricks tools
-    let tools = databricks_toolset().map_err(|e| eyre::eyre!("Failed to get databricks tools: {}", e))?;
-
-    let tool_definitions: Vec<rig::completion::ToolDefinition> = tools
-        .iter()
-        .map(|tool| tool.definition())
-        .collect();
-
-    let config_event = Event::LLMConfig {
-        model: model.to_string(),
-        temperature: 0.0,
-        max_tokens: 16384,
-        preamble: Some(DATABRICKS_SYSTEM_PROMPT.to_string()),
-        tools: Some(tool_definitions),
-        recipient: Some(WORKER_NAME.to_string()),
-        parent: Some(ParentAggregate {
-            aggregate_id: parent_aggregate_id.to_string(),
-            tool_id: Some(parent_tool_id.to_string()),
-        }),
-    };
-
-    let user_event = Event::UserMessage(rig::OneOrMany::one(
-        rig::message::UserContent::Text(rig::message::Text {
-            text: prompt,
-        }),
-    ));
-
-    Ok((task_thread_id, config_event, user_event))
+pub struct DatabricksHandler {
+    sandbox: Box<dyn SandboxDyn>,
+    tools: Vec<Box<dyn ToolDyn>>,
 }
 
-pub struct DatabricksHandler;
-
 impl DatabricksHandler {
-    pub fn new() -> Self {
-        Self
+    pub fn new() -> Result<Self> {
+        Ok(Self {
+            sandbox: NoOpSandbox::new().boxed(),  // Databricks uses NoOp for API calls
+            tools: databricks_toolset()?,
+        })
     }
 }
 
+#[async_trait]
 impl DelegationHandler for DatabricksHandler {
     fn trigger_tool(&self) -> &str {
         TRIGGER_TOOL
@@ -108,6 +78,27 @@ impl DelegationHandler for DatabricksHandler {
 
     fn thread_prefix(&self) -> &str {
         THREAD_PREFIX
+    }
+
+    fn worker_name(&self) -> &str {
+        WORKER_NAME
+    }
+
+    fn tools(&self) -> &[Box<dyn ToolDyn>] {
+        &self.tools
+    }
+
+    async fn execute_tool_by_name(
+        &mut self,
+        tool_name: &str,
+        args: serde_json::Value
+    ) -> eyre::Result<Result<serde_json::Value, serde_json::Value>> {
+        let tool = self.tools
+            .iter()
+            .find(|t| t.name() == tool_name)
+            .ok_or_else(|| eyre::eyre!("Tool '{}' not found", tool_name))?;
+
+        tool.call(args, &mut self.sandbox).await
     }
 
     fn handle(
@@ -118,7 +109,34 @@ impl DelegationHandler for DatabricksHandler {
         parent_aggregate_id: &str,
         parent_tool_id: &str
     ) -> Result<(String, Event, Event)> {
-        create_databricks_delegation(catalog, prompt_arg, model, parent_aggregate_id, parent_tool_id)
+        let task_thread_id = format!("databricks_{}", Uuid::new_v4());
+        let prompt = format!("Explore catalog '{}': {}", catalog, prompt_arg);
+
+        let tool_definitions: Vec<rig::completion::ToolDefinition> = self.tools
+            .iter()
+            .map(|tool| tool.definition())
+            .collect();
+
+        let config_event = Event::LLMConfig {
+            model: model.to_string(),
+            temperature: 0.0,
+            max_tokens: 16384,
+            preamble: Some(DATABRICKS_SYSTEM_PROMPT.to_string()),
+            tools: Some(tool_definitions),
+            recipient: Some(WORKER_NAME.to_string()),
+            parent: Some(ParentAggregate {
+                aggregate_id: parent_aggregate_id.to_string(),
+                tool_id: Some(parent_tool_id.to_string()),
+            }),
+        };
+
+        let user_event = Event::UserMessage(rig::OneOrMany::one(
+            rig::message::UserContent::Text(rig::message::Text {
+                text: prompt,
+            }),
+        ));
+
+        Ok((task_thread_id, config_event, user_event))
     }
 
     fn format_result(&self, summary: &str) -> String {

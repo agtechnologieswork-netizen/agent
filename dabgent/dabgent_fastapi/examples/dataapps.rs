@@ -55,15 +55,6 @@ async fn main() {
         let completion_sandbox = sandbox.fork().await?;
         let tool_processor = ToolProcessor::new(dabgent_sandbox::Sandbox::boxed(sandbox), store.clone(), tool_processor_tools, None);
 
-        let databricks_tools = databricks_toolset()
-            .map_err(|e| eyre::eyre!("Failed to get databricks tools: {}", e))?;
-
-        let databricks_tool_processor = ToolProcessor::new(
-            NoOpSandbox::new().boxed(),  // NoOpSandbox for external API calls
-            store.clone(),
-            databricks_tools,
-            Some("databricks_worker".to_string()),  // Only listen to delegated threads
-        );
 
         let compact_processor = CompactProcessor::new(
             store.clone(),
@@ -74,7 +65,7 @@ async fn main() {
         let delegation_processor = DelegationProcessor::new(
             store.clone(),
             "gemini-flash-latest".to_string(),
-            vec![Box::new(dabgent_agent::processor::delegation::databricks::DatabricksHandler::new())],
+            vec![Box::new(dabgent_agent::processor::delegation::databricks::DatabricksHandler::new()?)],
         );
 
         // FixMe: FinishProcessor should have no state, including export path
@@ -91,8 +82,7 @@ async fn main() {
             vec![
                 thread_processor.boxed(),
                 tool_processor.boxed(),           // Handles main thread tools (recipient: None)
-                databricks_tool_processor.boxed(), // Handles delegated thread tools (recipient: "databricks_worker")
-                delegation_processor.boxed(),
+                delegation_processor.boxed(),     // Handles delegation AND delegated tool execution
                 compact_processor.boxed(),
                 finish_processor.boxed(),
             ],

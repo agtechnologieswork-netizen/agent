@@ -1,14 +1,39 @@
 use super::{Aggregate, Processor};
-use crate::event::Event;
+use crate::event::{Event, TypedToolResult, ToolKind};
 use crate::processor::thread;
+use crate::toolbox::{ToolDyn, ToolCallExt};
+use crate::llm::CompletionResponse;
 use dabgent_mq::{EventDb, EventStore, Query};
+use async_trait::async_trait;
 use eyre::Result;
 
 pub mod databricks;
 
+#[async_trait]
 pub trait DelegationHandler: Send + Sync {
     fn trigger_tool(&self) -> &str;
     fn thread_prefix(&self) -> &str;
+    fn worker_name(&self) -> &str;
+
+    // Handler owns its sandbox and tools
+    fn tools(&self) -> &[Box<dyn ToolDyn>];
+
+    // Execute a tool by name - this avoids borrowing conflicts
+    async fn execute_tool_by_name(
+        &mut self,
+        tool_name: &str,
+        args: serde_json::Value
+    ) -> eyre::Result<Result<serde_json::Value, serde_json::Value>>;
+
+    // Check if this handler should process a specific event
+    fn should_handle_tools(&self, event: &EventDb<Event>) -> bool {
+        if let Event::AgentMessage { recipient: Some(r), .. } = &event.data {
+            r == self.worker_name() && event.aggregate_id.starts_with(self.thread_prefix())
+        } else {
+            false
+        }
+    }
+
     fn handle(
         &self,
         catalog: &str,
@@ -35,6 +60,13 @@ impl<E: EventStore> Processor<Event> for DelegationProcessor<E> {
                     event.aggregate_id
                 );
                 self.handle_delegation_request(event, tool_results).await?;
+            }
+            Event::AgentMessage { response, .. } if self.is_delegated_tool_execution(event) => {
+                tracing::info!(
+                    "Tool execution detected for delegated thread {}",
+                    event.aggregate_id
+                );
+                self.handle_tool_execution(event, response).await?;
             }
             Event::ToolResult(tool_results) if !self.is_delegation_tool_result(tool_results) => {
                 // Skip non-delegation tool results - they're handled by their respective ToolProcessors
@@ -231,6 +263,87 @@ impl<E: EventStore> DelegationProcessor<E> {
                         .await?;
                 }
             }
+        }
+
+        Ok(())
+    }
+
+    fn is_delegated_tool_execution(&self, event: &EventDb<Event>) -> bool {
+        self.handlers.iter().any(|h| h.should_handle_tools(event))
+    }
+
+    async fn handle_tool_execution(
+        &mut self,
+        event: &EventDb<Event>,
+        response: &CompletionResponse
+    ) -> eyre::Result<()> {
+        // Find the handler for this event
+        let handler_idx = self.handlers.iter()
+            .position(|h| h.should_handle_tools(event))
+            .ok_or_else(|| eyre::eyre!("No handler found for tool execution"))?;
+
+        let mut tool_results = Vec::new();
+
+        // Collect tool calls first to avoid borrowing issues
+        let mut tool_calls = Vec::new();
+        for content in response.choice.iter() {
+            if let rig::message::AssistantContent::ToolCall(call) = content {
+                tool_calls.push(call.clone());
+            }
+        }
+
+        // Execute each tool call using the handler's execute_tool_by_name method
+        for call in tool_calls {
+            let tool_name = call.function.name.clone();
+            let args = call.function.arguments.clone();
+
+            // Execute using the handler's method which handles borrowing internally
+            let result = self.handlers[handler_idx]
+                .execute_tool_by_name(&tool_name, args)
+                .await?;
+
+            // Check if this is a successful finish_delegation tool call
+            if tool_name == "finish_delegation" && result.is_ok() {
+                tracing::info!("Delegated work completed successfully, emitting WorkComplete event");
+
+                // Extract summary from finish_delegation tool arguments
+                let summary = call.function.arguments
+                    .get("summary")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("Delegated work completed")
+                    .to_string();
+
+                let work_complete_event = Event::WorkComplete {
+                    agent_type: "delegated_worker".to_string(),
+                    result: summary,
+                    parent: crate::event::ParentAggregate {
+                        aggregate_id: "unknown".to_string(), // Will be populated properly later
+                        tool_id: None,
+                    },
+                };
+
+                self.event_store.push_event(
+                    &event.stream_id,
+                    &event.aggregate_id,
+                    &work_complete_event,
+                    &Default::default()
+                ).await?;
+            }
+
+            let tool_result = call.to_result(result);
+            tool_results.push(TypedToolResult {
+                tool_name: ToolKind::Other(tool_name),
+                result: tool_result,
+            });
+        }
+
+        if !tool_results.is_empty() {
+            self.event_store.push_event(
+                &event.stream_id,
+                &event.aggregate_id,
+                &Event::ToolResult(tool_results),
+                &Default::default()
+            ).await?;
         }
 
         Ok(())
