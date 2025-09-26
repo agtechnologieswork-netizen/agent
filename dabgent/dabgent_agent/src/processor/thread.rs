@@ -1,9 +1,10 @@
-use crate::llm::{Completion, CompletionResponse, LLMClient, WithRetryExt};
-use crate::{Aggregate, Event, Processor};
-use dabgent_mq::{EventDb, EventStore, Query};
+use crate::Event;
+use crate::llm::{Completion, LLMClientDyn};
+use dabgent_mq::{Aggregate, Callback, Envelope, EventStore, Handler};
 use eyre::Result;
 use rig::completion::ToolDefinition;
 use serde::{Deserialize, Serialize};
+use std::sync::Arc;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Command {
@@ -15,8 +16,7 @@ pub enum Command {
         tools: Option<Vec<ToolDefinition>>,
         recipient: Option<String>,
     },
-    Agent(CompletionResponse),
-    User(rig::OneOrMany<rig::message::UserContent>),
+    Completion,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -25,6 +25,8 @@ pub enum Error {
     Uninitialized,
     #[error("Wrong turn")]
     WrongTurn,
+    #[error("LLM call error")]
+    LLMCall,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -39,60 +41,18 @@ pub struct Thread {
 }
 
 impl Aggregate for Thread {
+    const TYPE: &'static str = "thread";
     type Command = Command;
     type Event = Event;
     type Error = Error;
+    type Services = Arc<dyn LLMClientDyn>;
 
-    fn process(&mut self, command: Self::Command) -> Result<Vec<Self::Event>, Self::Error> {
-        let events = match command {
-            Command::Setup { .. } => self.handle_setup(command)?,
-            Command::Agent(..) => self.handle_agent(command)?,
-            Command::User(..) => self.handle_user(command)?,
-        };
-        for event in events.iter() {
-            self.apply(&event);
-        }
-        Ok(events)
-    }
-
-    fn apply(&mut self, event: &Self::Event) {
-        match event {
-            Event::LLMConfig {
-                model,
-                temperature,
-                max_tokens,
-                preamble,
-                tools,
-                recipient,
-                parent: _,
-            } => {
-                self.model = Some(model.clone());
-                self.temperature = Some(temperature.clone());
-                self.max_tokens = Some(max_tokens.clone());
-                self.preamble = preamble.clone();
-                self.tools = tools.clone();
-                self.recipient = recipient.clone();
-            }
-            Event::AgentMessage { response, .. } => {
-                self.messages.push(response.message());
-            }
-            Event::UserMessage(content) => {
-                self.messages.push(rig::completion::Message::User {
-                    content: content.clone(),
-                });
-            }
-            _ => {}
-        }
-    }
-}
-
-impl Thread {
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    pub fn handle_setup(&self, command: Command) -> Result<Vec<Event>, Error> {
-        match command {
+    async fn handle(
+        &self,
+        cmd: Self::Command,
+        services: &Self::Services,
+    ) -> Result<Vec<Self::Event>, Self::Error> {
+        match cmd {
             Command::Setup {
                 model,
                 temperature,
@@ -109,89 +69,86 @@ impl Thread {
                 recipient,
                 parent: None,
             }]),
-            _ => unreachable!(),
+            Command::Completion => self.handle_completion(services).await,
         }
     }
 
-    pub fn handle_user(&self, command: Command) -> Result<Vec<Event>, Error> {
-        if self.model.is_none() || self.temperature.is_none() || self.max_tokens.is_none() {
-            return Err(Error::Uninitialized);
-        }
-        match command {
-            Command::User(content) => match self.messages.last() {
-                None | Some(rig::completion::Message::Assistant { .. }) => {
-                    Ok(vec![Event::UserMessage(content)])
-                }
-                _ => Err(Error::WrongTurn),
-            },
-            _ => unreachable!(),
-        }
-    }
-
-    pub fn handle_agent(&self, command: Command) -> Result<Vec<Event>, Error> {
-        match command {
-            Command::Agent(response) => match self.messages.last() {
-                Some(rig::completion::Message::User { .. }) => Ok(vec![Event::AgentMessage {
-                    response,
-                    recipient: self.recipient.clone(),
-                }]),
-                _ => Err(Error::WrongTurn),
-            },
-            _ => unreachable!(),
-        }
-    }
-}
-
-pub struct ThreadProcessor<T: LLMClient, E: EventStore> {
-    llm: T,
-    event_store: E,
-}
-
-impl<T: LLMClient, E: EventStore> Processor<Event> for ThreadProcessor<T, E> {
-    async fn run(&mut self, event: &EventDb<Event>) -> eyre::Result<()> {
-        let query = Query::stream(&event.stream_id).aggregate(&event.aggregate_id);
-        match &event.data {
-            Event::UserMessage(..) => {
-                let events = self.event_store.load_events::<Event>(&query, None).await?;
-                let mut thread = Thread::fold(&events);
-                let completion = self.completion(&thread).await?;
-                let new_events = thread.process(Command::Agent(completion))?;
-                for new_event in new_events.iter() {
-                    self.event_store
-                        .push_event(
-                            &event.stream_id,
-                            &event.aggregate_id,
-                            new_event,
-                            &Default::default(),
-                        )
-                        .await?;
-                }
+    fn apply(&mut self, event: Self::Event) {
+        match event {
+            Event::LLMConfig {
+                model,
+                temperature,
+                max_tokens,
+                preamble,
+                tools,
+                recipient,
+                parent: _,
+            } => {
+                self.model = Some(model);
+                self.temperature = Some(temperature);
+                self.max_tokens = Some(max_tokens);
+                self.preamble = preamble;
+                self.tools = tools;
+                self.recipient = recipient;
+            }
+            Event::AgentMessage { response, .. } => {
+                self.messages.push(response.message());
+            }
+            Event::UserMessage(content) => {
+                self.messages.push(rig::completion::Message::User {
+                    content: content.clone(),
+                });
             }
             _ => {}
         }
-        Ok(())
     }
 }
 
-impl<T: LLMClient, E: EventStore> ThreadProcessor<T, E> {
-    pub fn new(llm: T, event_store: E) -> Self {
-        Self { llm, event_store }
-    }
-
-    pub async fn completion(&self, thread: &Thread) -> Result<CompletionResponse> {
-        let mut history = thread.messages.clone();
+impl Thread {
+    pub async fn handle_completion(
+        &self,
+        llm: &Arc<dyn LLMClientDyn>,
+    ) -> Result<Vec<Event>, Error> {
+        if self.model.is_none() || self.temperature.is_none() || self.max_tokens.is_none() {
+            return Err(Error::Uninitialized);
+        }
+        match self.messages.last() {
+            Some(rig::completion::Message::User { .. }) => {}
+            _ => return Err(Error::WrongTurn),
+        }
+        let mut history = self.messages.clone();
         let message = history.pop().expect("No messages");
-        let mut completion = Completion::new(thread.model.clone().unwrap(), message)
+        let mut completion = Completion::new(self.model.clone().unwrap(), message)
             .history(history)
-            .temperature(thread.temperature.unwrap())
-            .max_tokens(thread.max_tokens.unwrap());
-        if let Some(preamble) = &thread.preamble {
+            .temperature(self.temperature.unwrap())
+            .max_tokens(self.max_tokens.unwrap());
+        if let Some(preamble) = &self.preamble {
             completion = completion.preamble(preamble.clone());
         }
-        if let Some(ref tools) = thread.tools {
+        if let Some(ref tools) = self.tools {
             completion = completion.tools(tools.clone());
         }
-        let llm = self.llm.clone().with_retry();
-        llm.completion(completion).await
+        match llm.completion(completion).await {
+            Ok(response) => Ok(vec![Event::AgentMessage {
+                response,
+                recipient: self.recipient.clone(),
+            }]),
+            Err(_) => Err(Error::LLMCall),
+        }
+    }
+}
+
+pub struct CompletionCallback<ES: EventStore> {
+    handler: Handler<Thread, ES>,
+}
+
+impl<ES: EventStore> Callback<Thread> for CompletionCallback<ES> {
+    async fn process(&mut self, event: &Envelope<Thread>) -> Result<()> {
+        if matches!(event.data, Event::UserMessage(..)) {
+            self.handler
+                .execute(&event.aggregate_id, Command::Completion)
+                .await?;
+        }
+        Ok(())
     }
 }
