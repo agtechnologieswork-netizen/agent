@@ -5,10 +5,10 @@ use ratatui::{
     buffer::Buffer,
     layout::{Constraint, Direction, Layout, Rect},
     style::{Style, Stylize},
-    widgets::{Block, Borders, List, ListItem, Paragraph, Widget},
+    widgets::{Block, Borders, List, ListItem, Paragraph, StatefulWidget, Widget},
 };
 
-impl<S: EventStore> Widget for &App<S> {
+impl<S: EventStore> Widget for &mut App<S> {
     fn render(self, area: Rect, buf: &mut Buffer)
     where
         Self: Sized,
@@ -29,28 +29,25 @@ impl<S: EventStore> Widget for &App<S> {
 }
 
 impl<S: EventStore> App<S> {
-    fn draw_messages(&self, area: Rect, buf: &mut Buffer) {
-        // let mut state = ListState::default(); // move to parent state
-
+    fn draw_messages(&mut self, area: Rect, buf: &mut Buffer) {
         let items: Vec<ListItem> = self
             .history
             .iter()
             .map(|event| ListItem::new(event_as_text(event)))
             .collect();
 
+        let title = if self.auto_scroll {
+            "Event List (Auto-scroll ON | Use ↑↓ to navigate)"
+        } else {
+            "Event List (Auto-scroll OFF | Press End to re-enable)"
+        };
+
         let messages_list = List::new(items)
-            .block(Block::default().borders(Borders::ALL).title("Event List"))
+            .block(Block::default().borders(Borders::ALL).title(title))
             .highlight_style(Style::default().yellow())
             .highlight_symbol(">> ");
 
-        // StatefulWidget::render(list, area, buf, &mut state);
-
-        // let messages: Vec<ListItem> = vec![ListItem::from("todo")];
-
-        // let messages_list =
-        //     List::new(messages).block(Block::default().borders(Borders::ALL).title("Messages"));
-
-        messages_list.render(area, buf);
+        StatefulWidget::render(messages_list, area, buf, &mut self.list_state);
     }
 
     fn draw_input(&self, area: Rect, buf: &mut Buffer) {
