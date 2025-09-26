@@ -54,17 +54,19 @@ async fn main() {
         let completion_sandbox = sandbox.fork().await?;
         let tool_processor = ToolProcessor::new(dabgent_sandbox::Sandbox::boxed(sandbox), store.clone(), tool_processor_tools, None);
 
-
-        let compact_processor = CompactProcessor::new(
-            store.clone(),
-            2048,
-            "gemini-flash-latest".to_string(),  // Use same model as main pipeline
-        );
-
         let delegation_processor = DelegationProcessor::new(
             store.clone(),
             "gemini-flash-latest".to_string(),
-            vec![Box::new(dabgent_agent::processor::delegation::databricks::DatabricksHandler::new()?)],
+            vec![
+                Box::new(dabgent_agent::processor::delegation::databricks::DatabricksHandler::new()?),
+                Box::new(dabgent_agent::processor::delegation::compaction::CompactionHandler::new(2048)?),
+            ],
+        );
+
+        let compact_processor = CompactProcessor::new(
+            store.clone(),
+            2048, // Same threshold as delegation compaction
+            "gemini-flash-latest".to_string(),
         );
 
         // FixMe: FinishProcessor should have no state, including export path
@@ -81,8 +83,7 @@ async fn main() {
             vec![
                 thread_processor.boxed(),
                 tool_processor.boxed(),           // Handles main thread tools (recipient: None)
-                delegation_processor.boxed(),     // Handles delegation AND delegated tool execution
-                compact_processor.boxed(),
+                delegation_processor.boxed(),     // Handles delegation AND delegated tool execution (including compaction)
                 finish_processor.boxed(),
             ],
         );

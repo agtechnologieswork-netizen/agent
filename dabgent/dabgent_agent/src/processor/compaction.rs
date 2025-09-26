@@ -66,11 +66,7 @@ impl<E: EventStore> Processor<Event> for CompactProcessor<E> {
     async fn run(&mut self, event: &EventDb<Event>) -> eyre::Result<()> {
         match &event.data {
             Event::ToolResult(content) if self.has_delegation_tool_result(content) => {
-                // Skip delegation tool results completely - let DelegationProcessor handle them
-                tracing::debug!(
-                    "Skipping delegation tool result for aggregate {}",
-                    event.aggregate_id,
-                );
+                // they belong to delegation processor, need no processing 
             }
             Event::ToolResult(content) if self.is_done_tool_result(content) && self.should_compact(content) => {
                 tracing::info!(

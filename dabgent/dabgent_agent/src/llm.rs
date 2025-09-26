@@ -4,9 +4,9 @@ use std::pin::Pin;
 use std::time::Duration;
 use tokio::time::sleep;
 
-const MAX_COMPLETION_ATTEMPTS: usize = 4;
+const MAX_COMPLETION_ATTEMPTS: usize = 7;
 const BASE_BACKOFF_MS: u64 = 250;
-const MAX_BACKOFF_MS: u64 = 5000;
+const MAX_BACKOFF_MS: u64 = 10000;
 
 fn backoff_delay_ms(attempt: usize) -> u64 {
     let exp = BASE_BACKOFF_MS.saturating_mul(1 << (attempt.saturating_sub(1)));

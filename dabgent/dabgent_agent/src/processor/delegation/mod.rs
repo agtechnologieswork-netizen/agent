@@ -407,10 +407,12 @@ impl<E: EventStore> DelegationProcessor<E> {
                 // Extract summary from finish tool arguments
                 let summary = if tool_name == "finish_compaction" {
                     // For compaction, extract compacted_summary from the result
-                    result.as_ref().unwrap()
+                    // We already confirmed result.is_ok() above, so this should never fail
+                    let value = result.as_ref().expect("Logic error: result should be Ok at this point");
+                    value
                         .get("compacted_summary")
                         .and_then(|v| v.as_str())
-                        .unwrap_or("Compaction completed")
+                        .ok_or_else(|| eyre::eyre!("Missing 'compacted_summary' in finish_compaction tool result"))?
                         .to_string()
                 } else {
                     // For delegation, extract summary from arguments
@@ -446,12 +448,38 @@ impl<E: EventStore> DelegationProcessor<E> {
         }
 
         if !tool_results.is_empty() {
+            // Push the ToolResult event first
             self.event_store.push_event(
                 &event.stream_id,
                 &event.aggregate_id,
-                &Event::ToolResult(tool_results),
+                &Event::ToolResult(tool_results.clone()),
                 &Default::default()
             ).await?;
+
+            // Convert ToolResults to UserMessage so the LLM can process the results
+            // This is critical - without this, the LLM never sees the tool results and never calls finish_delegation
+            let tools = tool_results.iter().map(|t|
+                rig::message::UserContent::ToolResult(t.result.clone())
+            );
+            let user_content = rig::OneOrMany::many(tools)?;
+
+            // Load thread state and process the UserMessage
+            let query = Query::stream(&event.stream_id).aggregate(&event.aggregate_id);
+            let events = self.event_store.load_events::<Event>(&query, None).await?;
+            let mut thread = thread::Thread::fold(&events);
+            let new_events = thread.process(thread::Command::User(user_content))?;
+
+            // Push the new events (including UserMessage and any LLM responses)
+            for new_event in new_events.iter() {
+                self.event_store
+                    .push_event(
+                        &event.stream_id,
+                        &event.aggregate_id,
+                        new_event,
+                        &Default::default(),
+                    )
+                    .await?;
+            }
         }
 
         Ok(())

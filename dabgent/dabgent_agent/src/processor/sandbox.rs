@@ -1,8 +1,8 @@
-use super::Processor;
+use super::{Aggregate, Processor, thread};
 use crate::event::{Event, TypedToolResult, ToolKind};
 use crate::llm::{CompletionResponse, FinishReason};
 use crate::toolbox::{ToolCallExt, ToolDyn};
-use dabgent_mq::{EventDb, EventStore};
+use dabgent_mq::{EventDb, EventStore, Query};
 use dabgent_sandbox::SandboxDyn;
 use eyre::Result;
 use std::path::Path;
@@ -61,15 +61,64 @@ impl<E: EventStore> Processor<Event> for ToolProcessor<E> {
             {
                 let tool_results = self.run_tools(&response, &event.stream_id, &event.aggregate_id).await?;
 
-
-                let tool_result_event = Event::ToolResult(tool_results);
-
+                // Push the ToolResult event first
+                let tool_result_event = Event::ToolResult(tool_results.clone());
                 self.event_store.push_event(
                     &event.stream_id,
                     &event.aggregate_id,
                     &tool_result_event,
                     &Default::default(),
                 ).await?;
+
+                // Convert ToolResults to UserMessage so the LLM can process the results
+                // Skip delegation tool results - those are handled by DelegationProcessor
+                if !self.has_delegation_tool_result(&tool_results) {
+                    // Check if this is a Done tool result that needs compaction
+                    if self.is_done_tool_result(&tool_results) && self.should_trigger_compaction(&tool_results) {
+                        // Trigger compaction via delegation to compact_error tool
+                        let compact_tool_result = TypedToolResult {
+                            tool_name: ToolKind::Other("compact_error".to_string()),
+                            result: rig::message::ToolResult {
+                                id: "compact_trigger".to_string(),
+                                call_id: None,
+                                content: rig::OneOrMany::one(rig::message::ToolResultContent::Text(
+                                    rig::message::Text { text: "Triggering compaction for large Done tool result".to_string() }
+                                )),
+                            },
+                        };
+                        let compact_event = Event::ToolResult(vec![compact_tool_result]);
+                        self.event_store.push_event(
+                            &event.stream_id,
+                            &event.aggregate_id,
+                            &compact_event,
+                            &Default::default(),
+                        ).await?;
+                    } else {
+                        // Convert to UserMessage for normal processing
+                        let tools = tool_results.iter().map(|t|
+                            rig::message::UserContent::ToolResult(t.result.clone())
+                        );
+                        let user_content = rig::OneOrMany::many(tools)?;
+
+                        // Load thread state and process the UserMessage
+                        let query = Query::stream(&event.stream_id).aggregate(&event.aggregate_id);
+                        let events = self.event_store.load_events::<Event>(&query, None).await?;
+                        let mut thread = thread::Thread::fold(&events);
+                        let new_events = thread.process(thread::Command::User(user_content))?;
+
+                        // Push the new events (including UserMessage and any LLM responses)
+                        for new_event in new_events.iter() {
+                            self.event_store
+                                .push_event(
+                                    &event.stream_id,
+                                    &event.aggregate_id,
+                                    new_event,
+                                    &Default::default(),
+                                )
+                                .await?;
+                        }
+                    }
+                }
             }
 
             _ => {}
@@ -182,6 +231,40 @@ impl<E: EventStore> ToolProcessor<E> {
         }
 
         Ok(results)
+    }
+
+    fn has_delegation_tool_result(&self, results: &[TypedToolResult]) -> bool {
+        results.iter().any(|result| {
+            match &result.tool_name {
+                ToolKind::Other(tool_name) => tool_name == "explore_databricks_catalog" || tool_name == "finish_delegation",
+                _ => false,
+            }
+        })
+    }
+
+    fn is_done_tool_result(&self, results: &[TypedToolResult]) -> bool {
+        results.iter().any(|t| t.tool_name == ToolKind::Done)
+    }
+
+    fn should_trigger_compaction(&self, results: &[TypedToolResult]) -> bool {
+        let size = self.calculate_text_size(results);
+        size > 2048 // Use standard compaction threshold
+    }
+
+    fn calculate_text_size(&self, results: &[TypedToolResult]) -> usize {
+        results
+            .iter()
+            .map(|result| {
+                result.result
+                    .content
+                    .iter()
+                    .map(|content| match content {
+                        rig::message::ToolResultContent::Text(text) => text.text.len(),
+                        _ => 0, // Skip non-text content for size calculation
+                    })
+                    .sum::<usize>()
+            })
+            .sum()
     }
 
 }
