@@ -1,13 +1,17 @@
 use dabgent_agent::processor::{Pipeline, Processor, ThreadProcessor, ToolProcessor};
-use dabgent_agent::pipeline_config::{
-    PipelineConfig, create_python_toolset
-};
-use dabgent_agent::examples_utils::push_prompt;
+use dabgent_agent::toolbox::basic::toolset;
+use dabgent_agent::utils::{push_prompt, PythonValidator};
 use dabgent_mq::{EventStore, db::sqlite::SqliteStore};
 use dabgent_sandbox::dagger::{ConnectOpts, Sandbox as DaggerSandbox};
 use dabgent_sandbox::Sandbox;
 use eyre::Result;
 use rig::client::ProviderClient;
+
+const DEFAULT_MODEL: &str = "claude-sonnet-4-20250514";
+const PYTHON_SYSTEM_PROMPT: &str = "You are a python software engineer.
+Workspace is already set up using uv init.
+Use uv package manager if you need to add extra libraries.
+Program will be run using uv run main.py command.";
 
 #[tokio::main]
 async fn main() {
@@ -38,13 +42,12 @@ async fn create_dagger_sandbox(
 
 pub async fn pipeline_fn(stream_id: &str, store: impl EventStore) -> Result<()> {
     let stream_id = stream_id.to_owned();
-    let config = PipelineConfig::for_examples();
     let opts = ConnectOpts::default();
 
     opts.connect(|client| async move {
         let llm = rig::providers::anthropic::Client::from_env();
-        let sandbox = create_dagger_sandbox(&client, &config.examples_path).await?;
-        let tools = create_python_toolset();
+        let sandbox = create_dagger_sandbox(&client, "./examples").await?;
+        let tools = toolset(PythonValidator);
 
         let thread_processor = ThreadProcessor::new(
             llm.clone(),

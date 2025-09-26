@@ -2,7 +2,6 @@ use crate::events::{AppEvent, Event as UiEvent, EventHandler};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use dabgent_agent::event::Event as AgentEvent;
 use dabgent_mq::db::{Event as StoreEvent, EventStore, Metadata, Query};
-use dabgent_mq::Event as EventTrait;
 use ratatui::widgets::ListState;
 use rig::OneOrMany;
 use rig::message::{Text, UserContent};
@@ -18,11 +17,10 @@ pub struct App<S: EventStore> {
     pub auto_scroll: bool,
     pub pending_prompt: Option<String>,
     pub pending_prompt_target: Option<String>,
-    pub show_debug: bool,
 }
 
 impl<S: EventStore> App<S> {
-    pub fn new(store: S, stream_id: String, show_debug: bool) -> color_eyre::Result<Self> {
+    pub fn new(store: S, stream_id: String) -> color_eyre::Result<Self> {
         let query = Query::stream(stream_id.clone()).aggregate("thread");
 
         let event_stream = store.subscribe::<AgentEvent>(&Query::stream(stream_id.clone()))?;
@@ -39,7 +37,6 @@ impl<S: EventStore> App<S> {
             auto_scroll: true,
             pending_prompt: None,
             pending_prompt_target: None,
-            show_debug,
         })
     }
 
@@ -55,36 +52,11 @@ impl<S: EventStore> App<S> {
                     _ => {}
                 },
                 UiEvent::Thread(event) => {
-                    let aggregate_id = event.aggregate_id.clone();
-
-                    // Emit debug event for event processing (only if debug mode is enabled)
-                    if self.show_debug {
-                        let debug_event = AgentEvent::Debug {
-                            message: format!("Processing event: {}", event.data.event_type()),
-                            context: Some(serde_json::json!({
-                                "aggregate_id": aggregate_id.clone(),
-                                "event_type": event.data.event_type(),
-                                "created_at": event.created_at.to_rfc3339(),
-                            })),
-                            target: "debugger".to_string(),
-                        };
-                        self.history.push(StoreEvent {
-                            stream_id: self.query.stream_id.clone(),
-                            event_type: "debug".to_string(),
-                            aggregate_id: "debugger".to_string(),
-                            sequence: self.history.len() as i64,
-                            event_version: "1.0".to_string(),
-                            data: debug_event,
-                            metadata: serde_json::json!({}),
-                            created_at: chrono::Utc::now(),
-                        });
-                    }
-
                     if let dabgent_agent::event::Event::UserInputRequested { prompt, .. } =
                         &event.data
                     {
                         self.pending_prompt = Some(prompt.clone());
-                        self.pending_prompt_target = Some(aggregate_id.clone());
+                        self.pending_prompt_target = Some(event.aggregate_id.clone());
                     }
 
                     self.history.push(event);

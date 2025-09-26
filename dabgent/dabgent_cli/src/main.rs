@@ -15,10 +15,6 @@ struct Args {
     /// Load environment from .env file
     #[arg(long, default_value = "true")]
     dotenv: bool,
-
-    /// Show debug events in the UI
-    #[arg(long, default_value = "false")]
-    show_debug: bool,
 }
 
 #[tokio::main]
@@ -41,7 +37,7 @@ async fn main() -> color_eyre::Result<()> {
         store.migrate().await;
         eprintln!("✅ Connected to PostgreSQL");
 
-        let app = App::new(store.clone(), stream_id.clone(), args.show_debug)?;
+        let app = App::new(store.clone(), stream_id.clone())?;
         let terminal = ratatui::init();
         let result = tokio::select! {
             _ = run_pipeline(store.clone(), stream_id) => {
@@ -67,7 +63,7 @@ async fn main() -> color_eyre::Result<()> {
         let store = SqliteStore::new(pool);
         store.migrate().await;
 
-        let app = App::new(store.clone(), stream_id.clone(), args.show_debug)?;
+        let app = App::new(store.clone(), stream_id.clone())?;
         let terminal = ratatui::init();
         let result = tokio::select! {
             _ = run_pipeline(store.clone(), stream_id) => {

@@ -1,15 +1,19 @@
 use dabgent_agent::Aggregate;
 use dabgent_agent::processor::{Pipeline, Processor, ThreadProcessor, ToolProcessor, thread};
 use dabgent_agent::toolbox::planning::planning_toolset;
-use dabgent_agent::pipeline_config::{
-    PipelineConfig, create_python_toolset,
-    DEFAULT_MODEL, PYTHON_SYSTEM_PROMPT
-};
+use dabgent_agent::toolbox::basic::toolset;
+use dabgent_agent::utils::PythonValidator;
 use dabgent_mq::{EventStore, db::sqlite::SqliteStore};
 use dabgent_sandbox::dagger::{ConnectOpts, Sandbox as DaggerSandbox};
 use dabgent_sandbox::{NoOpSandbox, Sandbox};
 use eyre::Result;
 use rig::client::ProviderClient;
+
+const DEFAULT_MODEL: &str = "claude-sonnet-4-20250514";
+const PYTHON_SYSTEM_PROMPT: &str = "You are a python software engineer.
+Workspace is already set up using uv init.
+Use uv package manager if you need to add extra libraries.
+Program will be run using uv run main.py command.";
 
 // Helper function for creating Dagger sandboxes
 async fn create_dagger_sandbox(
@@ -132,33 +136,10 @@ pub async fn planning_pipeline(
             let query = dabgent_mq::Query::stream(&stream_id).aggregate("planner");
             let events = store.load_events::<dabgent_agent::event::Event>(&query, None).await?;
 
-            // Emit debug event
-            let debug_event = dabgent_agent::event::Event::Debug {
-                message: format!("Checking for PlanCreated event, found {} events", events.len()),
-                context: Some(serde_json::json!({
-                    "event_count": events.len(),
-                    "plan_created": plan_created,
-                    "feedback_sent": feedback_sent,
-                })),
-                target: "debugger".to_string(),
-            };
-            store
-                .push_event(&stream_id, "debugger", &debug_event, &Default::default())
-                .await?;
-
             for event in events.iter() {
                 match event {
                     dabgent_agent::event::Event::PlanCreated { tasks } => {
-                        let debug_event = dabgent_agent::event::Event::Debug {
-                            message: format!("PlanCreated event detected with {} tasks", tasks.len()),
-                            context: Some(serde_json::json!({
-                                "tasks": tasks,
-                            })),
-                            target: "debugger".to_string(),
-                        };
-                        store
-                            .push_event(&stream_id, "debugger", &debug_event, &Default::default())
-                            .await?;
+                        println!("PlanCreated event detected with {} tasks", tasks.len());
                         plan_created = true;
                         break;
                     }
@@ -171,18 +152,6 @@ pub async fn planning_pipeline(
                                 println!("Context: {pretty}");
                             }
                         }
-
-                        let debug_event = dabgent_agent::event::Event::Debug {
-                            message: "Sending planner feedback".to_string(),
-                            context: Some(serde_json::json!({
-                                "prompt": prompt,
-                                "feedback": "Looks good, please proceed with the execution plan.",
-                            })),
-                            target: "debugger".to_string(),
-                        };
-                        store
-                            .push_event(&stream_id, "debugger", &debug_event, &Default::default())
-                            .await?;
 
                         send_planner_feedback(
                             &store,
@@ -218,9 +187,8 @@ pub async fn planning_pipeline(
 
         if let Some(tasks) = plan_tasks {
 
-            let config = PipelineConfig::for_examples();
-            let execution_sandbox = create_dagger_sandbox(&client, &config.examples_path).await?;
-            let execution_tools = create_python_toolset();
+            let execution_sandbox = create_dagger_sandbox(&client, "./examples").await?;
+            let execution_tools = toolset(PythonValidator);
 
             let execution_thread = ThreadProcessor::new(llm.clone(), store.clone());
             let execution_tool_processor = ToolProcessor::new(
@@ -251,7 +219,7 @@ pub async fn planning_pipeline(
                     max_tokens: 4096,
                     preamble: Some(PYTHON_SYSTEM_PROMPT.to_string()),
                     tools: Some(
-                        create_python_toolset()
+                        toolset(PythonValidator)
                             .iter()
                             .map(|tool| tool.definition())
                             .collect()
