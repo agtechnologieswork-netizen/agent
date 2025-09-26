@@ -8,6 +8,50 @@ pub struct DoneToolArgs {
     pub summary: String,
 }
 
+#[derive(Serialize, Deserialize)]
+pub struct FinishDelegationArgs {
+    pub summary: String,
+}
+
+#[derive(Clone)]
+pub struct FinishDelegationTool;
+
+impl Tool for FinishDelegationTool {
+    type Args = FinishDelegationArgs;
+    type Output = String;
+    type Error = String;
+
+    fn name(&self) -> String {
+        "finish_delegation".to_string()
+    }
+
+    fn definition(&self) -> rig::completion::ToolDefinition {
+        rig::completion::ToolDefinition {
+            name: self.name(),
+            description: "Complete delegated work and return summary to main thread".to_string(),
+            parameters: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "summary": {
+                        "type": "string",
+                        "description": "Comprehensive summary of delegated work results"
+                    }
+                },
+                "required": ["summary"]
+            }),
+        }
+    }
+
+    async fn call(
+        &self,
+        args: Self::Args,
+        _sandbox: &mut Box<dyn SandboxDyn>,
+    ) -> eyre::Result<eyre::Result<Self::Output, Self::Error>> {
+        // This tool just returns the summary - the actual event emission will be handled by ToolProcessor
+        Ok(Ok(args.summary))
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BashArgs {
     pub command: String,

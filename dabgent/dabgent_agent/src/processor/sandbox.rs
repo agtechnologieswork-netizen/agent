@@ -61,38 +61,6 @@ impl<E: EventStore> Processor<Event> for ToolProcessor<E> {
             {
                 let tool_results = self.run_tools(&response, &event.stream_id, &event.aggregate_id).await?;
 
-                // Check for delegation tools and emit DelegateWork events
-                for typed_result in &tool_results {
-                    if let ToolKind::Other(tool_name) = &typed_result.tool_name {
-                        if tool_name == "explore_databricks_catalog" {
-                            // Extract arguments from the original tool call in the response
-                            if let Some(tool_call) = self.find_tool_call_by_id(&response, &typed_result.result.id) {
-                                tracing::info!("Databricks exploration requested, emitting DelegateWork event");
-
-                                let catalog = tool_call.function.arguments.get("catalog")
-                                    .and_then(|v| v.as_str())
-                                    .unwrap_or("main");
-                                let prompt = tool_call.function.arguments.get("prompt")
-                                    .and_then(|v| v.as_str())
-                                    .unwrap_or("Explore the catalog for relevant data");
-
-                                let delegate_event = Event::DelegateWork {
-                                    agent_type: "databricks_explorer".to_string(),
-                                    prompt: format!("Explore catalog '{}': {}", catalog, prompt),
-                                    parent_tool_id: typed_result.result.id.clone(),
-                                };
-                                self.event_store
-                                    .push_event(
-                                        &event.stream_id,
-                                        &event.aggregate_id,
-                                        &delegate_event,
-                                        &Default::default(),
-                                    )
-                                    .await?;
-                            }
-                        }
-                    }
-                }
 
                 let tool_result_event = Event::ToolResult(tool_results);
 
@@ -165,6 +133,37 @@ impl<E: EventStore> ToolProcessor<E> {
                                 .await?;
                         }
 
+                        // Check if this is a successful FinishDelegationTool call
+                        if call.function.name == "finish_delegation" && tool_result.is_ok() {
+                            tracing::info!("Delegated work completed successfully, emitting WorkComplete event");
+
+                            // Extract summary from finish_delegation tool arguments
+                            let summary = call.function.arguments
+                                .get("summary")
+                                .and_then(|v| v.as_str())
+                                .unwrap_or("Delegated work completed")
+                                .to_string();
+
+                            // For now, we'll create a minimal WorkComplete event
+                            // Later we can extract parent info if needed
+                            let work_complete_event = Event::WorkComplete {
+                                agent_type: "databricks_explorer".to_string(),
+                                result: summary,
+                                parent: crate::event::ParentAggregate {
+                                    aggregate_id: "unknown".to_string(), // Will be populated properly later
+                                    tool_id: None,
+                                },
+                            };
+                            self.event_store
+                                .push_event(
+                                    stream_id,
+                                    aggregate_id,
+                                    &work_complete_event,
+                                    &Default::default(),
+                                )
+                                .await?;
+                        }
+
                         tool_result
                     }
                     None => {
@@ -185,17 +184,4 @@ impl<E: EventStore> ToolProcessor<E> {
         Ok(results)
     }
 
-    fn find_tool_call_by_id<'a>(&self, response: &'a CompletionResponse, tool_id: &str) -> Option<&'a rig::message::ToolCall> {
-        response.choice.iter().find_map(|content| {
-            if let rig::message::AssistantContent::ToolCall(call) = content {
-                if call.id == tool_id {
-                    Some(call)
-                } else {
-                    None
-                }
-            } else {
-                None
-            }
-        })
-    }
 }

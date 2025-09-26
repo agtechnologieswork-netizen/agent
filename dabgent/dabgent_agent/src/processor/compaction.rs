@@ -65,6 +65,13 @@ pub struct CompactProcessor<E: EventStore> {
 impl<E: EventStore> Processor<Event> for CompactProcessor<E> {
     async fn run(&mut self, event: &EventDb<Event>) -> eyre::Result<()> {
         match &event.data {
+            Event::ToolResult(content) if self.has_delegation_tool_result(content) => {
+                // Skip delegation tool results completely - let DelegationProcessor handle them
+                tracing::debug!(
+                    "Skipping delegation tool result for aggregate {}",
+                    event.aggregate_id,
+                );
+            }
             Event::ToolResult(content) if self.is_done_tool_result(content) && self.should_compact(content) => {
                 tracing::info!(
                     "Compaction triggered for aggregate {}",
@@ -239,6 +246,15 @@ impl<E: EventStore> CompactProcessor<E> {
 
     fn is_done_tool_result(&self, results: &[TypedToolResult]) -> bool {
         results.iter().any(|t| t.tool_name == ToolKind::Done)
+    }
+
+    fn has_delegation_tool_result(&self, results: &[TypedToolResult]) -> bool {
+        results.iter().any(|result| {
+            match &result.tool_name {
+                ToolKind::Other(tool_name) => tool_name == "explore_databricks_catalog" || tool_name == "finish_delegation",
+                _ => false,
+            }
+        })
     }
 
     fn should_compact(&self, results: &[TypedToolResult]) -> bool {

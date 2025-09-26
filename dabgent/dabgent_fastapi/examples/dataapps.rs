@@ -1,9 +1,10 @@
 use dabgent_agent::processor::{CompactProcessor, DelegationProcessor, FinishProcessor, Pipeline, Processor, ThreadProcessor, ToolProcessor};
 use dabgent_agent::toolbox::ToolDyn;
+use dabgent_agent::toolbox::databricks::databricks_toolset;
 use dabgent_fastapi::{toolset::dataapps_toolset, validator::DataAppsValidator, artifact_preparer::DataAppsArtifactPreparer};
 use dabgent_fastapi::templates::{EMBEDDED_TEMPLATES, DEFAULT_TEMPLATE_PATH};
 use dabgent_mq::{EventStore, create_store, StoreConfig};
-use dabgent_sandbox::{Sandbox, dagger::{ConnectOpts, Sandbox as DaggerSandbox}};
+use dabgent_sandbox::{Sandbox, NoOpSandbox, dagger::{ConnectOpts, Sandbox as DaggerSandbox}};
 use eyre::Result;
 use rig::client::ProviderClient;
 
@@ -54,17 +55,25 @@ async fn main() {
         let completion_sandbox = sandbox.fork().await?;
         let tool_processor = ToolProcessor::new(dabgent_sandbox::Sandbox::boxed(sandbox), store.clone(), tool_processor_tools, None);
 
-        // Create CompactProcessor with small threshold for testing
+        let databricks_tools = databricks_toolset()
+            .map_err(|e| eyre::eyre!("Failed to get databricks tools: {}", e))?;
+
+        let databricks_tool_processor = ToolProcessor::new(
+            NoOpSandbox::new().boxed(),  // NoOpSandbox for external API calls
+            store.clone(),
+            databricks_tools,
+            Some("databricks_worker".to_string()),  // Only listen to delegated threads
+        );
+
         let compact_processor = CompactProcessor::new(
             store.clone(),
             2048,
-            "gemini-2.5-flash".to_string(),  // Use same model as main pipeline
+            "gemini-flash-latest".to_string(),  // Use same model as main pipeline
         );
 
-        // Create DelegationProcessor for Databricks exploration
         let delegation_processor = DelegationProcessor::new(
             store.clone(),
-            "gemini-2.5-flash".to_string(),
+            "gemini-flash-lite-latest".to_string(),
         );
 
         // FixMe: FinishProcessor should have no state, including export path
@@ -80,7 +89,8 @@ async fn main() {
             store.clone(),
             vec![
                 thread_processor.boxed(),
-                tool_processor.boxed(),
+                tool_processor.boxed(),           // Handles main thread tools (recipient: None)
+                databricks_tool_processor.boxed(), // Handles delegated thread tools (recipient: "databricks_worker")
                 delegation_processor.boxed(),
                 compact_processor.boxed(),
                 finish_processor.boxed(),
@@ -150,7 +160,7 @@ Create a bakery business DataApp by:
 Focus on creating a functional DataApp that showcases real bakery business data from Databricks.
 ";
 
-const MODEL: &str = "gemini-2.5-flash";
+const MODEL: &str = "gemini-flash-latest";
 
 async fn create_sandbox(client: &dagger_sdk::DaggerConn) -> Result<DaggerSandbox> {
     tracing::info!("Setting up sandbox with DataApps template...");

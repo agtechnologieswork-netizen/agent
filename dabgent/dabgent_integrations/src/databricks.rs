@@ -230,20 +230,31 @@ impl DatabricksRestClient {
             request = request.json(body);
         }
 
+        debug!("Sending HTTP request to Databricks API...");
         let response = request
             .send()
             .await
-            .map_err(|e| anyhow!("HTTP request failed: {}", e))?;
+            .map_err(|e| {
+                info!("HTTP request failed: {}", e);
+                anyhow!("HTTP request failed: {}", e)
+            })?;
 
         let status = response.status();
+        debug!("Received HTTP response with status: {}", status);
+
         let response_text = response
             .text()
             .await
-            .map_err(|e| anyhow!("Failed to read response text: {}", e))?;
+            .map_err(|e| {
+                info!("Failed to read response text: {}", e);
+                anyhow!("Failed to read response text: {}", e)
+            })?;
 
-        debug!("Response status: {}, body: {}", status, response_text);
+        debug!("Response body length: {} characters", response_text.len());
+        debug!("Response body: {}", response_text);
 
         if !status.is_success() {
+            info!("API request failed with status {}: {}", status, response_text);
             return Err(anyhow!(
                 "API request failed with status {}: {}",
                 status,
@@ -251,7 +262,9 @@ impl DatabricksRestClient {
             ));
         }
 
+        debug!("Parsing JSON response...");
         serde_json::from_str(&response_text).map_err(|e| {
+            info!("Failed to parse JSON response: {}. Response: {}", e, response_text);
             anyhow!(
                 "Failed to parse JSON response: {}. Response: {}",
                 e,
@@ -462,6 +475,7 @@ impl DatabricksRestClient {
     }
 
     pub async fn list_schemas(&self, catalog_name: &str) -> Result<Vec<String>> {
+        info!("Starting list_schemas for catalog: {}", catalog_name);
         let mut all_schemas = Vec::new();
         let mut next_page_token: Option<String> = None;
 
@@ -476,9 +490,11 @@ impl DatabricksRestClient {
             url.push('?');
             url.push_str(&query_params.join("&"));
 
+            debug!("About to make API request for schemas...");
             let response: SchemasListResponse = self
                 .api_request(reqwest::Method::GET, &url, None::<&()>)
                 .await?;
+            debug!("Successfully received schemas response");
 
             if let Some(schemas) = response.schemas {
                 for schema in schemas {
@@ -493,6 +509,7 @@ impl DatabricksRestClient {
             }
         }
 
+        info!("Completed list_schemas, found {} schemas", all_schemas.len());
         Ok(all_schemas)
     }
 

@@ -1,4 +1,4 @@
-use crate::toolbox::{ClientTool, ClientToolAdapter, ToolDyn};
+use crate::toolbox::{ClientTool, ClientToolAdapter, ToolDyn, basic::FinishDelegationTool};
 use dabgent_integrations::databricks::DatabricksRestClient;
 use eyre::Result;
 use serde::{Deserialize, Serialize};
@@ -152,8 +152,10 @@ impl ClientTool<DatabricksRestClient> for DatabricksListSchemas {
     }
 
     async fn call(&self, args: Self::Args) -> Result<Result<Self::Output, Self::Error>> {
+        tracing::debug!("DatabricksListSchemas::call starting with catalog: {}", args.catalog_name);
         match self.client.list_schemas(&args.catalog_name).await {
             Ok(schemas) => {
+                tracing::debug!("DatabricksListSchemas::call succeeded, found {} schemas", schemas.len());
                 if schemas.is_empty() {
                     Ok(Ok(format!("No schemas found in catalog '{}'.", args.catalog_name)))
                 } else {
@@ -169,7 +171,10 @@ impl ClientTool<DatabricksRestClient> for DatabricksListSchemas {
                     Ok(Ok(result_lines.join("\n")))
                 }
             }
-            Err(e) => Ok(Err(format!("Failed to list schemas in catalog '{}': {}", args.catalog_name, e))),
+            Err(e) => {
+                tracing::debug!("DatabricksListSchemas::call failed with error: {}", e);
+                Ok(Err(format!("Failed to list schemas in catalog '{}': {}", args.catalog_name, e)))
+            }
         }
     }
 }
@@ -468,7 +473,12 @@ fn format_value(value: &Value) -> String {
 
 // Public function to create a databricks toolset
 pub fn databricks_toolset() -> Result<Vec<Box<dyn ToolDyn>>> {
-    let client = Arc::new(DatabricksRestClient::new().map_err(|e| eyre::eyre!("{}", e))?);
+    tracing::info!("Creating Databricks toolset...");
+    let client = Arc::new(DatabricksRestClient::new().map_err(|e| {
+        tracing::error!("Failed to create DatabricksRestClient: {}", e);
+        eyre::eyre!("{}", e)
+    })?);
+    tracing::info!("DatabricksRestClient created successfully");
 
     Ok(vec![
         Box::new(ClientToolAdapter::new(DatabricksListCatalogs::new(client.clone()))),
@@ -476,5 +486,6 @@ pub fn databricks_toolset() -> Result<Vec<Box<dyn ToolDyn>>> {
         Box::new(ClientToolAdapter::new(DatabricksListTables::new(client.clone()))),
         Box::new(ClientToolAdapter::new(DatabricksDescribeTable::new(client.clone()))),
         Box::new(ClientToolAdapter::new(DatabricksExecuteQuery::new(client.clone()))),
+        Box::new(FinishDelegationTool),
     ])
 }
