@@ -122,9 +122,33 @@ pub async fn planning_pipeline(
             let query = dabgent_mq::Query::stream(&stream_id).aggregate("planner");
             let events = store.load_events::<dabgent_agent::event::Event>(&query, None).await?;
 
+            // Emit debug event
+            let debug_event = dabgent_agent::event::Event::Debug {
+                message: format!("Checking for PlanCreated event, found {} events", events.len()),
+                context: Some(serde_json::json!({
+                    "event_count": events.len(),
+                    "plan_created": plan_created,
+                    "feedback_sent": feedback_sent,
+                })),
+                target: "debugger".to_string(),
+            };
+            store
+                .push_event(&stream_id, "debugger", &debug_event, &Default::default())
+                .await?;
+
             for event in events.iter() {
                 match event {
-                    dabgent_agent::event::Event::PlanCreated { .. } => {
+                    dabgent_agent::event::Event::PlanCreated { tasks } => {
+                        let debug_event = dabgent_agent::event::Event::Debug {
+                            message: format!("PlanCreated event detected with {} tasks", tasks.len()),
+                            context: Some(serde_json::json!({
+                                "tasks": tasks,
+                            })),
+                            target: "debugger".to_string(),
+                        };
+                        store
+                            .push_event(&stream_id, "debugger", &debug_event, &Default::default())
+                            .await?;
                         plan_created = true;
                         break;
                     }
@@ -137,6 +161,19 @@ pub async fn planning_pipeline(
                                 println!("Context: {pretty}");
                             }
                         }
+
+                        let debug_event = dabgent_agent::event::Event::Debug {
+                            message: "Sending planner feedback".to_string(),
+                            context: Some(serde_json::json!({
+                                "prompt": prompt,
+                                "feedback": "Looks good, please proceed with the execution plan.",
+                            })),
+                            target: "debugger".to_string(),
+                        };
+                        store
+                            .push_event(&stream_id, "debugger", &debug_event, &Default::default())
+                            .await?;
+
                         send_planner_feedback(
                             &store,
                             &stream_id,

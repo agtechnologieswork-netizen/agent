@@ -65,6 +65,9 @@ pub fn event_as_text<'a>(aggregate_id: &'a str, event: &'a AgentEvent) -> Text<'
         AgentEvent::UserInputRequested { prompt, context } => {
             render_user_input_requested(prompt, context)
         }
+        AgentEvent::Debug { message, context, target } => {
+            render_debug(message, context, target)
+        }
     };
 
     let mut lines: Vec<Line> = text.into_iter().collect();
@@ -98,6 +101,40 @@ pub fn render_user_input_requested<'a>(
             }
             Err(_) => {
                 lines.push(Line::from(format!("Context: {context}")));
+            }
+        }
+    }
+
+    Text::from(lines)
+}
+
+pub fn render_debug<'a>(
+    message: &'a str,
+    context: &'a Option<serde_json::Value>,
+    target: &'a str,
+) -> Text<'a> {
+    let mut lines = vec![Line::from(vec![
+        Span::styled("[DEBUG]", Style::new().fg(Color::Cyan).bold()),
+        Span::raw(" "),
+        Span::styled(format!("@{target}"), Style::new().fg(Color::Gray)),
+    ])];
+    lines.push(Line::from(message.to_owned()));
+
+    if let Some(context) = context {
+        match serde_json::to_string_pretty(context) {
+            Ok(pretty) => {
+                for line in pretty.lines() {
+                    lines.push(Line::from(vec![
+                        Span::raw("  "),
+                        Span::styled(line.to_owned(), Style::new().fg(Color::DarkGray)),
+                    ]));
+                }
+            }
+            Err(_) => {
+                lines.push(Line::from(vec![
+                    Span::raw("  "),
+                    Span::styled(format!("{context}"), Style::new().fg(Color::DarkGray)),
+                ]));
             }
         }
     }
