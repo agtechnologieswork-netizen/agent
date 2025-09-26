@@ -77,7 +77,7 @@ impl PipelineConfig {
     /// Creates a config for CLI usage (with adjusted paths)
     pub fn for_cli() -> Self {
         Self {
-            examples_path: "./dabgent_agent/examples".to_string(),
+            examples_path: "./examples".to_string(),
             ..Default::default()
         }
     }

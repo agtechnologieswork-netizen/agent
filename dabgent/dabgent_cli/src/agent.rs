@@ -46,6 +46,8 @@ pub async fn run_pipeline(store: impl EventStore, stream_id: String) {
             .tools(tools)
             .build()?;
 
+        // The pipeline will run continuously, processing events from the stream
+        // It will only exit when a pipeline_shutdown event is received
         pipeline
             .run(stream_id.to_owned(), AGGREGATE_ID.to_owned())
             .await

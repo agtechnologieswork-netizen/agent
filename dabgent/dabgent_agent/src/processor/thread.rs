@@ -81,6 +81,27 @@ impl Aggregate for Thread {
                     content: content.clone(),
                 });
             }
+            Event::ToolResult(tool_results) => {
+                // Convert tool results to User message with ToolResult content
+                let tool_contents: Vec<rig::message::UserContent> = tool_results
+                    .iter()
+                    .map(|typed_result| {
+                        // Convert TypedToolResult to ToolResult
+                        let tool_result = rig::message::ToolResult {
+                            id: typed_result.result.id.clone(),
+                            content: typed_result.result.content.clone(),
+                            call_id: None, // Add call_id if available
+                        };
+                        rig::message::UserContent::ToolResult(tool_result)
+                    })
+                    .collect();
+
+                if !tool_contents.is_empty() {
+                    self.messages.push(rig::completion::Message::User {
+                        content: rig::OneOrMany::many(tool_contents).unwrap(),
+                    });
+                }
+            }
             _ => {}
         }
     }
@@ -151,7 +172,7 @@ impl<T: LLMClient, E: EventStore> Processor<Event> for ThreadProcessor<T, E> {
     async fn run(&mut self, event: &EventDb<Event>) -> eyre::Result<()> {
         let query = Query::stream(&event.stream_id).aggregate(&event.aggregate_id);
         match &event.data {
-            Event::UserMessage(..) => {
+            Event::UserMessage(..) | Event::ToolResult(..) => {
                 let events = self.event_store.load_events::<Event>(&query, None).await?;
                 let mut thread = Thread::fold(&events);
                 let completion = self.completion(&thread).await?;

@@ -1,8 +1,6 @@
 use crate::events::{AppEvent, Event as UiEvent, EventHandler};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-use dabgent_agent::Aggregate;
 use dabgent_agent::event::Event as AgentEvent;
-use dabgent_agent::processor::thread::{self};
 use dabgent_mq::db::{Event as StoreEvent, EventStore, Metadata, Query};
 use dabgent_mq::Event as EventTrait;
 use ratatui::widgets::ListState;
@@ -12,7 +10,6 @@ use rig::message::{Text, UserContent};
 pub struct App<S: EventStore> {
     store: S,
     query: Query,
-    pub thread: thread::Thread,
     pub history: Vec<StoreEvent<AgentEvent>>,
     pub input_buffer: String,
     pub running: bool,
@@ -30,12 +27,10 @@ impl<S: EventStore> App<S> {
 
         let event_stream = store.subscribe::<AgentEvent>(&Query::stream(stream_id.clone()))?;
         let events = EventHandler::new(event_stream);
-        let thread = thread::Thread::new();
 
         Ok(Self {
             store,
             query,
-            thread,
             history: Vec::new(),
             input_buffer: String::new(),
             running: true,
@@ -49,8 +44,8 @@ impl<S: EventStore> App<S> {
     }
 
     pub async fn run(mut self, mut terminal: ratatui::DefaultTerminal) -> color_eyre::Result<()> {
-        self.setup_thread().await?;
-        self.fold_thread().await?;
+        // Don't set up thread here - let the pipeline handle it
+        // Don't fold thread at startup - wait for pipeline to initialize
         while self.running {
             terminal.draw(|frame| frame.render_widget(&mut self, frame.area()))?;
             match self.events.next().await? {
@@ -99,15 +94,7 @@ impl<S: EventStore> App<S> {
                         self.list_state.select(Some(self.history.len() - 1));
                     }
 
-                    if self
-                        .query
-                        .aggregate_id
-                        .as_ref()
-                        .map(|agg| aggregate_id == *agg)
-                        .unwrap_or(false)
-                    {
-                        self.fold_thread().await?;
-                    }
+                    // No need to fold thread anymore - pipeline handles everything
                 }
                 UiEvent::App(app_event) => match app_event {
                     AppEvent::Confirm => self.confirm().await?,
@@ -187,44 +174,6 @@ impl<S: EventStore> App<S> {
         Ok(())
     }
 
-    pub async fn fold_thread(&mut self) -> color_eyre::Result<()> {
-        let events = self
-            .store
-            .load_events::<AgentEvent>(&self.query, None)
-            .await?;
-
-        // Emit debug event for thread folding (only if debug mode is enabled)
-        if self.show_debug {
-            let debug_event = AgentEvent::Debug {
-                message: format!("Folding thread with {} events", events.len()),
-                context: Some(serde_json::json!({
-                    "event_count": events.len(),
-                    "aggregate_id": self.query.aggregate_id.clone(),
-                })),
-                target: "debugger".to_string(),
-            };
-            self.history.push(StoreEvent {
-                stream_id: self.query.stream_id.clone(),
-                event_type: "debug".to_string(),
-                aggregate_id: "debugger".to_string(),
-                sequence: self.history.len() as i64,
-                event_version: "1.0".to_string(),
-                data: debug_event,
-                metadata: serde_json::json!({}),
-                created_at: chrono::Utc::now(),
-            });
-        }
-
-        self.thread = thread::Thread::fold(&events);
-
-        // Auto-scroll to bottom after folding thread
-        if self.auto_scroll && !self.history.is_empty() {
-            self.list_state.select(Some(self.history.len() - 1));
-        }
-
-        Ok(())
-    }
-
     async fn send_message_to(
         &mut self,
         aggregate_id: &str,
@@ -232,32 +181,13 @@ impl<S: EventStore> App<S> {
     ) -> color_eyre::Result<()> {
         let text = UserContent::Text(Text { text: content });
         let message = OneOrMany::one(text);
+        let user_event = AgentEvent::UserMessage(message);
         let metadata = Metadata::default();
 
-        if self
-            .query
-            .aggregate_id
-            .as_ref()
-            .map(|current| current == aggregate_id)
-            .unwrap_or(false)
-        {
-            let events = self.thread.process(thread::Command::User(message))?;
-            for event in events {
-                self.store
-                    .push_event(&self.query.stream_id, aggregate_id, &event, &metadata)
-                    .await?;
-            }
-        } else {
-            let query = Query::stream(&self.query.stream_id).aggregate(aggregate_id);
-            let events = self.store.load_events::<AgentEvent>(&query, None).await?;
-            let mut thread = thread::Thread::fold(&events);
-            let events = thread.process(thread::Command::User(message))?;
-            for event in events {
-                self.store
-                    .push_event(&self.query.stream_id, aggregate_id, &event, &metadata)
-                    .await?;
-            }
-        }
+        // Just push the user message event and let the pipeline handle it
+        self.store
+            .push_event(&self.query.stream_id, aggregate_id, &user_event, &metadata)
+            .await?;
 
         Ok(())
     }
@@ -296,38 +226,5 @@ impl<S: EventStore> App<S> {
 
     pub fn input(&mut self, input: char) {
         self.input_buffer.push(input);
-    }
-
-    async fn setup_thread(&mut self) -> color_eyre::Result<()> {
-        // Check if thread is already configured
-        if self.thread.model.is_some() {
-            return Ok(());
-        }
-
-        // Send setup command
-        let setup_command = thread::Command::Setup {
-            model: "claude-sonnet-4-20250514".to_string(),
-            temperature: 0.7,
-            max_tokens: 4096,
-            preamble: Some("You are a helpful AI assistant.".to_string()),
-            tools: None,
-            recipient: None,
-        };
-
-        let events = self.thread.process(setup_command)?;
-        let metadata = Metadata::default();
-
-        for event in events {
-            self.store
-                .push_event(
-                    &self.query.stream_id,
-                    &self.query.aggregate_id.clone().unwrap_or_default(),
-                    &event,
-                    &metadata,
-                )
-                .await?;
-        }
-
-        Ok(())
     }
 }
