@@ -1,7 +1,7 @@
 use dabgent_agent::processor::{Pipeline, Processor, ThreadProcessor, ToolProcessor};
 use dabgent_agent::toolbox::{self, basic::toolset, planning::planning_toolset};
-use dabgent_mq::db::sqlite::SqliteStore;
 use dabgent_mq::EventStore;
+use dabgent_mq::db::sqlite::SqliteStore;
 use dabgent_sandbox::dagger::{ConnectOpts, Sandbox as DaggerSandbox};
 use dabgent_sandbox::{NoOpSandbox, Sandbox, SandboxDyn};
 use eyre::Result;
@@ -47,7 +47,11 @@ async fn main() {
         .expect("Pipeline failed");
 }
 
-pub async fn planning_pipeline(stream_id: &str, store: impl EventStore + Clone, task: &str) -> Result<()> {
+pub async fn planning_pipeline(
+    stream_id: &str,
+    store: impl EventStore + Clone,
+    task: &str,
+) -> Result<()> {
     let stream_id = stream_id.to_owned();
     let task = task.to_owned();
 
@@ -70,6 +74,7 @@ pub async fn planning_pipeline(stream_id: &str, store: impl EventStore + Clone, 
                     .collect()
             ),
             recipient: Some("planner".to_string()),
+            parent: None,
         };
         store
             .push_event(&stream_id, "planner", &planning_config, &Default::default())
@@ -182,6 +187,7 @@ pub async fn planning_pipeline(stream_id: &str, store: impl EventStore + Clone, 
                             .collect()
                     ),
                     recipient: None,
+                    parent: None,
                 };
                 store
                     .push_event(&stream_id, &thread_id, &worker_config, &Default::default())
