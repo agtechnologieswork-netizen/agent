@@ -4,6 +4,7 @@ use dabgent_agent::Aggregate;
 use dabgent_agent::event::Event as AgentEvent;
 use dabgent_agent::processor::thread::{self};
 use dabgent_mq::db::{EventStore, Metadata, Query};
+use ratatui::widgets::ListState;
 use rig::OneOrMany;
 use rig::message::{Text, UserContent};
 
@@ -15,6 +16,8 @@ pub struct App<S: EventStore> {
     pub input_buffer: String,
     pub running: bool,
     pub events: EventHandler,
+    pub list_state: ListState,
+    pub auto_scroll: bool,
 }
 
 impl<S: EventStore> App<S> {
@@ -37,6 +40,8 @@ impl<S: EventStore> App<S> {
             input_buffer: String::new(),
             running: true,
             events,
+            list_state: ListState::default(),
+            auto_scroll: true,
         })
     }
 
@@ -44,7 +49,7 @@ impl<S: EventStore> App<S> {
         self.setup_thread().await?;
         self.fold_thread().await?;
         while self.running {
-            terminal.draw(|frame| frame.render_widget(&self, frame.area()))?;
+            terminal.draw(|frame| frame.render_widget(&mut self, frame.area()))?;
             match self.events.next().await? {
                 UiEvent::Tick => self.tick(),
                 UiEvent::Crossterm(event) => match event {
@@ -53,6 +58,12 @@ impl<S: EventStore> App<S> {
                 },
                 UiEvent::Thread(event) => {
                     self.history.push(event);
+
+                    // Auto-scroll to bottom if enabled
+                    if self.auto_scroll && !self.history.is_empty() {
+                        self.list_state.select(Some(self.history.len() - 1));
+                    }
+
                     self.fold_thread().await?;
                 }
                 UiEvent::App(app_event) => match app_event {
@@ -74,6 +85,60 @@ impl<S: EventStore> App<S> {
             }
             KeyCode::Char(c) => self.events.send(UiEvent::App(AppEvent::Input(c))),
             KeyCode::Backspace => self.events.send(UiEvent::App(AppEvent::Erase)),
+            KeyCode::Up => {
+                self.auto_scroll = false;
+                if let Some(selected) = self.list_state.selected() {
+                    if selected > 0 {
+                        self.list_state.select(Some(selected - 1));
+                    }
+                } else if !self.history.is_empty() {
+                    self.list_state.select(Some(self.history.len() - 1));
+                }
+            }
+            KeyCode::Down => {
+                if let Some(selected) = self.list_state.selected() {
+                    if selected < self.history.len() - 1 {
+                        self.list_state.select(Some(selected + 1));
+                        // Re-enable auto-scroll if we reach the bottom
+                        if selected + 1 == self.history.len() - 1 {
+                            self.auto_scroll = true;
+                        }
+                    }
+                } else if !self.history.is_empty() {
+                    self.list_state.select(Some(0));
+                }
+            }
+            KeyCode::PageUp => {
+                self.auto_scroll = false;
+                if !self.history.is_empty() {
+                    let current = self.list_state.selected().unwrap_or(self.history.len() - 1);
+                    let new_pos = current.saturating_sub(10);
+                    self.list_state.select(Some(new_pos));
+                }
+            }
+            KeyCode::PageDown => {
+                if !self.history.is_empty() {
+                    let current = self.list_state.selected().unwrap_or(0);
+                    let new_pos = (current + 10).min(self.history.len() - 1);
+                    self.list_state.select(Some(new_pos));
+                    // Re-enable auto-scroll if we reach the bottom
+                    if new_pos == self.history.len() - 1 {
+                        self.auto_scroll = true;
+                    }
+                }
+            }
+            KeyCode::Home => {
+                self.auto_scroll = false;
+                if !self.history.is_empty() {
+                    self.list_state.select(Some(0));
+                }
+            }
+            KeyCode::End => {
+                self.auto_scroll = true;
+                if !self.history.is_empty() {
+                    self.list_state.select(Some(self.history.len() - 1));
+                }
+            }
             _ => {}
         }
         Ok(())
@@ -85,6 +150,12 @@ impl<S: EventStore> App<S> {
             .load_events::<AgentEvent>(&self.query, None)
             .await?;
         self.thread = thread::Thread::fold(&events);
+
+        // Auto-scroll to bottom after folding thread
+        if self.auto_scroll && !self.history.is_empty() {
+            self.list_state.select(Some(self.history.len() - 1));
+        }
+
         Ok(())
     }
 

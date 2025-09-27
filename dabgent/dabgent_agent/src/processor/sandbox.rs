@@ -2,7 +2,11 @@ use crate::event::{Event, ToolKind, TypedToolResult};
 use crate::llm::{CompletionResponse, FinishReason};
 use crate::sandbox_seed::{collect_template_files, write_template_files};
 use crate::toolbox::{ToolCallExt, ToolDyn};
+<<<<<<< HEAD
 use dabgent_mq::{Aggregate, Callback, Envelope, EventStore, Handler};
+=======
+use dabgent_mq::{EventDb, EventStore};
+>>>>>>> origin
 use dabgent_sandbox::SandboxDyn;
 use eyre::Result;
 use serde::{Deserialize, Serialize};
