@@ -61,20 +61,24 @@ impl<E: EventStore> Processor<Event> for ToolProcessor<E> {
             {
                 let tool_results = self.run_tools(&response, &event.stream_id, &event.aggregate_id).await?;
 
-                // Push the ToolResult event first
-                let tool_result_event = Event::ToolResult(tool_results.clone());
-                self.event_store.push_event(
-                    &event.stream_id,
-                    &event.aggregate_id,
-                    &tool_result_event,
-                    &Default::default(),
-                ).await?;
+                // Don't emit ToolResult for delegation trigger tools
+                // DelegationProcessor will handle these directly from AgentMessage
+                let non_delegation_results: Vec<_> = tool_results.into_iter()
+                    .filter(|tr| !self.is_delegation_trigger_tool(tr))
+                    .collect();
 
-                // Convert ToolResults to UserMessage so the LLM can process the results
-                // Skip delegation tool results - those are handled by DelegationProcessor
-                if !self.has_delegation_tool_result(&tool_results) {
-                    // Check if this is a Done tool result that needs compaction
-                    if self.is_done_tool_result(&tool_results) && self.should_trigger_compaction(&tool_results) {
+                if !non_delegation_results.is_empty() {
+                    // Push ToolResult event only for non-delegation tools
+                    let tool_result_event = Event::ToolResult(non_delegation_results.clone());
+                    self.event_store.push_event(
+                        &event.stream_id,
+                        &event.aggregate_id,
+                        &tool_result_event,
+                        &Default::default(),
+                    ).await?;
+
+                    // Convert ToolResults to UserMessage for non-delegation tools
+                    if self.is_done_tool_result(&non_delegation_results) && self.should_trigger_compaction(&non_delegation_results) {
                         // Trigger compaction via delegation to compact_error tool
                         let compact_tool_result = TypedToolResult {
                             tool_name: ToolKind::Other("compact_error".to_string()),
@@ -95,7 +99,7 @@ impl<E: EventStore> Processor<Event> for ToolProcessor<E> {
                         ).await?;
                     } else {
                         // Convert to UserMessage for normal processing
-                        let tools = tool_results.iter().map(|t|
+                        let tools = non_delegation_results.iter().map(|t|
                             rig::message::UserContent::ToolResult(t.result.clone())
                         );
                         let user_content = rig::OneOrMany::many(tools)?;
@@ -233,14 +237,16 @@ impl<E: EventStore> ToolProcessor<E> {
         Ok(results)
     }
 
-    fn has_delegation_tool_result(&self, results: &[TypedToolResult]) -> bool {
-        results.iter().any(|result| {
-            match &result.tool_name {
-                ToolKind::Other(tool_name) => tool_name == "explore_databricks_catalog" || tool_name == "finish_delegation",
-                _ => false,
+    fn is_delegation_trigger_tool(&self, result: &TypedToolResult) -> bool {
+        match &result.tool_name {
+            ToolKind::Other(tool_name) => {
+                // These tools trigger delegation but don't return results to main thread
+                tool_name == "explore_databricks_catalog" || tool_name == "compact_error"
             }
-        })
+            _ => false,
+        }
     }
+
 
     fn is_done_tool_result(&self, results: &[TypedToolResult]) -> bool {
         results.iter().any(|t| t.tool_name == ToolKind::Done)

@@ -63,12 +63,6 @@ async fn main() {
             ],
         );
 
-        let compact_processor = CompactProcessor::new(
-            store.clone(),
-            2048, // Same threshold as delegation compaction
-            "gemini-flash-latest".to_string(),
-        );
-
         // FixMe: FinishProcessor should have no state, including export path
         let finish_processor = FinishProcessor::new_with_preparer(
             dabgent_sandbox::Sandbox::boxed(completion_sandbox),

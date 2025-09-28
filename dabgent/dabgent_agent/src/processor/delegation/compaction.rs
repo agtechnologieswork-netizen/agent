@@ -1,12 +1,10 @@
-use super::DelegationHandler;
+use super::{DelegationHandler, FinishDelegationTool};
 use async_trait::async_trait;
 use crate::event::{Event, ParentAggregate};
-use crate::toolbox::{ToolDyn, Tool};
+use crate::toolbox::ToolDyn;
 use dabgent_sandbox::{SandboxDyn, NoOpSandbox, Sandbox};
 use eyre::Result;
 use uuid::Uuid;
-use serde_json::json;
-use serde::{Deserialize, Serialize};
 
 const COMPACTION_SYSTEM_PROMPT: &str = r#"
 You are an error message compactor. Your role is to reduce verbose error messages while preserving critical debugging information.
@@ -17,7 +15,7 @@ You are an error message compactor. Your role is to reduce verbose error message
 - Remove unnecessary elements: repetitive stack traces, verbose details, redundant information
 
 ## Output Format
-When you have compacted the error message, call the `finish_compaction` tool with your compacted result.
+When you have compacted the error message, call the `finish_delegation` tool with your compacted result.
 
 ## Examples
 
@@ -32,7 +30,7 @@ Traceback (most recent call last):
 AttributeError: 'NoneType' object has no attribute 'split'
 [... additional verbose stack frames ...]
 ```
-Output: `finish_compaction(summary="AttributeError in main.py:10 - 'NoneType' object has no attribute 'split'")`
+Output: `finish_delegation(result="AttributeError in main.py:10 - 'NoneType' object has no attribute 'split'")`
 
 ### Example 2: Validation Errors
 Input: Verbose validation error with nested field details
@@ -43,7 +41,7 @@ ValidationError: Multiple validation errors occurred:
 - Field 'email': Invalid email format, must contain @ symbol
 [... additional validation context ...]
 ```
-Output: `finish_compaction(summary="ValidationError: 3 fields failed - name (required), age (min:0), email (invalid format)")`
+Output: `finish_delegation(result="ValidationError: 3 fields failed - name (required), age (min:0), email (invalid format)")`
 
 ### Example 3: Build/Compilation Errors
 Input: Long compilation error with multiple issues
@@ -53,11 +51,11 @@ src/components/UserForm.tsx(42,15): error TS2322: Type 'string' is not assignabl
 src/components/UserForm.tsx(45,8): error TS2304: Cannot find name 'useState'
 [... additional compilation context ...]
 ```
-Output: `finish_compaction(summary="TypeScript errors: UserForm.tsx:42 (string→number), :45 (useState undefined)")`
+Output: `finish_delegation(result="TypeScript errors: UserForm.tsx:42 (string→number), :45 (useState undefined)")`
 
 ## Instructions
 Focus on the core issue and location. Remove implementation details that don't help identify the root cause.
-Always call `finish_compaction` with your compacted result when done.
+Always call `finish_delegation` with your compacted result when done.
 "#;
 
 pub const TRIGGER_TOOL: &str = "compact_error";
@@ -73,7 +71,7 @@ pub struct CompactionHandler {
 impl CompactionHandler {
     pub fn new(compaction_threshold: usize) -> Result<Self> {
         let tools = vec![
-            Box::new(FinishCompactionTool) as Box<dyn ToolDyn>
+            Box::new(FinishDelegationTool) as Box<dyn ToolDyn>
         ];
 
         Ok(Self {
@@ -163,58 +161,3 @@ impl DelegationHandler for CompactionHandler {
     }
 }
 
-#[derive(Deserialize, Serialize)]
-pub struct FinishCompactionArgs {
-    pub summary: String,
-}
-
-#[derive(Serialize)]
-pub struct FinishCompactionOutput {
-    pub result: String,
-    pub compacted_summary: String,
-}
-
-#[derive(Serialize)]
-pub struct FinishCompactionError {
-    pub error: String,
-}
-
-pub struct FinishCompactionTool;
-
-impl Tool for FinishCompactionTool {
-    type Args = FinishCompactionArgs;
-    type Output = FinishCompactionOutput;
-    type Error = FinishCompactionError;
-
-    fn name(&self) -> String {
-        "finish_compaction".to_string()
-    }
-
-    fn definition(&self) -> rig::completion::ToolDefinition {
-        rig::completion::ToolDefinition {
-            name: Tool::name(self),
-            description: "Complete the error compaction with the compacted result".to_string(),
-            parameters: json!({
-                "type": "object",
-                "properties": {
-                    "summary": {
-                        "type": "string",
-                        "description": "The compacted error message"
-                    }
-                },
-                "required": ["summary"]
-            }),
-        }
-    }
-
-    async fn call(
-        &self,
-        args: Self::Args,
-        _sandbox: &mut Box<dyn SandboxDyn>,
-    ) -> Result<Result<Self::Output, Self::Error>> {
-        Ok(Ok(FinishCompactionOutput {
-            result: "Compaction completed successfully".to_string(),
-            compacted_summary: args.summary,
-        }))
-    }
-}

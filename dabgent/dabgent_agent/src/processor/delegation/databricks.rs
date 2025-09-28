@@ -46,7 +46,7 @@ When you have completed your exploration and analysis, call the `finish_delegati
   - Sample data showing what the columns contain
 - Specific API endpoint recommendations with exact column mappings
 
-Example: `finish_delegation(summary="Explored catalog 'main': Found bakery schema with 3 tables. products table (id: bigint, name: string, price: decimal, category: string) contains 500 bakery items like 'Chocolate Croissant', $4.50, 'pastry'. orders table (order_id: bigint, customer_id: bigint, product_id: bigint, quantity: int, order_date: timestamp) has 10K orders. Recommend /api/products endpoint returning {id, name, price, category} and /api/orders endpoint returning {order_id, customer_id, product_id, quantity, order_date}.")`
+Example: `finish_delegation(result="Explored catalog 'main': Found bakery schema with 3 tables. products table (id: bigint, name: string, price: decimal, category: string) contains 500 bakery items like 'Chocolate Croissant', $4.50, 'pastry'. orders table (order_id: bigint, customer_id: bigint, product_id: bigint, quantity: int, order_date: timestamp) has 10K orders. Recommend /api/products endpoint returning {id, name, price, category} and /api/orders endpoint returning {order_id, customer_id, product_id, quantity, order_date}.")`
 
 **IMPORTANT**: Always use `databricks_describe_table` on relevant tables to get complete column details and sample data. This detailed structure information is critical for API design.
 "#;

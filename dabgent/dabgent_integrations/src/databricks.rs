@@ -474,7 +474,7 @@ impl DatabricksRestClient {
         Ok(all_catalogs)
     }
 
-    pub async fn list_schemas(&self, catalog_name: &str) -> Result<Vec<String>> {
+    pub async fn list_schemas(&self, catalog_name: &str, name_filter: Option<&str>) -> Result<Vec<String>> {
         info!("Starting list_schemas for catalog: {}", catalog_name);
         let mut all_schemas = Vec::new();
         let mut next_page_token: Option<String> = None;
@@ -498,7 +498,14 @@ impl DatabricksRestClient {
 
             if let Some(schemas) = response.schemas {
                 for schema in schemas {
-                    all_schemas.push(schema.name);
+                    // Apply filter if provided
+                    if let Some(filter) = name_filter {
+                        if schema.name.to_lowercase().contains(&filter.to_lowercase()) {
+                            all_schemas.push(schema.name);
+                        }
+                    } else {
+                        all_schemas.push(schema.name);
+                    }
                 }
             }
 
@@ -531,7 +538,7 @@ impl DatabricksRestClient {
         // For each catalog, get schemas and then tables
         for catalog_name in catalog_names {
             let schema_names = if schema == "*" {
-                self.list_schemas(&catalog_name).await?
+                self.list_schemas(&catalog_name, None).await?
             } else {
                 vec![schema.to_string()]
             };

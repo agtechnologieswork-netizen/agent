@@ -1,11 +1,14 @@
 use super::{Aggregate, Processor};
 use crate::event::{Event, TypedToolResult, ToolKind};
 use crate::processor::thread;
-use crate::toolbox::{ToolDyn, ToolCallExt};
+use crate::toolbox::{Tool, ToolDyn, ToolCallExt};
 use crate::llm::CompletionResponse;
 use dabgent_mq::{EventDb, EventStore, Query};
+use dabgent_sandbox::SandboxDyn;
 use async_trait::async_trait;
 use eyre::Result;
+use serde::{Deserialize, Serialize};
+use serde_json::json;
 
 pub mod databricks;
 pub mod compaction;
@@ -56,6 +59,13 @@ pub struct DelegationProcessor<E: EventStore> {
 impl<E: EventStore> Processor<Event> for DelegationProcessor<E> {
     async fn run(&mut self, event: &EventDb<Event>) -> eyre::Result<()> {
         match &event.data {
+            Event::AgentMessage { response, .. } if self.has_delegation_trigger_tool_call(response) => {
+                tracing::info!(
+                    "Delegation trigger tool call detected for aggregate {}",
+                    event.aggregate_id
+                );
+                self.handle_delegation_trigger(event, response).await?;
+            }
             Event::ToolResult(tool_results) if self.is_delegation_tool_result(tool_results) => {
                 tracing::info!(
                     "Delegation tool result detected for aggregate {}",
@@ -101,6 +111,56 @@ impl<E: EventStore> DelegationProcessor<E> {
         }
     }
 
+    fn has_delegation_trigger_tool_call(&self, response: &CompletionResponse) -> bool {
+        response.choice.iter().any(|content| {
+            if let rig::message::AssistantContent::ToolCall(call) = content {
+                self.handlers.iter().any(|h| h.trigger_tool() == call.function.name)
+            } else {
+                false
+            }
+        })
+    }
+
+    async fn handle_delegation_trigger(&mut self, event: &EventDb<Event>, response: &CompletionResponse) -> eyre::Result<()> {
+        // Extract trigger tool calls and start delegation for each
+        for content in response.choice.iter() {
+            if let rig::message::AssistantContent::ToolCall(call) = content {
+                if let Some(handler_idx) = self.handlers.iter().position(|h| h.trigger_tool() == call.function.name) {
+                    // Extract catalog and prompt from arguments
+                    let catalog = call.function.arguments
+                        .get("catalog")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("main");
+
+                    let prompt = call.function.arguments
+                        .get("prompt")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("");
+
+                    // Create delegation using handler
+                    let (task_thread_id, config_event, user_event) = self.handlers[handler_idx]
+                        .handle(catalog, prompt, &self.default_model, &event.aggregate_id, &call.id)?;
+
+                    // Push events to start delegation
+                    self.event_store.push_event(
+                        &event.stream_id,
+                        &task_thread_id,
+                        &config_event,
+                        &Default::default()
+                    ).await?;
+
+                    self.event_store.push_event(
+                        &event.stream_id,
+                        &task_thread_id,
+                        &user_event,
+                        &Default::default()
+                    ).await?;
+                }
+            }
+        }
+        Ok(())
+    }
+
     fn is_delegated_thread(&self, aggregate_id: &str) -> bool {
         self.handlers.iter().any(|h| aggregate_id.starts_with(h.thread_prefix()))
     }
@@ -140,10 +200,13 @@ impl<E: EventStore> DelegationProcessor<E> {
     fn has_delegation_tool_result(&self, results: &[crate::event::TypedToolResult]) -> bool {
         results.iter().any(|result| {
             match &result.tool_name {
-                crate::event::ToolKind::Other(tool_name) =>
-                    tool_name == "explore_databricks_catalog" ||
-                    tool_name == "finish_delegation" ||
-                    tool_name == "finish_compaction",
+                crate::event::ToolKind::Other(tool_name) => {
+                    // Check if this tool belongs to any delegation handler
+                    self.handlers.iter().any(|handler| {
+                        handler.trigger_tool() == tool_name ||
+                        handler.tools().iter().any(|t| t.name() == *tool_name)
+                    })
+                }
                 _ => false,
             }
         })
@@ -336,29 +399,68 @@ impl<E: EventStore> DelegationProcessor<E> {
                 .find(|h| event.aggregate_id.starts_with(h.thread_prefix()));
 
             if let Some(handler) = handler {
-                let result_content = handler.format_result(summary);
+                // Check if this is compaction (needs ToolResult) or other delegation (needs UserMessage)
+                if handler.thread_prefix() == "compact_" {
+                    // For compaction, send ToolResult with original tool_id to replace the Done tool result
+                    if let Some(tool_id) = &parent.tool_id {
+                        let compacted_result = vec![TypedToolResult {
+                            tool_name: ToolKind::Done,
+                            result: rig::message::ToolResult {
+                                id: tool_id.clone(),
+                                call_id: None,
+                                content: rig::OneOrMany::one(rig::message::ToolResultContent::Text(
+                                    summary.into()
+                                )),
+                            },
+                        }];
 
-                let user_content = rig::OneOrMany::one(rig::message::UserContent::Text(
-                    rig::message::Text {
-                        text: result_content,
+                        // Convert ToolResult directly to UserMessage for original thread
+                        let tools = compacted_result.iter().map(|t| rig::message::UserContent::ToolResult(t.result.clone()));
+                        let user_content = rig::OneOrMany::many(tools)?;
+
+                        // Load original thread state and process
+                        let original_query = Query::stream(&event.stream_id).aggregate(&parent.aggregate_id);
+                        let events = self.event_store.load_events::<Event>(&original_query, None).await?;
+                        let mut thread = thread::Thread::fold(&events);
+                        let new_events = thread.process(thread::Command::User(user_content))?;
+
+                        for new_event in new_events.iter() {
+                            self.event_store
+                                .push_event(
+                                    &event.stream_id,
+                                    &parent.aggregate_id,
+                                    new_event,
+                                    &Default::default(),
+                                )
+                                .await?;
+                        }
                     }
-                ));
+                } else {
+                    // For other delegations, send formatted UserMessage text
+                    let result_content = handler.format_result(summary);
 
-                // Load original thread state and process
-                let original_query = Query::stream(&event.stream_id).aggregate(&parent.aggregate_id);
-                let events = self.event_store.load_events::<Event>(&original_query, None).await?;
-                let mut thread = thread::Thread::fold(&events);
-                let new_events = thread.process(thread::Command::User(user_content))?;
+                    let user_content = rig::OneOrMany::one(rig::message::UserContent::Text(
+                        rig::message::Text {
+                            text: result_content,
+                        }
+                    ));
 
-                for new_event in new_events.iter() {
-                    self.event_store
-                        .push_event(
-                            &event.stream_id,
-                            &parent.aggregate_id,
-                            new_event,
-                            &Default::default(),
-                        )
-                        .await?;
+                    // Load original thread state and process
+                    let original_query = Query::stream(&event.stream_id).aggregate(&parent.aggregate_id);
+                    let events = self.event_store.load_events::<Event>(&original_query, None).await?;
+                    let mut thread = thread::Thread::fold(&events);
+                    let new_events = thread.process(thread::Command::User(user_content))?;
+
+                    for new_event in new_events.iter() {
+                        self.event_store
+                            .push_event(
+                                &event.stream_id,
+                                &parent.aggregate_id,
+                                new_event,
+                                &Default::default(),
+                            )
+                            .await?;
+                    }
                 }
             }
         }
@@ -400,44 +502,38 @@ impl<E: EventStore> DelegationProcessor<E> {
                 .execute_tool_by_name(&tool_name, args)
                 .await?;
 
-            // Check if this is a successful finish tool call (delegation or compaction)
-            if (tool_name == "finish_delegation" || tool_name == "finish_compaction") && result.is_ok() {
-                tracing::info!("Delegated work completed successfully, emitting WorkComplete event");
+            // Check if this is a successful terminal tool call using the tool object
+            let tool = self.handlers[handler_idx].tools()
+                .iter()
+                .find(|t| t.name() == tool_name);
 
-                // Extract summary from finish tool arguments
-                let summary = if tool_name == "finish_compaction" {
-                    // For compaction, extract compacted_summary from the result
-                    // We already confirmed result.is_ok() above, so this should never fail
-                    let value = result.as_ref().expect("Logic error: result should be Ok at this point");
-                    value
-                        .get("compacted_summary")
+            if let Some(tool) = tool {
+                if tool.is_terminal() && result.is_ok() {
+                    tracing::info!("Terminal tool completed successfully, emitting WorkComplete event");
+
+                    // Extract result from finish_delegation arguments (now unified)
+                    let summary = call.function.arguments
+                        .get("result")
                         .and_then(|v| v.as_str())
-                        .ok_or_else(|| eyre::eyre!("Missing 'compacted_summary' in finish_compaction tool result"))?
-                        .to_string()
-                } else {
-                    // For delegation, extract summary from arguments
-                    call.function.arguments
-                        .get("summary")
-                        .and_then(|v| v.as_str())
-                        .ok_or_else(|| eyre::eyre!("Missing 'summary' argument in finish_delegation tool call"))?
-                        .to_string()
-                };
+                        .ok_or_else(|| eyre::eyre!("Missing 'result' argument in finish_delegation tool call"))?
+                        .to_string();
 
-                let work_complete_event = Event::WorkComplete {
-                    agent_type: "delegated_worker".to_string(),
-                    result: summary,
-                    parent: crate::event::ParentAggregate {
-                        aggregate_id: event.aggregate_id.clone(),
-                        tool_id: Some(call.id.clone()),
-                    },
-                };
+                    let work_complete_event = Event::WorkComplete {
+                        agent_type: "delegated_worker".to_string(),
+                        result: summary,
+                        parent: crate::event::ParentAggregate {
+                            aggregate_id: event.aggregate_id.clone(),
+                            tool_id: Some(call.id.clone()),
+                        },
+                    };
 
-                self.event_store.push_event(
-                    &event.stream_id,
-                    &event.aggregate_id,
-                    &work_complete_event,
-                    &Default::default()
-                ).await?;
+                    self.event_store.push_event(
+                        &event.stream_id,
+                        &event.aggregate_id,
+                        &work_complete_event,
+                        &Default::default()
+                    ).await?;
+                }
             }
 
             let tool_result = call.to_result(result);
@@ -456,32 +552,104 @@ impl<E: EventStore> DelegationProcessor<E> {
                 &Default::default()
             ).await?;
 
-            // Convert ToolResults to UserMessage so the LLM can process the results
-            // This is critical - without this, the LLM never sees the tool results and never calls finish_delegation
-            let tools = tool_results.iter().map(|t|
-                rig::message::UserContent::ToolResult(t.result.clone())
-            );
-            let user_content = rig::OneOrMany::many(tools)?;
+            // Convert ToolResults to UserMessage only if they're not from terminal tools
+            // Terminal tools complete the delegated work and don't need further LLM processing
+            let non_terminal_results: Vec<_> = tool_results.iter()
+                .filter(|tr| {
+                    if let ToolKind::Other(tool_name) = &tr.tool_name {
+                        // Check if this tool is terminal by finding it in handler tools
+                        let is_terminal = self.handlers[handler_idx].tools()
+                            .iter()
+                            .find(|t| t.name() == *tool_name)
+                            .map(|t| t.is_terminal())
+                            .unwrap_or(false);
+                        !is_terminal
+                    } else {
+                        true // Non-other tools are not terminal
+                    }
+                })
+                .collect();
 
-            // Load thread state and process the UserMessage
-            let query = Query::stream(&event.stream_id).aggregate(&event.aggregate_id);
-            let events = self.event_store.load_events::<Event>(&query, None).await?;
-            let mut thread = thread::Thread::fold(&events);
-            let new_events = thread.process(thread::Command::User(user_content))?;
+            if !non_terminal_results.is_empty() {
+                let tools = non_terminal_results.iter().map(|t|
+                    rig::message::UserContent::ToolResult(t.result.clone())
+                );
+                let user_content = rig::OneOrMany::many(tools)?;
 
-            // Push the new events (including UserMessage and any LLM responses)
-            for new_event in new_events.iter() {
-                self.event_store
-                    .push_event(
-                        &event.stream_id,
-                        &event.aggregate_id,
-                        new_event,
-                        &Default::default(),
-                    )
-                    .await?;
+                // Load thread state and process the UserMessage
+                let query = Query::stream(&event.stream_id).aggregate(&event.aggregate_id);
+                let events = self.event_store.load_events::<Event>(&query, None).await?;
+                let mut thread = thread::Thread::fold(&events);
+                let new_events = thread.process(thread::Command::User(user_content))?;
+
+                // Push the new events (including UserMessage and any LLM responses)
+                for new_event in new_events.iter() {
+                    self.event_store
+                        .push_event(
+                            &event.stream_id,
+                            &event.aggregate_id,
+                            new_event,
+                            &Default::default(),
+                        )
+                        .await?;
+                }
             }
         }
 
         Ok(())
+    }
+}
+
+// Unified terminal tool for all delegation handlers
+#[derive(Deserialize, Serialize)]
+pub struct FinishDelegationArgs {
+    pub result: String,
+}
+
+#[derive(Serialize)]
+pub struct FinishDelegationOutput {
+    pub success: String,
+}
+
+pub struct FinishDelegationTool;
+
+impl Tool for FinishDelegationTool {
+    type Args = FinishDelegationArgs;
+    type Output = FinishDelegationOutput;
+    type Error = serde_json::Value;
+
+    fn name(&self) -> String {
+        "finish_delegation".to_string()
+    }
+
+    fn definition(&self) -> rig::completion::ToolDefinition {
+        rig::completion::ToolDefinition {
+            name: Tool::name(self),
+            description: "Complete the delegated work with a result summary".to_string(),
+            parameters: json!({
+                "type": "object",
+                "properties": {
+                    "result": {
+                        "type": "string",
+                        "description": "The result of the delegated work"
+                    }
+                },
+                "required": ["result"]
+            }),
+        }
+    }
+
+    fn is_terminal(&self) -> bool {
+        true
+    }
+
+    async fn call(
+        &self,
+        args: Self::Args,
+        _sandbox: &mut Box<dyn SandboxDyn>,
+    ) -> Result<Result<Self::Output, Self::Error>> {
+        Ok(Ok(FinishDelegationOutput {
+            success: format!("Delegated work completed: {}", args.result),
+        }))
     }
 }
