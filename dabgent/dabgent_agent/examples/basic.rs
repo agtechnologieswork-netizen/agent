@@ -1,7 +1,7 @@
 use dabgent_agent::event::Event;
-use dabgent_agent::pipeline::PipelineBuilder;
+use dabgent_agent::processor::{Pipeline, Processor, ThreadProcessor, ToolProcessor};
 use dabgent_agent::toolbox::{self, basic::toolset};
-use dabgent_mq::{EventStore, db::sqlite::SqliteStore};
+use dabgent_mq::{EventStore, db::{Query, sqlite::SqliteStore}};
 use dabgent_sandbox::dagger::{ConnectOpts, Sandbox as DaggerSandbox};
 use dabgent_sandbox::{Sandbox, SandboxDyn};
 use eyre::Result;
@@ -9,6 +9,8 @@ use rig::client::ProviderClient;
 
 const MODEL: &str = "claude-sonnet-4-20250514";
 const AGGREGATE_ID: &str = "thread";
+const TEMPERATURE: f64 = 0.0;
+const MAX_TOKENS: u64 = 4_096;
 
 const SYSTEM_PROMPT: &str = "
 You are a python software engineer.
@@ -25,6 +27,16 @@ async fn main() {
     let prompt = "minimal script that fetches my ip using some api like ipify.org";
 
     let store = store().await;
+    let tool_definitions = {
+        let tools = toolset(Validator);
+        tools
+            .iter()
+            .map(|tool| tool.definition())
+            .collect::<Vec<_>>()
+    };
+    ensure_thread_config(&store, STREAM_ID, AGGREGATE_ID, &tool_definitions)
+        .await
+        .unwrap();
     push_prompt(&store, STREAM_ID, AGGREGATE_ID, prompt)
         .await
         .unwrap();
@@ -50,18 +62,20 @@ pub async fn pipeline_fn(
             async move {
                 let sandbox = sandbox(&client).await?;
                 let tools = toolset(Validator);
-                PipelineBuilder::new()
-                    .llm(llm)
-                    .store(store.clone())
-                    .sandbox(sandbox.boxed())
-                    .model(MODEL.to_owned())
-                    .preamble(SYSTEM_PROMPT.to_owned())
-                    .temperature(0.0)
-                    .max_tokens(4_096)
-                    .tools(tools)
-                    .build()?
-                    .run(stream_id.clone(), aggregate_id.clone())
+                let tool_definitions = tools
+                    .iter()
+                    .map(|tool| tool.definition())
+                    .collect::<Vec<_>>();
+                ensure_thread_config(&store, &stream_id, &aggregate_id, &tool_definitions)
                     .await?;
+                let thread_processor = ThreadProcessor::new(llm.clone(), store.clone());
+                let tool_processor =
+                    ToolProcessor::new(sandbox.boxed(), store.clone(), tools, None);
+                let pipeline = Pipeline::new(
+                    store.clone(),
+                    vec![thread_processor.boxed(), tool_processor.boxed()],
+                );
+                pipeline.run(stream_id.clone()).await?;
                 Ok(())
             }
         })
@@ -100,6 +114,40 @@ async fn push_prompt<S: EventStore>(
         text: prompt.to_owned(),
     });
     let event = Event::UserMessage(rig::OneOrMany::one(user_content));
+    store
+        .push_event(stream_id, aggregate_id, &event, &Default::default())
+        .await
+        .map_err(Into::into)
+}
+
+async fn ensure_thread_config<S: EventStore>(
+    store: &S,
+    stream_id: &str,
+    aggregate_id: &str,
+    tools: &[rig::completion::ToolDefinition],
+) -> Result<()> {
+    let query = Query::stream(stream_id).aggregate(aggregate_id);
+    let events = store.load_events::<Event>(&query, None).await?;
+    if events
+        .iter()
+        .any(|event| matches!(event, Event::LLMConfig { .. }))
+    {
+        return Ok(());
+    }
+
+    let event = Event::LLMConfig {
+        model: MODEL.to_owned(),
+        temperature: TEMPERATURE,
+        max_tokens: MAX_TOKENS,
+        preamble: Some(SYSTEM_PROMPT.to_owned()),
+        tools: if tools.is_empty() {
+            None
+        } else {
+            Some(tools.to_vec())
+        },
+        recipient: None,
+        parent: None,
+    };
     store
         .push_event(stream_id, aggregate_id, &event, &Default::default())
         .await
