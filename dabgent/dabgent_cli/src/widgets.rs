@@ -62,6 +62,9 @@ pub fn event_as_text<'a>(aggregate_id: &'a str, event: &'a AgentEvent) -> Text<'
         AgentEvent::ToolResult(_) => Text::raw("Tool result"),
         AgentEvent::PlanCreated { tasks } => render_plan_created(tasks),
         AgentEvent::PlanUpdated { tasks } => render_plan_updated(tasks),
+        AgentEvent::PlanCompleted { tasks, message } => {
+            Text::raw(format!("✅ {} (total: {} tasks)", message, tasks.len()))
+        },
         AgentEvent::UserInputRequested { prompt, context } => {
             render_user_input_requested(prompt, context)
         }

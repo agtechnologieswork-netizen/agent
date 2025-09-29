@@ -83,28 +83,37 @@ impl<S: EventStore + Clone + Send + Sync> NoSandboxTool for CreatePlanTool<S> {
             Err(e) => return Ok(Err(e.to_string())),
         }
 
-        let feedback_event = crate::event::Event::UserInputRequested {
-            prompt: "Please review the generated plan and share any feedback or adjustments."
-                .to_string(),
-            context: Some(json!({
-                "tasks": args.tasks.clone(),
-            })),
-        };
+        // Don't request user input here - let the monitor handle completion flow
+        // This was causing message sequencing issues
+        // let feedback_event = crate::event::Event::UserInputRequested {
+        //     prompt: "Please review the generated plan and share any feedback or adjustments."
+        //         .to_string(),
+        //     context: Some(json!({
+        //         "tasks": args.tasks.clone(),
+        //     })),
+        // };
 
-        if let Err(e) = self
-            .store
-            .push_event(
-                &self.stream_id,
-                "planner",
-                &feedback_event,
-                &Default::default(),
-            )
-            .await
-        {
-            return Ok(Err(e.to_string()));
-        }
+        // if let Err(e) = self
+        //     .store
+        //     .push_event(
+        //         &self.stream_id,
+        //         "planner",
+        //         &feedback_event,
+        //         &Default::default(),
+        //     )
+        //     .await
+        // {
+        //     return Ok(Err(e.to_string()));
+        // }
 
-        let message = format!("Created plan with {} tasks", args.tasks.len());
+        let message = format!(
+            "✅ I've created a plan with {} tasks:\n\n{}\n\nThe tasks will now be executed sequentially. I'll notify you when all tasks are complete.",
+            args.tasks.len(),
+            args.tasks.iter().enumerate()
+                .map(|(i, t)| format!("{}. {}", i + 1, t))
+                .collect::<Vec<_>>()
+                .join("\n")
+        );
 
         Ok(Ok(CreatePlanOutput {
             tasks: args.tasks,

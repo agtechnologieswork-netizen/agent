@@ -72,10 +72,14 @@ When you receive task status updates:
 - Use update_plan if tasks need to be modified
 - The system will handle all task execution automatically
 
-When all tasks are completed (you'll receive a message listing all completed tasks):
-- Provide a comprehensive summary of what was accomplished
-- Highlight any important results or outputs
-- Suggest any follow-up actions if needed
+IMPORTANT: After creating a plan with create_plan, you MUST send a message to the user explaining what will happen next.
+
+When you see 'all_tasks_completed' in the context and the user responds:
+- If they type 'review', use get_plan_status to show detailed results
+- If they type 'continue', ask what follow-up tasks they'd like and create a new plan
+- If they type 'done', acknowledge and thank them
+- For other responses, interpret their intent and respond accordingly
+- Always acknowledge the user's message before taking action
 
 The create_plan tool expects an array of task descriptions.
 Each task should be a concrete, actionable step that can be independently executed.
@@ -378,28 +382,40 @@ async fn monitor_plan_execution(
                             current_task_index = Some(index + 1);
                             tracing::info!("Moving to next task: {}", index + 1);
                         } else {
-                            tracing::info!("All {} tasks completed! Notifying planner", tasks.len());
+                            tracing::info!("All {} tasks completed!", tasks.len());
 
-                            // Send a completion summary to the planner
-                            let completion_message = dabgent_agent::event::Event::UserMessage(
-                                rig::OneOrMany::one(rig::message::UserContent::Text(rig::message::Text {
-                                    text: format!(
-                                        "All {} tasks have been completed successfully:\n\n{}\n\nPlease provide a summary of what was accomplished.",
-                                        tasks.len(),
-                                        tasks.iter().enumerate()
-                                            .map(|(i, t)| format!("✓ Task {}: {}", i, t))
-                                            .collect::<Vec<_>>()
-                                            .join("\n")
-                                    ),
-                                }))
-                            );
+                            // Create a summary of completed tasks
+                            let task_summary = tasks.iter().enumerate()
+                                .map(|(i, t)| format!("{}. {}", i + 1, t))
+                                .collect::<Vec<_>>()
+                                .join("\n");
 
-                            // Wait a bit to ensure the planner is ready to receive the message
-                            tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
-                            store.push_event(&stream_id, "planner", &completion_message, &Default::default()).await?;
-                            tracing::info!("Sent completion notification to planner");
+                            // First, send a completion event to show in the UI
+                            let completion_event = dabgent_agent::event::Event::PlanCompleted {
+                                tasks: tasks.clone(),
+                                message: format!("All {} tasks completed successfully", tasks.len()),
+                            };
+                            store.push_event(&stream_id, "planner", &completion_event, &Default::default()).await?;
 
-                            current_task_index = None; // Reset to wait for new plan
+                            // Then show prompt to the user for next steps
+                            let completion_display = dabgent_agent::event::Event::UserInputRequested {
+                                prompt: format!(
+                                    "✅ All {} tasks have been completed successfully!\n\n{}\n\n=== What would you like to do next? ===\n• Type 'review' to see a detailed summary\n• Type 'continue' to create follow-up tasks\n• Type 'done' to end the session\n• Or provide any other instructions for the planner",
+                                    tasks.len(),
+                                    task_summary
+                                ),
+                                context: Some(serde_json::json!({
+                                    "event": "all_tasks_completed",
+                                    "task_count": tasks.len(),
+                                    "completed_tasks": tasks
+                                })),
+                            };
+
+                            // Send to planner aggregate since we're in planning mode
+                            store.push_event(&stream_id, "planner", &completion_display, &Default::default()).await?;
+                            tracing::info!("Displayed completion summary to user");
+
+                            current_task_index = None; // Reset to wait for new plan or user input
                         }
                     }
                 }

@@ -59,6 +59,10 @@ pub enum Event {
     PlanUpdated {
         tasks: Vec<String>,
     },
+    PlanCompleted {
+        tasks: Vec<String>,
+        message: String,
+    },
     UserInputRequested {
         prompt: String,
         context: Option<Value>,
@@ -86,6 +90,7 @@ impl dabgent_mq::Event for Event {
             Event::PipelineShutdown => "pipeline_shutdown",
             Event::PlanCreated { .. } => "plan_created",
             Event::PlanUpdated { .. } => "plan_updated",
+            Event::PlanCompleted { .. } => "plan_completed",
             Event::UserInputRequested { .. } => "user_input_requested",
             Event::Debug { .. } => "debug",
         }
