@@ -112,6 +112,15 @@ impl Aggregate for Thread {
             Event::TaskCompleted { .. } => {
                 self.is_completed = true;
             }
+            Event::UserInputRequested { prompt, .. } => {
+                // Treat UserInputRequested as an assistant message so the next user message is accepted
+                self.messages.push(rig::completion::Message::Assistant {
+                    id: Some(format!("user_input_request_{}", uuid::Uuid::new_v4())),
+                    content: rig::OneOrMany::one(rig::message::AssistantContent::Text(
+                        rig::message::Text { text: prompt.clone() }
+                    )),
+                });
+            }
             _ => {}
         }
     }
@@ -190,16 +199,20 @@ impl<T: LLMClient, E: EventStore> Processor<Event> for ThreadProcessor<T, E> {
     async fn run(&mut self, event: &EventDb<Event>) -> eyre::Result<()> {
         let query = Query::stream(&event.stream_id).aggregate(&event.aggregate_id);
         match &event.data {
-            Event::UserMessage(..) | Event::ToolResult(..) => {
+            Event::UserMessage(..) | Event::ToolResult(..) | Event::UserInputRequested { .. } => {
                 tracing::info!("ThreadProcessor processing event for aggregate {}: {:?}",
                     event.aggregate_id,
                     match &event.data {
                         Event::UserMessage(_) => "UserMessage",
                         Event::ToolResult(_) => "ToolResult",
+                        Event::UserInputRequested { .. } => "UserInputRequested",
                         _ => "Other"
                     });
                 let events = self.event_store.load_events::<Event>(&query, None).await?;
+                tracing::debug!("Loaded {} events for aggregate {}", events.len(), event.aggregate_id);
                 let mut thread = Thread::fold(&events);
+                tracing::debug!("Thread state after fold - Model: {:?}, Recipient: {:?}, Completed: {}, Messages: {}",
+                    thread.model.is_some(), thread.recipient, thread.is_completed, thread.messages.len());
 
                 // Check recipient filter
                 if let Some(ref filter) = self.recipient_filter {
@@ -233,12 +246,29 @@ impl<T: LLMClient, E: EventStore> Processor<Event> for ThreadProcessor<T, E> {
                     return Ok(());
                 }
 
-                tracing::debug!("Thread {} - Last message type: {:?}", event.aggregate_id,
+                tracing::debug!("Thread {} - Last message type: {:?}, Total messages: {}",
+                    event.aggregate_id,
                     thread.messages.last().map(|m| match m {
                         rig::completion::Message::User { .. } => "User",
                         rig::completion::Message::Assistant { .. } => "Assistant",
-                    }));
-                let completion = self.completion(&thread).await?;
+                    }),
+                    thread.messages.len());
+
+                // Validate thread is ready for completion
+                if thread.model.is_none() || thread.temperature.is_none() || thread.max_tokens.is_none() {
+                    tracing::warn!("Thread {} not properly configured. Model: {:?}, Temp: {:?}, MaxTokens: {:?}",
+                        event.aggregate_id, thread.model.is_some(), thread.temperature.is_some(), thread.max_tokens.is_some());
+                    tracing::info!("Skipping completion generation for unconfigured thread {}", event.aggregate_id);
+                    return Ok(());
+                }
+
+                let completion = match self.completion(&thread).await {
+                    Ok(c) => c,
+                    Err(e) => {
+                        tracing::error!("Failed to generate completion for thread {}: {:?}", event.aggregate_id, e);
+                        return Err(e);
+                    }
+                };
                 tracing::info!("ThreadProcessor generated completion for aggregate {}", event.aggregate_id);
                 match thread.process(Command::Agent(completion.clone())) {
                     Ok(new_events) => {
@@ -281,8 +311,37 @@ impl<T: LLMClient, E: EventStore> ThreadProcessor<T, E> {
     }
 
     pub async fn completion(&self, thread: &Thread) -> Result<CompletionResponse> {
+        // Validate thread state before attempting completion
+        tracing::debug!("Validating thread state for completion. Model: {:?}, Temperature: {:?}, MaxTokens: {:?}, Messages: {}",
+            thread.model, thread.temperature, thread.max_tokens, thread.messages.len());
+
+        if thread.model.is_none() {
+            tracing::error!("Thread model is None - cannot generate completion");
+            return Err(eyre::eyre!("Thread model is not configured"));
+        }
+        if thread.temperature.is_none() {
+            tracing::error!("Thread temperature is None - cannot generate completion");
+            return Err(eyre::eyre!("Thread temperature is not configured"));
+        }
+        if thread.max_tokens.is_none() {
+            tracing::error!("Thread max_tokens is None - cannot generate completion");
+            return Err(eyre::eyre!("Thread max_tokens is not configured"));
+        }
+        if thread.messages.is_empty() {
+            tracing::error!("Thread has no messages - cannot generate completion");
+            return Err(eyre::eyre!("Thread has no messages"));
+        }
+
         let mut history = thread.messages.clone();
         let message = history.pop().expect("No messages");
+
+        tracing::debug!("Creating completion with model: {}, temp: {}, max_tokens: {}, tools: {}",
+            thread.model.as_ref().unwrap(),
+            thread.temperature.unwrap(),
+            thread.max_tokens.unwrap(),
+            thread.tools.as_ref().map(|t| t.len()).unwrap_or(0)
+        );
+
         let mut completion = Completion::new(thread.model.clone().unwrap(), message)
             .history(history)
             .temperature(thread.temperature.unwrap())
@@ -293,7 +352,21 @@ impl<T: LLMClient, E: EventStore> ThreadProcessor<T, E> {
         if let Some(ref tools) = thread.tools {
             completion = completion.tools(tools.clone());
         }
+
+        tracing::info!("Sending completion request to LLM");
         let llm = self.llm.clone().with_retry();
-        llm.completion(completion).await
+        let result = llm.completion(completion).await;
+
+        match &result {
+            Ok(response) => {
+                tracing::info!("LLM returned completion successfully. Finish reason: {:?}",
+                    response.finish_reason);
+            }
+            Err(e) => {
+                tracing::error!("LLM completion failed: {:?}", e);
+            }
+        }
+
+        result
     }
 }

@@ -147,27 +147,37 @@ async fn run_planning_mode<C: LLMClient + 'static>(
     let executor_stream_id = stream_id.clone();
 
     let planner_handle = tokio::spawn(async move {
-        planner_pipeline.run(planner_stream_id).await
+        tracing::info!("Starting planner pipeline");
+        let result = planner_pipeline.run(planner_stream_id).await;
+        tracing::info!("Planner pipeline finished with result: {:?}", result.is_ok());
+        result
     });
     let executor_handle = tokio::spawn(async move {
-        executor_pipeline.run(executor_stream_id).await
+        tracing::info!("Starting executor pipeline");
+        let result = executor_pipeline.run(executor_stream_id).await;
+        tracing::info!("Executor pipeline finished with result: {:?}", result.is_ok());
+        result
     });
 
-    // Wait for both pipelines
-    tokio::select! {
-        result = planner_handle => {
-            match result {
-                Ok(Ok(_)) => tracing::info!("Planner pipeline completed"),
-                Ok(Err(e)) => tracing::error!("Planner pipeline error: {:?}", e),
-                Err(e) => tracing::error!("Planner pipeline panic: {:?}", e),
+    // Use try_join to wait for both pipelines without terminating early
+    // This ensures both pipelines keep running even if one encounters an error
+    match tokio::try_join!(planner_handle, executor_handle) {
+        Ok((planner_result, executor_result)) => {
+            if let Err(e) = planner_result {
+                tracing::error!("Planner pipeline error: {:?}", e);
+            } else {
+                tracing::info!("Planner pipeline completed successfully");
+            }
+            if let Err(e) = executor_result {
+                tracing::error!("Executor pipeline error: {:?}", e);
+            } else {
+                tracing::info!("Executor pipeline completed successfully");
             }
         }
-        result = executor_handle => {
-            match result {
-                Ok(Ok(_)) => tracing::info!("Executor pipeline completed"),
-                Ok(Err(e)) => tracing::error!("Executor pipeline error: {:?}", e),
-                Err(e) => tracing::error!("Executor pipeline panic: {:?}", e),
-            }
+        Err(e) => {
+            tracing::error!("Pipeline join error: {:?}", e);
+            // Even if one task panicked, try to gracefully handle it
+            return Err(eyre::eyre!("Pipeline execution failed: {}", e));
         }
     }
 
