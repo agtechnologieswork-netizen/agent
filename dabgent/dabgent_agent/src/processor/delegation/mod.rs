@@ -61,6 +61,15 @@ pub trait DelegationHandler: Send + Sync {
     // Determine if this handler should handle a specific tool result
     fn should_handle(&self, result: &TypedToolResult) -> bool;
 
+    // Extract prompt argument from tool call or tool result (handler-specific logic)
+    fn extract_prompt(&self, tool_call: &rig::message::ToolCall, _tool_result: &TypedToolResult) -> String {
+        // Default: extract from tool call arguments
+        tool_call.function.arguments.get("prompt")
+            .and_then(|v| v.as_str())
+            .unwrap_or("Explore the catalog for relevant data")
+            .to_string()
+    }
+
     fn handle(
         &self,
         context: DelegationContext,
@@ -231,14 +240,13 @@ impl<E: EventStore> DelegationProcessor<E> {
                     });
 
                 if let Some(tool_call) = tool_call {
-                    let prompt_arg = tool_call.function.arguments.get("prompt")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("Explore the catalog for relevant data");
+                    // Let handler extract prompt using its own logic (may extract from tool call args or tool result content)
+                    let prompt_arg = self.handlers[handler_idx].extract_prompt(tool_call, delegation_result);
 
                     // Create context using handler's own logic
                     let context = self.handlers[handler_idx].create_context(tool_call)?;
 
-                    self.handle_delegation_by_index(event, handler_idx, context, prompt_arg, &parent_tool_id).await?;
+                    self.handle_delegation_by_index(event, handler_idx, context, &prompt_arg, &parent_tool_id).await?;
                 } else {
                     return Err(eyre::eyre!(
                         "Could not find original tool call with id '{}' for delegation",
@@ -407,40 +415,6 @@ impl<E: EventStore> DelegationProcessor<E> {
             let result = self.handlers[handler_idx]
                 .execute_tool_by_name(&tool_name, args)
                 .await?;
-
-            // Check if this is a successful terminal tool call using the tool object
-            let tool = self.handlers[handler_idx].tools()
-                .iter()
-                .find(|t| t.name() == tool_name);
-
-            if let Some(tool) = tool {
-                if tool.is_terminal() && result.is_ok() {
-                    tracing::info!("Terminal tool completed successfully, emitting WorkComplete event");
-
-                    // Extract result from finish_delegation arguments (now unified)
-                    let summary = call.function.arguments
-                        .get("result")
-                        .and_then(|v| v.as_str())
-                        .ok_or_else(|| eyre::eyre!("Missing 'result' argument in finish_delegation tool call"))?
-                        .to_string();
-
-                    let work_complete_event = Event::WorkComplete {
-                        agent_type: "delegated_worker".to_string(),
-                        result: summary,
-                        parent: crate::event::ParentAggregate {
-                            aggregate_id: event.aggregate_id.clone(),
-                            tool_id: Some(call.id.clone()),
-                        },
-                    };
-
-                    self.event_store.push_event(
-                        &event.stream_id,
-                        &event.aggregate_id,
-                        &work_complete_event,
-                        &Default::default()
-                    ).await?;
-                }
-            }
 
             let tool_kind = match tool_name.as_str() {
                 "finish_delegation" => ToolKind::FinishDelegation,

@@ -68,11 +68,13 @@ async fn main() -> Result<()> {
         vec![Box::new(compaction_handler)],
     );
 
+    let completion_processor = dabgent_agent::processor::CompletionProcessor::new(store.clone());
     let pipeline = Pipeline::new(
         store,
         vec![
             thread_processor.boxed(),
             tool_processor.boxed(),
+            completion_processor.boxed(),
             delegation_processor.boxed(),
         ],
     );

@@ -1,4 +1,4 @@
-use dabgent_agent::processor::{DelegationProcessor, FinishProcessor, Pipeline, Processor, ThreadProcessor, ToolProcessor};
+use dabgent_agent::processor::{CompletionProcessor, DelegationProcessor, FinishProcessor, Pipeline, Processor, ThreadProcessor, ToolProcessor};
 use dabgent_agent::toolbox::ToolDyn;
 use dabgent_fastapi::{toolset::dataapps_toolset, validator::DataAppsValidator, artifact_preparer::DataAppsArtifactPreparer};
 use dabgent_fastapi::templates::{EMBEDDED_TEMPLATES, DEFAULT_TEMPLATE_PATH};
@@ -72,11 +72,13 @@ async fn main() {
             DataAppsArtifactPreparer,
         );
 
+        let completion_processor = CompletionProcessor::new(store.clone());
         let pipeline = Pipeline::new(
             store.clone(),
             vec![
                 thread_processor.boxed(),
                 tool_processor.boxed(),           // Handles main thread tools (recipient: None)
+                completion_processor.boxed(),     // Handles Done and FinishDelegation completions
                 delegation_processor.boxed(),     // Handles delegation AND delegated tool execution (including compaction)
                 finish_processor.boxed(),
             ],

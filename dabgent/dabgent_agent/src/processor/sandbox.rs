@@ -71,54 +71,6 @@ impl<E: EventStore> Processor<Event> for ToolProcessor<E> {
                         &Default::default(),
                     ).await?;
 
-                    // Emit TaskCompleted event for Done tools
-                    if let Some(done_result) = tool_results.iter().find(|r| r.tool_name == ToolKind::Done) {
-                        // Extract summary from the tool result content
-                        let summary = done_result.result.content.iter()
-                            .filter_map(|content| match content {
-                                rig::message::ToolResultContent::Text(text) => Some(text.text.clone()),
-                                _ => None,
-                            })
-                            .collect::<Vec<_>>()
-                            .join("\n");
-
-                        // Check if Done tool succeeded by examining the tool result content structure
-                        let success = done_result.result.content.iter().all(|content| {
-                            match content {
-                                rig::message::ToolResultContent::Text(text) => {
-                                    // Parse as JSON - if it has "error" field, Done failed
-                                    if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&text.text) {
-                                        if let Some(obj) = parsed.as_object() {
-                                            !obj.contains_key("error")
-                                        } else {
-                                            true
-                                        }
-                                    } else {
-                                        true
-                                    }
-                                }
-                                _ => true,
-                            }
-                        });
-
-                        if success {
-                            tracing::info!("Task completed successfully, emitting TaskCompleted event");
-                        } else {
-                            tracing::info!("Task completed with errors, emitting TaskCompleted event with success=false");
-                        }
-
-                        let task_completed_event = Event::TaskCompleted {
-                            success,
-                            summary: if summary.is_empty() { "Task completed".to_string() } else { summary }
-                        };
-                        self.event_store.push_event(
-                            &event.stream_id,
-                            &event.aggregate_id,
-                            &task_completed_event,
-                            &Default::default(),
-                        ).await?;
-                    }
-
                     // Convert to UserMessage for normal processing
                     let tools = tool_results.iter().map(|t|
                         rig::message::UserContent::ToolResult(t.result.clone())

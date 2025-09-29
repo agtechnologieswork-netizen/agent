@@ -195,6 +195,27 @@ impl DelegationHandler for CompactionHandler {
         summary.to_string()
     }
 
+    fn extract_prompt(&self, _tool_call: &rig::message::ToolCall, tool_result: &TypedToolResult) -> String {
+        // For Done results, extract error text from result content
+        // For explicit compact_error calls, extract from tool call arguments (using default impl)
+        if matches!(tool_result.tool_name, ToolKind::Done) {
+            tool_result.result.content.iter()
+                .filter_map(|content| match content {
+                    rig::message::ToolResultContent::Text(text) => Some(text.text.as_str()),
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+                .join("\n")
+        } else {
+            // For explicit compact_error calls, use default extraction from tool call arguments
+            _tool_call.function.arguments.get("error_text")
+                .or_else(|| _tool_call.function.arguments.get("prompt"))
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string()
+        }
+    }
+
     fn should_handle(&self, result: &TypedToolResult) -> bool {
         match &result.tool_name {
             // Handle explicit compact_error calls

@@ -3,6 +3,7 @@ pub mod sandbox;
 pub mod thread;
 pub mod replay;
 pub mod delegation;
+pub mod completion;
 use dabgent_mq::{EventDb, EventStore, Query};
 use std::pin::Pin;
 use tokio::sync::mpsc;
@@ -11,6 +12,7 @@ pub use finish::FinishProcessor;
 pub use sandbox::ToolProcessor;
 pub use thread::ThreadProcessor;
 pub use delegation::DelegationProcessor;
+pub use completion::CompletionProcessor;
 
 pub trait Aggregate: Default {
     type Command;
