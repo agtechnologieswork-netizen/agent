@@ -210,6 +210,23 @@ impl<T: LLMClient, E: EventStore> Processor<Event> for ThreadProcessor<T, E> {
                     });
                 let events = self.event_store.load_events::<Event>(&query, None).await?;
                 tracing::debug!("Loaded {} events for aggregate {}", events.len(), event.aggregate_id);
+
+                // Log event types for debugging
+                tracing::debug!("Events in aggregate {}:", event.aggregate_id);
+                for (i, evt) in events.iter().enumerate() {
+                    let event_name = match evt {
+                        Event::LLMConfig { .. } => "LLMConfig",
+                        Event::UserMessage(_) => "UserMessage",
+                        Event::AgentMessage { .. } => "AgentMessage",
+                        Event::ToolResult(_) => "ToolResult",
+                        Event::UserInputRequested { .. } => "UserInputRequested",
+                        Event::PlanCompleted { .. } => "PlanCompleted",
+                        Event::TaskCompleted { .. } => "TaskCompleted",
+                        _ => "Other",
+                    };
+                    tracing::debug!("  Event {}: {}", i, event_name);
+                }
+
                 let mut thread = Thread::fold(&events);
                 tracing::debug!("Thread state after fold - Model: {:?}, Recipient: {:?}, Completed: {}, Messages: {}",
                     thread.model.is_some(), thread.recipient, thread.is_completed, thread.messages.len());
