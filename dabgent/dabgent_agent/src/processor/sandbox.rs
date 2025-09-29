@@ -275,7 +275,10 @@ impl<E: EventStore> ToolProcessor<E> {
                 results.push(TypedToolResult {
                     tool_name: match call.function.name.as_str() {
                         "done" => ToolKind::Done,
-                        other => ToolKind::Other(other.to_string())
+                        "explore_databricks_catalog" => ToolKind::ExploreDatabricksCatalog,
+                        "finish_delegation" => ToolKind::FinishDelegation,
+                        "compact_error" => ToolKind::CompactError,
+                        other => ToolKind::Regular(other.to_string())
                     },
                     result: call.to_result(result)
                 });
@@ -286,13 +289,8 @@ impl<E: EventStore> ToolProcessor<E> {
     }
 
     fn is_delegation_trigger_tool(&self, result: &TypedToolResult) -> bool {
-        match &result.tool_name {
-            ToolKind::Other(tool_name) => {
-                // These tools trigger delegation but don't return results to main thread
-                tool_name == "explore_databricks_catalog" || tool_name == "compact_error"
-            }
-            _ => false,
-        }
+        matches!(&result.tool_name,
+            ToolKind::ExploreDatabricksCatalog | ToolKind::CompactError)
     }
 
 

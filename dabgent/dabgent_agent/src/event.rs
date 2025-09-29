@@ -11,7 +11,10 @@ pub struct ParentAggregate {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum ToolKind {
     Done,
-    Other(String),
+    ExploreDatabricksCatalog,
+    FinishDelegation,
+    CompactError,
+    Regular(String),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

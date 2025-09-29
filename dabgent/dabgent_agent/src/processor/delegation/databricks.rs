@@ -105,6 +105,32 @@ impl DelegationHandler for DatabricksHandler {
         tool.call(args, &mut self.sandbox).await
     }
 
+    fn create_context(&self, tool_call: &rig::message::ToolCall) -> Result<DelegationContext> {
+        let catalog = tool_call.function.arguments
+            .get("catalog")
+            .and_then(|v| v.as_str())
+            .unwrap_or("main")
+            .to_string();
+        Ok(DelegationContext::Databricks { catalog })
+    }
+
+    fn create_completion_result(&self, summary: &str, parent_tool_id: &str) -> crate::event::TypedToolResult {
+        use crate::event::{TypedToolResult, ToolKind};
+
+        let result_content = self.format_result(summary);
+
+        TypedToolResult {
+            tool_name: ToolKind::ExploreDatabricksCatalog,
+            result: rig::message::ToolResult {
+                id: parent_tool_id.to_string(),
+                call_id: None,
+                content: rig::OneOrMany::one(rig::message::ToolResultContent::Text(
+                    rig::message::Text { text: result_content }
+                )),
+            },
+        }
+    }
+
     fn handle(
         &self,
         context: DelegationContext,

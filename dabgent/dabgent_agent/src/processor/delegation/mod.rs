@@ -52,6 +52,12 @@ pub trait DelegationHandler: Send + Sync {
         }
     }
 
+    // Create context from tool call arguments
+    fn create_context(&self, tool_call: &rig::message::ToolCall) -> Result<DelegationContext>;
+
+    // Create completion result for returning to parent thread
+    fn create_completion_result(&self, summary: &str, parent_tool_id: &str) -> TypedToolResult;
+
     fn handle(
         &self,
         context: DelegationContext,
@@ -145,20 +151,8 @@ impl<E: EventStore> DelegationProcessor<E> {
                         .and_then(|v| v.as_str())
                         .unwrap_or("");
 
-                    // Create appropriate context based on handler type
-                    let context = if self.handlers[handler_idx].trigger_tool() == "explore_databricks_catalog" {
-                        let catalog = call.function.arguments
-                            .get("catalog")
-                            .and_then(|v| v.as_str())
-                            .unwrap_or("main");
-                        DelegationContext::Databricks { catalog: catalog.to_string() }
-                    } else if self.handlers[handler_idx].trigger_tool() == "compact_error" {
-                        // For compaction, we'll need to pass the threshold from somewhere
-                        // For now, using a default - this should ideally come from handler state
-                        DelegationContext::Compaction { threshold: 1000 }
-                    } else {
-                        return Err(eyre::eyre!("Unknown handler type for trigger: {}", call.function.name));
-                    };
+                    // Create context using handler's own logic
+                    let context = self.handlers[handler_idx].create_context(call)?;
 
                     // Create delegation using handler
                     let result = self.handlers[handler_idx]
@@ -191,11 +185,8 @@ impl<E: EventStore> DelegationProcessor<E> {
     fn is_delegation_tool_result(&self, tool_results: &[crate::event::TypedToolResult]) -> bool {
         // Check for explicit delegation tool results only
         tool_results.iter().any(|result| {
-            if let crate::event::ToolKind::Other(tool_name) = &result.tool_name {
-                self.handlers.iter().any(|h| tool_name == h.trigger_tool())
-            } else {
-                false
-            }
+            matches!(&result.tool_name,
+                crate::event::ToolKind::ExploreDatabricksCatalog | crate::event::ToolKind::CompactError)
         })
     }
 
@@ -208,21 +199,20 @@ impl<E: EventStore> DelegationProcessor<E> {
     ) -> eyre::Result<()> {
         // Handle explicit delegation tool results
         let delegation_result = tool_results.iter().find(|result| {
-            if let crate::event::ToolKind::Other(tool_name) = &result.tool_name {
-                self.handlers.iter().any(|h| tool_name == h.trigger_tool())
-            } else {
-                false
-            }
+            matches!(&result.tool_name,
+                crate::event::ToolKind::ExploreDatabricksCatalog | crate::event::ToolKind::CompactError)
         });
 
         if let Some(delegation_result) = delegation_result {
             let parent_tool_id = delegation_result.result.id.clone();
 
-            // Find matching handler index
-            let handler_idx = if let crate::event::ToolKind::Other(tool_name) = &delegation_result.tool_name {
-                self.handlers.iter().position(|h| tool_name == h.trigger_tool())
-            } else {
-                None
+            // Find matching handler index based on ToolKind
+            let handler_idx = match &delegation_result.tool_name {
+                crate::event::ToolKind::ExploreDatabricksCatalog =>
+                    self.handlers.iter().position(|h| h.trigger_tool() == "explore_databricks_catalog"),
+                crate::event::ToolKind::CompactError =>
+                    self.handlers.iter().position(|h| h.trigger_tool() == "compact_error"),
+                _ => None,
             };
 
             if let Some(handler_idx) = handler_idx {
@@ -254,17 +244,8 @@ impl<E: EventStore> DelegationProcessor<E> {
                         .and_then(|v| v.as_str())
                         .unwrap_or("Explore the catalog for relevant data");
 
-                    // Create appropriate context based on handler type
-                    let context = if self.handlers[handler_idx].trigger_tool() == "explore_databricks_catalog" {
-                        let catalog = tool_call.function.arguments.get("catalog")
-                            .and_then(|v| v.as_str())
-                            .unwrap_or("main");
-                        DelegationContext::Databricks { catalog: catalog.to_string() }
-                    } else if self.handlers[handler_idx].trigger_tool() == "compact_error" {
-                        DelegationContext::Compaction { threshold: 1000 }
-                    } else {
-                        return Err(eyre::eyre!("Unknown handler type for delegation"));
-                    };
+                    // Create context using handler's own logic
+                    let context = self.handlers[handler_idx].create_context(tool_call)?;
 
                     self.handle_delegation_by_index(event, handler_idx, context, prompt_arg, &parent_tool_id).await?;
                 } else {
@@ -291,14 +272,20 @@ impl<E: EventStore> DelegationProcessor<E> {
             .position(|h| h.worker_name() == agent_type)
             .ok_or_else(|| eyre::eyre!("No handler found for agent_type '{}'", agent_type))?;
 
-        // Create appropriate context based on handler type
-        let context = if self.handlers[handler_idx].trigger_tool() == "explore_databricks_catalog" {
-            DelegationContext::Databricks { catalog: "main".to_string() }
-        } else if self.handlers[handler_idx].trigger_tool() == "compact_error" {
-            DelegationContext::Compaction { threshold: 1000 }
-        } else {
-            return Err(eyre::eyre!("Unknown handler type for worker: {}", agent_type));
+        // Create a dummy tool call to extract context from handler
+        // For DelegateWork events triggered by ToolProcessor, we don't have a real tool call
+        // So we create a minimal one with empty arguments - handlers should use defaults
+        let dummy_call = rig::message::ToolCall {
+            id: parent_tool_id.to_string(),
+            call_id: None,
+            function: rig::message::ToolFunction {
+                name: self.handlers[handler_idx].trigger_tool().to_string(),
+                arguments: serde_json::Value::Object(Default::default()),
+            },
         };
+
+        // Create context using handler's own logic
+        let context = self.handlers[handler_idx].create_context(&dummy_call)?;
 
         // Delegate work to the appropriate handler
         self.handle_delegation_by_index(event, handler_idx, context, prompt, parent_tool_id).await
@@ -365,78 +352,29 @@ impl<E: EventStore> DelegationProcessor<E> {
                 .find(|h| event.aggregate_id.starts_with(h.thread_prefix()));
 
             if let Some(handler) = handler {
-                // Check if this is compaction (needs ToolResult) or other delegation (needs UserMessage)
-                if handler.thread_prefix() == "compact_" {
-                    // For compaction, send ToolResult with original tool_id to replace the Done tool result
-                    if let Some(tool_id) = &parent.tool_id {
-                        let compacted_result = vec![TypedToolResult {
-                            tool_name: ToolKind::Done,
-                            result: rig::message::ToolResult {
-                                id: tool_id.clone(),
-                                call_id: None,
-                                content: rig::OneOrMany::one(rig::message::ToolResultContent::Text(
-                                    summary.into()
-                                )),
-                            },
-                        }];
+                if let Some(tool_id) = &parent.tool_id {
+                    // Use handler's create_completion_result to get the appropriate result type
+                    let completion_result = vec![handler.create_completion_result(summary, tool_id)];
 
-                        // Convert ToolResult directly to UserMessage for original thread
-                        let tools = compacted_result.iter().map(|t| rig::message::UserContent::ToolResult(t.result.clone()));
-                        let user_content = rig::OneOrMany::many(tools)?;
+                    // Convert ToolResult to UserMessage for thread processing
+                    let tools = completion_result.iter().map(|t| rig::message::UserContent::ToolResult(t.result.clone()));
+                    let user_content = rig::OneOrMany::many(tools)?;
 
-                        // Load original thread state and process
-                        let original_query = Query::stream(&event.stream_id).aggregate(&parent.aggregate_id);
-                        let events = self.event_store.load_events::<Event>(&original_query, None).await?;
-                        let mut thread = thread::Thread::fold(&events);
-                        let new_events = thread.process(thread::Command::User(user_content))?;
+                    // Load original thread state and process
+                    let original_query = Query::stream(&event.stream_id).aggregate(&parent.aggregate_id);
+                    let events = self.event_store.load_events::<Event>(&original_query, None).await?;
+                    let mut thread = thread::Thread::fold(&events);
+                    let new_events = thread.process(thread::Command::User(user_content))?;
 
-                        for new_event in new_events.iter() {
-                            self.event_store
-                                .push_event(
-                                    &event.stream_id,
-                                    &parent.aggregate_id,
-                                    new_event,
-                                    &Default::default(),
-                                )
-                                .await?;
-                        }
-                    }
-                } else {
-                    // For other delegations, send ToolResult to match the original tool_use
-                    if let Some(tool_id) = &parent.tool_id {
-                        let result_content = handler.format_result(summary);
-
-                        let delegation_tool_result = vec![TypedToolResult {
-                            tool_name: ToolKind::Other(handler.trigger_tool().to_string()),
-                            result: rig::message::ToolResult {
-                                id: tool_id.clone(),
-                                call_id: None,
-                                content: rig::OneOrMany::one(rig::message::ToolResultContent::Text(
-                                    rig::message::Text { text: result_content }
-                                )),
-                            },
-                        }];
-
-                        // Convert ToolResult to UserMessage for thread processing
-                        let tools = delegation_tool_result.iter().map(|t| rig::message::UserContent::ToolResult(t.result.clone()));
-                        let user_content = rig::OneOrMany::many(tools)?;
-
-                        // Load original thread state and process
-                        let original_query = Query::stream(&event.stream_id).aggregate(&parent.aggregate_id);
-                        let events = self.event_store.load_events::<Event>(&original_query, None).await?;
-                        let mut thread = thread::Thread::fold(&events);
-                        let new_events = thread.process(thread::Command::User(user_content))?;
-
-                        for new_event in new_events.iter() {
-                            self.event_store
-                                .push_event(
-                                    &event.stream_id,
-                                    &parent.aggregate_id,
-                                    new_event,
-                                    &Default::default(),
-                                )
-                                .await?;
-                        }
+                    for new_event in new_events.iter() {
+                        self.event_store
+                            .push_event(
+                                &event.stream_id,
+                                &parent.aggregate_id,
+                                new_event,
+                                &Default::default(),
+                            )
+                            .await?;
                     }
                 }
             }
@@ -513,9 +451,14 @@ impl<E: EventStore> DelegationProcessor<E> {
                 }
             }
 
+            let tool_kind = match tool_name.as_str() {
+                "finish_delegation" => ToolKind::FinishDelegation,
+                other => ToolKind::Regular(other.to_string()),
+            };
+
             let tool_result = call.to_result(result);
             tool_results.push(TypedToolResult {
-                tool_name: ToolKind::Other(tool_name),
+                tool_name: tool_kind,
                 result: tool_result,
             });
         }
@@ -533,16 +476,18 @@ impl<E: EventStore> DelegationProcessor<E> {
             // Terminal tools complete the delegated work and don't need further LLM processing
             let non_terminal_results: Vec<_> = tool_results.iter()
                 .filter(|tr| {
-                    if let ToolKind::Other(tool_name) = &tr.tool_name {
-                        // Check if this tool is terminal by finding it in handler tools
-                        let is_terminal = self.handlers[handler_idx].tools()
-                            .iter()
-                            .find(|t| t.name() == *tool_name)
-                            .map(|t| t.is_terminal())
-                            .unwrap_or(false);
-                        !is_terminal
-                    } else {
-                        true // Non-other tools are not terminal
+                    match &tr.tool_name {
+                        ToolKind::Regular(tool_name) => {
+                            // Check if this tool is terminal by finding it in handler tools
+                            let is_terminal = self.handlers[handler_idx].tools()
+                                .iter()
+                                .find(|t| t.name() == *tool_name)
+                                .map(|t| t.is_terminal())
+                                .unwrap_or(false);
+                            !is_terminal
+                        }
+                        ToolKind::FinishDelegation => false, // Terminal tool
+                        _ => true, // Other ToolKind variants are not terminal
                     }
                 })
                 .collect();

@@ -121,6 +121,28 @@ impl DelegationHandler for CompactionHandler {
         tool.call(args, &mut self.sandbox).await
     }
 
+    fn create_context(&self, _tool_call: &rig::message::ToolCall) -> Result<DelegationContext> {
+        Ok(DelegationContext::Compaction {
+            threshold: self.compaction_threshold,
+        })
+    }
+
+    fn create_completion_result(&self, summary: &str, parent_tool_id: &str) -> crate::event::TypedToolResult {
+        use crate::event::{TypedToolResult, ToolKind};
+
+        // For compaction, we return a Done tool result (replacing the original large Done result)
+        TypedToolResult {
+            tool_name: ToolKind::Done,
+            result: rig::message::ToolResult {
+                id: parent_tool_id.to_string(),
+                call_id: None,
+                content: rig::OneOrMany::one(rig::message::ToolResultContent::Text(
+                    summary.into()
+                )),
+            },
+        }
+    }
+
     fn handle(
         &self,
         context: DelegationContext,

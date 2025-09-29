@@ -1,4 +1,5 @@
-use dabgent_agent::processor::{CompactProcessor, Pipeline, Processor, ThreadProcessor, ToolProcessor};
+use dabgent_agent::processor::{DelegationProcessor, Pipeline, Processor, ThreadProcessor, ToolProcessor};
+use dabgent_agent::processor::delegation::compaction::CompactionHandler;
 use dabgent_agent::toolbox::{databricks::databricks_toolset, ToolDyn};
 use dabgent_mq::{EventStore, create_store, StoreConfig};
 use dabgent_sandbox::{Sandbox, NoOpSandbox};
@@ -58,10 +59,13 @@ async fn main() -> Result<()> {
         tools,
         None,
     );
-    let compact_processor = CompactProcessor::new(
+
+    // Set up delegation processor with compaction handler
+    let compaction_handler = CompactionHandler::new(2048)?; // Compact threshold
+    let delegation_processor = DelegationProcessor::new(
         store.clone(),
-        2048, // Compact threshold - keep context manageable
         MODEL.to_string(),
+        vec![Box::new(compaction_handler)],
     );
 
     let pipeline = Pipeline::new(
@@ -69,7 +73,7 @@ async fn main() -> Result<()> {
         vec![
             thread_processor.boxed(),
             tool_processor.boxed(),
-            compact_processor.boxed(),
+            delegation_processor.boxed(),
         ],
     );
 

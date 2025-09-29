@@ -133,8 +133,8 @@ Focus on creating a functional DataApp that showcases real bakery business data 
 ";
 
 
-const MAIN_MODEL: &str = "claude-sonnet-4-20250514";
-const DELEGATION_MODEL: &str = "claude-sonnet-4-20250514";
+const MAIN_MODEL: &str = "claude-sonnet-4-5";
+const DELEGATION_MODEL: &str = "claude-sonnet-4-5";
 
 async fn create_sandbox(client: &dagger_sdk::DaggerConn) -> Result<DaggerSandbox> {
     tracing::info!("Setting up sandbox with DataApps template...");
