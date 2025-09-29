@@ -214,6 +214,7 @@ pub async fn monitor_plan_execution(
                         tasks_started.insert(index); // Mark it as started to avoid confusion
                     }
 
+                    // Check if task needs to be started
                     if !already_started && !is_completed {
                         // Start this task (only once)
                         tracing::info!("Monitor starting task {}: {}", index, tasks[index]);
@@ -246,7 +247,10 @@ pub async fn monitor_plan_execution(
                         );
                         store.push_event(&stream_id, &thread_id, &task_message, &Default::default()).await?;
                         tracing::info!("Monitor pushed UserMessage for task {}: {}", index, task);
-                    } else if is_completed {
+                    }
+
+                    // Check if task is completed (regardless of whether it was just started)
+                    if is_completed {
                         tracing::info!("Task {} is completed, moving to next", index);
 
                         // Move to next task
