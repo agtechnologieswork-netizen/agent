@@ -53,7 +53,6 @@ pub struct DelegationProcessor<E: EventStore> {
     event_store: E,
     default_model: String,
     handlers: Vec<Box<dyn DelegationHandler>>,
-    compaction_threshold: Option<usize>,
 }
 
 impl<E: EventStore> Processor<Event> for DelegationProcessor<E> {
@@ -90,6 +89,13 @@ impl<E: EventStore> Processor<Event> for DelegationProcessor<E> {
                 );
                 self.handle_work_completion(event, result).await?;
             }
+            Event::DelegateWork { agent_type, prompt, parent_tool_id } => {
+                tracing::info!(
+                    "Delegation work request detected for agent_type {} in aggregate {}",
+                    agent_type, event.aggregate_id
+                );
+                self.handle_delegate_work(event, agent_type, prompt, parent_tool_id).await?;
+            }
             _ => {}
         }
         Ok(())
@@ -98,16 +104,10 @@ impl<E: EventStore> Processor<Event> for DelegationProcessor<E> {
 
 impl<E: EventStore> DelegationProcessor<E> {
     pub fn new(event_store: E, default_model: String, handlers: Vec<Box<dyn DelegationHandler>>) -> Self {
-        // Extract compaction threshold if a compaction handler exists
-        let compaction_threshold = handlers.iter()
-            .find(|h| h.trigger_tool() == "compact_error")
-            .map(|_| 2048_usize); // Default threshold, could be made configurable
-
         Self {
             event_store,
             default_model,
             handlers,
-            compaction_threshold,
         }
     }
 
@@ -166,91 +166,23 @@ impl<E: EventStore> DelegationProcessor<E> {
     }
 
     fn is_delegation_tool_result(&self, tool_results: &[crate::event::TypedToolResult]) -> bool {
-        // Check for explicit delegation tool results
-        let has_explicit_delegation = tool_results.iter().any(|result| {
+        // Check for explicit delegation tool results only
+        tool_results.iter().any(|result| {
             if let crate::event::ToolKind::Other(tool_name) = &result.tool_name {
                 self.handlers.iter().any(|h| tool_name == h.trigger_tool())
             } else {
                 false
             }
-        });
-
-        // Check for auto-compaction trigger (Done tools with large content)
-        let should_auto_compact = self.should_auto_compact(tool_results);
-
-        has_explicit_delegation || should_auto_compact
-    }
-
-    fn should_auto_compact(&self, tool_results: &[crate::event::TypedToolResult]) -> bool {
-        // Check if we have a compaction handler and threshold configured
-        if let Some(threshold) = self.compaction_threshold {
-            return tool_results.iter().any(|result| {
-                // Must be a Done tool result
-                result.tool_name == crate::event::ToolKind::Done &&
-                // Must not be a delegation result (avoid recursion)
-                !self.has_delegation_tool_result(tool_results) &&
-                // Must exceed size threshold
-                self.calculate_text_size(&[result.clone()]) > threshold
-            });
-        }
-
-        false
-    }
-
-    fn has_delegation_tool_result(&self, results: &[crate::event::TypedToolResult]) -> bool {
-        results.iter().any(|result| {
-            match &result.tool_name {
-                crate::event::ToolKind::Other(tool_name) => {
-                    // Check if this tool belongs to any delegation handler
-                    self.handlers.iter().any(|handler| {
-                        handler.trigger_tool() == tool_name ||
-                        handler.tools().iter().any(|t| t.name() == *tool_name)
-                    })
-                }
-                _ => false,
-            }
         })
     }
 
-    fn calculate_text_size(&self, results: &[crate::event::TypedToolResult]) -> usize {
-        results
-            .iter()
-            .map(|result| {
-                result.result
-                    .content
-                    .iter()
-                    .map(|content| match content {
-                        rig::message::ToolResultContent::Text(text) => text.text.len(),
-                        _ => 0,
-                    })
-                    .sum::<usize>()
-            })
-            .sum()
-    }
 
-    fn extract_text_content(&self, results: &[crate::event::TypedToolResult]) -> String {
-        results
-            .iter()
-            .flat_map(|result| {
-                result.result.content.iter().filter_map(|content| match content {
-                    rig::message::ToolResultContent::Text(text) => Some(text.text.clone()),
-                    _ => None,
-                })
-            })
-            .collect::<Vec<_>>()
-            .join("\n")
-    }
 
     async fn handle_delegation_request(
         &mut self,
         event: &EventDb<Event>,
         tool_results: &[crate::event::TypedToolResult],
     ) -> eyre::Result<()> {
-        // Check for auto-compaction first
-        if self.should_auto_compact(tool_results) {
-            return self.handle_auto_compaction(event, tool_results).await;
-        }
-
         // Handle explicit delegation tool results
         let delegation_result = tool_results.iter().find(|result| {
             if let crate::event::ToolKind::Other(tool_name) = &result.tool_name {
@@ -316,26 +248,20 @@ impl<E: EventStore> DelegationProcessor<E> {
         Ok(())
     }
 
-    async fn handle_auto_compaction(
+    async fn handle_delegate_work(
         &mut self,
         event: &EventDb<Event>,
-        tool_results: &[crate::event::TypedToolResult],
+        agent_type: &str,
+        prompt: &str,
+        parent_tool_id: &str,
     ) -> eyre::Result<()> {
-        // Find compaction handler
+        // Find handler based on worker name (agent_type maps to worker_name)
         let handler_idx = self.handlers.iter()
-            .position(|h| h.trigger_tool() == "compact_error")
-            .ok_or_else(|| eyre::eyre!("Compaction handler not found"))?;
+            .position(|h| h.worker_name() == agent_type)
+            .ok_or_else(|| eyre::eyre!("No handler found for agent_type '{}'", agent_type))?;
 
-        // Find the Done tool result that needs compaction
-        let done_result = tool_results.iter().find(|result| {
-            result.tool_name == crate::event::ToolKind::Done
-        }).ok_or_else(|| eyre::eyre!("No Done tool result found for compaction"))?;
-
-        let parent_tool_id = done_result.result.id.clone();
-        let error_text = self.extract_text_content(&[done_result.clone()]);
-
-        // Use empty catalog since it's not relevant for compaction
-        self.handle_delegation_by_index(event, handler_idx, "", &error_text, &parent_tool_id).await
+        // Delegate work to the appropriate handler
+        self.handle_delegation_by_index(event, handler_idx, "", prompt, parent_tool_id).await
     }
 
     async fn handle_delegation_by_index(

@@ -68,36 +68,99 @@ impl<E: EventStore> Processor<Event> for ToolProcessor<E> {
                     .collect();
 
                 if !non_delegation_results.is_empty() {
-                    // Push ToolResult event only for non-delegation tools
-                    let tool_result_event = Event::ToolResult(non_delegation_results.clone());
-                    self.event_store.push_event(
-                        &event.stream_id,
-                        &event.aggregate_id,
-                        &tool_result_event,
-                        &Default::default(),
-                    ).await?;
-
-                    // Convert ToolResults to UserMessage for non-delegation tools
+                    // Check if compaction will be triggered before emitting tool results
                     if self.is_done_tool_result(&non_delegation_results) && self.should_trigger_compaction(&non_delegation_results) {
-                        // Trigger compaction via delegation to compact_error tool
-                        let compact_tool_result = TypedToolResult {
-                            tool_name: ToolKind::Other("compact_error".to_string()),
-                            result: rig::message::ToolResult {
-                                id: "compact_trigger".to_string(),
-                                call_id: None,
-                                content: rig::OneOrMany::one(rig::message::ToolResultContent::Text(
-                                    rig::message::Text { text: "Triggering compaction for large Done tool result".to_string() }
-                                )),
-                            },
+                        // Large Done tool - trigger compaction instead of normal processing
+                        let done_result = non_delegation_results.iter()
+                            .find(|r| r.tool_name == ToolKind::Done)
+                            .expect("Done tool result should exist");
+
+                        tracing::info!("Large Done tool result detected, triggering compaction delegation");
+
+                        // Extract the error text from the Done tool result
+                        let error_text = done_result.result.content.iter()
+                            .filter_map(|content| match content {
+                                rig::message::ToolResultContent::Text(text) => Some(text.text.clone()),
+                                _ => None,
+                            })
+                            .collect::<Vec<_>>()
+                            .join("\n");
+
+                        // Emit DelegateWork event for compaction
+                        let delegate_work_event = Event::DelegateWork {
+                            agent_type: "compact_worker".to_string(),
+                            prompt: error_text,
+                            parent_tool_id: done_result.result.id.clone(),
                         };
-                        let compact_event = Event::ToolResult(vec![compact_tool_result]);
                         self.event_store.push_event(
                             &event.stream_id,
                             &event.aggregate_id,
-                            &compact_event,
+                            &delegate_work_event,
                             &Default::default(),
                         ).await?;
                     } else {
+                        // No compaction needed - emit tool results normally and convert to UserMessage
+                        let tool_result_event = Event::ToolResult(non_delegation_results.clone());
+                        self.event_store.push_event(
+                            &event.stream_id,
+                            &event.aggregate_id,
+                            &tool_result_event,
+                            &Default::default(),
+                        ).await?;
+
+                        // Emit TaskCompleted event for Done tools (since no compaction)
+                        if self.is_done_tool_result(&non_delegation_results) {
+                            // Find the Done tool result to extract summary and check success
+                            if let Some(done_result) = non_delegation_results.iter().find(|r| r.tool_name == ToolKind::Done) {
+                                // Extract summary from the tool result content
+                                let summary = done_result.result.content.iter()
+                                    .filter_map(|content| match content {
+                                        rig::message::ToolResultContent::Text(text) => Some(text.text.clone()),
+                                        _ => None,
+                                    })
+                                    .collect::<Vec<_>>()
+                                    .join("\n");
+
+                                // Check if Done tool succeeded by examining the tool result content structure
+                                // When DoneTool validator fails: to_result wraps as {"error": "validation error: ..."}
+                                // When DoneTool validator succeeds: to_result stores plain text summary
+                                let success = done_result.result.content.iter().all(|content| {
+                                    match content {
+                                        rig::message::ToolResultContent::Text(text) => {
+                                            // Parse as JSON - if it has "error" field, Done failed
+                                            if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&text.text) {
+                                                if let Some(obj) = parsed.as_object() {
+                                                    !obj.contains_key("error")
+                                                } else {
+                                                    true // Not an object, so no error field
+                                                }
+                                            } else {
+                                                true // Not JSON, plain text summary = success
+                                            }
+                                        }
+                                        _ => true, // Non-text content doesn't indicate failure
+                                    }
+                                });
+
+                                if success {
+                                    tracing::info!("Task completed successfully, emitting TaskCompleted event");
+                                } else {
+                                    tracing::info!("Task completed with errors, emitting TaskCompleted event with success=false");
+                                }
+
+                                let task_completed_event = Event::TaskCompleted {
+                                    success,
+                                    summary: if summary.is_empty() { "Task completed".to_string() } else { summary }
+                                };
+                                self.event_store.push_event(
+                                    &event.stream_id,
+                                    &event.aggregate_id,
+                                    &task_completed_event,
+                                    &Default::default(),
+                                ).await?;
+                            }
+                        }
+
                         // Convert to UserMessage for normal processing
                         let tools = non_delegation_results.iter().map(|t|
                             rig::message::UserContent::ToolResult(t.result.clone())
@@ -161,30 +224,8 @@ impl<E: EventStore> ToolProcessor<E> {
                         let args = call.function.arguments.clone();
                         let tool_result = tool.call(args, &mut self.sandbox).await?;
 
-                        // Check if this is a successful DoneTool call
-                        if call.function.name == "done" && tool_result.is_ok() {
-                            tracing::info!("Task completed successfully, emitting TaskCompleted event");
-
-                            // Extract summary from Done tool arguments
-                            let summary = call.function.arguments
-                                .get("summary")
-                                .and_then(|v| v.as_str())
-                                .unwrap_or("Task completed")
-                                .to_string();
-
-                            let task_completed_event = Event::TaskCompleted {
-                                success: true,
-                                summary
-                            };
-                            self.event_store
-                                .push_event(
-                                    stream_id,
-                                    aggregate_id,
-                                    &task_completed_event,
-                                    &Default::default(),
-                                )
-                                .await?;
-                        }
+                        // Note: TaskCompleted event will be handled later in tool result processing
+                        // to coordinate with compaction logic
 
                         // Check if this is a successful FinishDelegationTool call
                         if call.function.name == "finish_delegation" && tool_result.is_ok() {
