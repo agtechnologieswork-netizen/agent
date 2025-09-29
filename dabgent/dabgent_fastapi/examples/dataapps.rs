@@ -99,7 +99,6 @@ Workspace Setup:
 - You have a pre-configured DataApps project structure in /app with backend and frontend directories
 - Backend is in /app/backend with Python, FastAPI, and uv package management
 - Frontend is in /app/frontend with React Admin and TypeScript
-- Use 'uv run' for all Python commands (e.g., 'uv run python main.py')
 
 Data Sources:
 - You have access to Databricks Unity Catalog with bakery business data
@@ -108,11 +107,11 @@ Data Sources:
 - Once you explore the data, use the actual schema and sample data for your API design
 
 Your Task:
-1. First, explore the Databricks catalog to understand available bakery data
+1. First, explore the Databricks catalog to understand the data
 2. Create a data API that serves real data from Databricks tables
 3. Configure React Admin UI to display this data in tables
-4. Add proper logging and debugging throughout
-5. Ensure CORS is properly configured for React Admin
+4. Ensure CORS is properly configured for React Admin
+5. When the app is ready, you need to use tool Done to run the tests and linters. If there are any errors, fix them; otherwise, the tool will confirm completion.
 
 Implementation Details:
 - Start by exploring the Databricks catalog to find relevant tables
@@ -120,17 +119,7 @@ Implementation Details:
 - Each endpoint should return data with fields matching the Databricks schema
 - Update frontend/src/App.tsx to add Resources for the discovered data
 - Include X-Total-Count header for React Admin pagination
-- Add debug logging in both backend (print/logging) and frontend (console.log)
 
-Quality Requirements:
-- Follow React Admin patterns for data providers
-- Use proper REST API conventions (/api/resource)
-- Handle errors gracefully with clear messages
-- Design APIs around real data structures from Databricks
-- Run all linters and tests before completion
-
-Start by exploring the Databricks catalog, then implement the required features based on the actual data you find.
-Use the tools available to you as needed.
 ";
 
 const USER_PROMPT: &str = "

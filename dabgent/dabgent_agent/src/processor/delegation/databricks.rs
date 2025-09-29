@@ -1,4 +1,4 @@
-use super::DelegationHandler;
+use super::{DelegationHandler, DelegationContext, DelegationResult};
 use async_trait::async_trait;
 use crate::event::{Event, ParentAggregate};
 use crate::toolbox::{databricks::databricks_toolset, ToolDyn};
@@ -88,6 +88,10 @@ impl DelegationHandler for DatabricksHandler {
         &self.tools
     }
 
+    fn sandbox_mut(&mut self) -> &mut Box<dyn SandboxDyn> {
+        &mut self.sandbox
+    }
+
     async fn execute_tool_by_name(
         &mut self,
         tool_name: &str,
@@ -103,12 +107,17 @@ impl DelegationHandler for DatabricksHandler {
 
     fn handle(
         &self,
-        catalog: &str,
+        context: DelegationContext,
         prompt_arg: &str,
         model: &str,
         parent_aggregate_id: &str,
         parent_tool_id: &str
-    ) -> Result<(String, Event, Event)> {
+    ) -> Result<DelegationResult> {
+        let catalog = match context {
+            DelegationContext::Databricks { catalog } => catalog,
+            _ => return Err(eyre::eyre!("Invalid context for databricks handler")),
+        };
+
         let task_thread_id = format!("databricks_{}", Uuid::new_v4());
         let prompt = format!("Explore catalog '{}': {}", catalog, prompt_arg);
 
@@ -136,7 +145,11 @@ impl DelegationHandler for DatabricksHandler {
             }),
         ));
 
-        Ok((task_thread_id, config_event, user_event))
+        Ok(DelegationResult {
+            task_thread_id,
+            config_event,
+            user_event,
+        })
     }
 
     fn format_result(&self, summary: &str) -> String {

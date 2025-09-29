@@ -1,4 +1,4 @@
-use super::{DelegationHandler, FinishDelegationTool};
+use super::{DelegationHandler, DelegationContext, DelegationResult, FinishDelegationTool};
 use async_trait::async_trait;
 use crate::event::{Event, ParentAggregate};
 use crate::toolbox::ToolDyn;
@@ -104,6 +104,10 @@ impl DelegationHandler for CompactionHandler {
         &self.tools
     }
 
+    fn sandbox_mut(&mut self) -> &mut Box<dyn SandboxDyn> {
+        &mut self.sandbox
+    }
+
     async fn execute_tool_by_name(
         &mut self,
         tool_name: &str,
@@ -119,15 +123,20 @@ impl DelegationHandler for CompactionHandler {
 
     fn handle(
         &self,
-        _catalog: &str,  // Not used for compaction
+        context: DelegationContext,
         error_text: &str,
         model: &str,
         parent_aggregate_id: &str,
         parent_tool_id: &str
-    ) -> Result<(String, Event, Event)> {
+    ) -> Result<DelegationResult> {
+        let threshold = match context {
+            DelegationContext::Compaction { threshold } => threshold,
+            _ => return Err(eyre::eyre!("Invalid context for compaction handler")),
+        };
+
         let task_thread_id = format!("compact_{}", Uuid::new_v4());
         let prompt = format!("Compact this error message to under {} characters:\n\n{}",
-                           self.compaction_threshold, error_text);
+                           threshold, error_text);
 
         let tool_definitions: Vec<rig::completion::ToolDefinition> = self.tools
             .iter()
@@ -153,7 +162,11 @@ impl DelegationHandler for CompactionHandler {
             }),
         ));
 
-        Ok((task_thread_id, config_event, user_event))
+        Ok(DelegationResult {
+            task_thread_id,
+            config_event,
+            user_event,
+        })
     }
 
     fn format_result(&self, summary: &str) -> String {

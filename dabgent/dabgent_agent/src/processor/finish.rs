@@ -179,16 +179,8 @@ impl<E: EventStore, P: ArtifactPreparer> Processor<Event> for FinishProcessor<E,
                 }
             }
             Event::TaskCompleted { success: false, .. } => {
-                tracing::warn!("Task completed with failure, skipping export and shutting down");
-                let shutdown_event = Event::PipelineShutdown;
-                self.event_store
-                    .push_event(
-                        &event.stream_id,
-                        &event.aggregate_id,
-                        &shutdown_event,
-                        &Default::default(),
-                    )
-                    .await?;
+                tracing::info!("Task completed with failure, allowing pipeline to continue for retry");
+                // Don't shutdown - let the agent fix issues and retry
             }
             _ => {}
         }

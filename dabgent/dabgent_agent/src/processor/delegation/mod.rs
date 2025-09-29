@@ -13,6 +13,19 @@ use serde_json::json;
 pub mod databricks;
 pub mod compaction;
 
+#[derive(Debug, Clone)]
+pub enum DelegationContext {
+    Databricks { catalog: String },
+    Compaction { threshold: usize },
+}
+
+#[derive(Debug)]
+pub struct DelegationResult {
+    pub task_thread_id: String,
+    pub config_event: Event,
+    pub user_event: Event,
+}
+
 #[async_trait]
 pub trait DelegationHandler: Send + Sync {
     fn trigger_tool(&self) -> &str;
@@ -21,6 +34,7 @@ pub trait DelegationHandler: Send + Sync {
 
     // Handler owns its sandbox and tools
     fn tools(&self) -> &[Box<dyn ToolDyn>];
+    fn sandbox_mut(&mut self) -> &mut Box<dyn SandboxDyn>;
 
     // Execute a tool by name - this avoids borrowing conflicts
     async fn execute_tool_by_name(
@@ -40,12 +54,12 @@ pub trait DelegationHandler: Send + Sync {
 
     fn handle(
         &self,
-        catalog: &str,
+        context: DelegationContext,
         prompt: &str,
         model: &str,
         parent_aggregate_id: &str,
         parent_tool_id: &str
-    ) -> Result<(String, Event, Event)>;
+    ) -> Result<DelegationResult>;
     fn format_result(&self, summary: &str) -> String;
 }
 
@@ -126,33 +140,42 @@ impl<E: EventStore> DelegationProcessor<E> {
         for content in response.choice.iter() {
             if let rig::message::AssistantContent::ToolCall(call) = content {
                 if let Some(handler_idx) = self.handlers.iter().position(|h| h.trigger_tool() == call.function.name) {
-                    // Extract catalog and prompt from arguments
-                    let catalog = call.function.arguments
-                        .get("catalog")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("main");
-
                     let prompt = call.function.arguments
                         .get("prompt")
                         .and_then(|v| v.as_str())
                         .unwrap_or("");
 
+                    // Create appropriate context based on handler type
+                    let context = if self.handlers[handler_idx].trigger_tool() == "explore_databricks_catalog" {
+                        let catalog = call.function.arguments
+                            .get("catalog")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("main");
+                        DelegationContext::Databricks { catalog: catalog.to_string() }
+                    } else if self.handlers[handler_idx].trigger_tool() == "compact_error" {
+                        // For compaction, we'll need to pass the threshold from somewhere
+                        // For now, using a default - this should ideally come from handler state
+                        DelegationContext::Compaction { threshold: 1000 }
+                    } else {
+                        return Err(eyre::eyre!("Unknown handler type for trigger: {}", call.function.name));
+                    };
+
                     // Create delegation using handler
-                    let (task_thread_id, config_event, user_event) = self.handlers[handler_idx]
-                        .handle(catalog, prompt, &self.default_model, &event.aggregate_id, &call.id)?;
+                    let result = self.handlers[handler_idx]
+                        .handle(context, prompt, &self.default_model, &event.aggregate_id, &call.id)?;
 
                     // Push events to start delegation
                     self.event_store.push_event(
                         &event.stream_id,
-                        &task_thread_id,
-                        &config_event,
+                        &result.task_thread_id,
+                        &result.config_event,
                         &Default::default()
                     ).await?;
 
                     self.event_store.push_event(
                         &event.stream_id,
-                        &task_thread_id,
-                        &user_event,
+                        &result.task_thread_id,
+                        &result.user_event,
                         &Default::default()
                     ).await?;
                 }
@@ -227,15 +250,23 @@ impl<E: EventStore> DelegationProcessor<E> {
                     });
 
                 if let Some(tool_call) = tool_call {
-                    // Extract arguments from the tool call
-                    let catalog = tool_call.function.arguments.get("catalog")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("main"); // Default to "main" if not provided
                     let prompt_arg = tool_call.function.arguments.get("prompt")
                         .and_then(|v| v.as_str())
                         .unwrap_or("Explore the catalog for relevant data");
 
-                    self.handle_delegation_by_index(event, handler_idx, catalog, prompt_arg, &parent_tool_id).await?;
+                    // Create appropriate context based on handler type
+                    let context = if self.handlers[handler_idx].trigger_tool() == "explore_databricks_catalog" {
+                        let catalog = tool_call.function.arguments.get("catalog")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("main");
+                        DelegationContext::Databricks { catalog: catalog.to_string() }
+                    } else if self.handlers[handler_idx].trigger_tool() == "compact_error" {
+                        DelegationContext::Compaction { threshold: 1000 }
+                    } else {
+                        return Err(eyre::eyre!("Unknown handler type for delegation"));
+                    };
+
+                    self.handle_delegation_by_index(event, handler_idx, context, prompt_arg, &parent_tool_id).await?;
                 } else {
                     return Err(eyre::eyre!(
                         "Could not find original tool call with id '{}' for delegation",
@@ -260,20 +291,29 @@ impl<E: EventStore> DelegationProcessor<E> {
             .position(|h| h.worker_name() == agent_type)
             .ok_or_else(|| eyre::eyre!("No handler found for agent_type '{}'", agent_type))?;
 
+        // Create appropriate context based on handler type
+        let context = if self.handlers[handler_idx].trigger_tool() == "explore_databricks_catalog" {
+            DelegationContext::Databricks { catalog: "main".to_string() }
+        } else if self.handlers[handler_idx].trigger_tool() == "compact_error" {
+            DelegationContext::Compaction { threshold: 1000 }
+        } else {
+            return Err(eyre::eyre!("Unknown handler type for worker: {}", agent_type));
+        };
+
         // Delegate work to the appropriate handler
-        self.handle_delegation_by_index(event, handler_idx, "", prompt, parent_tool_id).await
+        self.handle_delegation_by_index(event, handler_idx, context, prompt, parent_tool_id).await
     }
 
     async fn handle_delegation_by_index(
         &mut self,
         event: &EventDb<Event>,
         handler_idx: usize,
-        catalog: &str,
+        context: DelegationContext,
         prompt_arg: &str,
         parent_tool_id: &str,
     ) -> eyre::Result<()> {
-        let (task_thread_id, config_event, user_event) = self.handlers[handler_idx].handle(
-            catalog,
+        let result = self.handlers[handler_idx].handle(
+            context,
             prompt_arg,
             &self.default_model,
             &event.aggregate_id,
@@ -284,8 +324,8 @@ impl<E: EventStore> DelegationProcessor<E> {
         self.event_store
             .push_event(
                 &event.stream_id,
-                &task_thread_id,
-                &config_event,
+                &result.task_thread_id,
+                &result.config_event,
                 &Default::default(),
             )
             .await?;
@@ -294,8 +334,8 @@ impl<E: EventStore> DelegationProcessor<E> {
         self.event_store
             .push_event(
                 &event.stream_id,
-                &task_thread_id,
-                &user_event,
+                &result.task_thread_id,
+                &result.user_event,
                 &Default::default(),
             )
             .await?;
