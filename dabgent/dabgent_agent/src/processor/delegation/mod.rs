@@ -58,6 +58,9 @@ pub trait DelegationHandler: Send + Sync {
     // Create completion result for returning to parent thread
     fn create_completion_result(&self, summary: &str, parent_tool_id: &str) -> TypedToolResult;
 
+    // Determine if this handler should handle a specific tool result
+    fn should_handle(&self, result: &TypedToolResult) -> bool;
+
     fn handle(
         &self,
         context: DelegationContext,
@@ -183,10 +186,9 @@ impl<E: EventStore> DelegationProcessor<E> {
     }
 
     fn is_delegation_tool_result(&self, tool_results: &[crate::event::TypedToolResult]) -> bool {
-        // Check for explicit delegation tool results only
+        // Check if any handler should handle any of the tool results
         tool_results.iter().any(|result| {
-            matches!(&result.tool_name,
-                crate::event::ToolKind::ExploreDatabricksCatalog | crate::event::ToolKind::CompactError)
+            self.handlers.iter().any(|handler| handler.should_handle(result))
         })
     }
 
@@ -197,25 +199,14 @@ impl<E: EventStore> DelegationProcessor<E> {
         event: &EventDb<Event>,
         tool_results: &[crate::event::TypedToolResult],
     ) -> eyre::Result<()> {
-        // Handle explicit delegation tool results
-        let delegation_result = tool_results.iter().find(|result| {
-            matches!(&result.tool_name,
-                crate::event::ToolKind::ExploreDatabricksCatalog | crate::event::ToolKind::CompactError)
-        });
-
-        if let Some(delegation_result) = delegation_result {
-            let parent_tool_id = delegation_result.result.id.clone();
-
-            // Find matching handler index based on ToolKind
-            let handler_idx = match &delegation_result.tool_name {
-                crate::event::ToolKind::ExploreDatabricksCatalog =>
-                    self.handlers.iter().position(|h| h.trigger_tool() == "explore_databricks_catalog"),
-                crate::event::ToolKind::CompactError =>
-                    self.handlers.iter().position(|h| h.trigger_tool() == "compact_error"),
-                _ => None,
-            };
+        // Find a tool result that a handler can handle
+        for delegation_result in tool_results.iter() {
+            // Find matching handler using should_handle
+            let handler_idx = self.handlers.iter()
+                .position(|h| h.should_handle(delegation_result));
 
             if let Some(handler_idx) = handler_idx {
+                let parent_tool_id = delegation_result.result.id.clone();
                 // Load events to find the original tool call with arguments
                 let query = Query::stream(&event.stream_id).aggregate(&event.aggregate_id);
                 let events = self.event_store.load_events::<Event>(&query, None).await?;

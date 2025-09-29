@@ -1,6 +1,6 @@
 use super::{DelegationHandler, DelegationContext, DelegationResult, FinishDelegationTool};
 use async_trait::async_trait;
-use crate::event::{Event, ParentAggregate};
+use crate::event::{Event, ParentAggregate, TypedToolResult, ToolKind};
 use crate::toolbox::ToolDyn;
 use dabgent_sandbox::{SandboxDyn, NoOpSandbox, Sandbox};
 use eyre::Result;
@@ -193,6 +193,25 @@ impl DelegationHandler for CompactionHandler {
 
     fn format_result(&self, summary: &str) -> String {
         summary.to_string()
+    }
+
+    fn should_handle(&self, result: &TypedToolResult) -> bool {
+        match &result.tool_name {
+            // Handle explicit compact_error calls
+            ToolKind::CompactError => true,
+            // Handle large Done results
+            ToolKind::Done => {
+                // Extract text from tool result to check size
+                let total_size: usize = result.result.content.iter()
+                    .map(|content| match content {
+                        rig::message::ToolResultContent::Text(t) => t.text.len(),
+                        _ => 0,
+                    })
+                    .sum();
+                total_size > self.compaction_threshold
+            }
+            _ => false,
+        }
     }
 }
 

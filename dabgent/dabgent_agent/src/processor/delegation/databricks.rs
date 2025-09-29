@@ -1,6 +1,6 @@
 use super::{DelegationHandler, DelegationContext, DelegationResult};
 use async_trait::async_trait;
-use crate::event::{Event, ParentAggregate};
+use crate::event::{Event, ParentAggregate, TypedToolResult, ToolKind};
 use crate::toolbox::{databricks::databricks_toolset, ToolDyn};
 use dabgent_sandbox::{SandboxDyn, NoOpSandbox, Sandbox};
 use eyre::Result;
@@ -183,6 +183,10 @@ impl DelegationHandler for DatabricksHandler {
             "## Databricks Exploration Results\n\n{}\n\n*This data was discovered from your Databricks catalog and can be used to build your DataApp API.*",
             summary
         )
+    }
+
+    fn should_handle(&self, result: &TypedToolResult) -> bool {
+        matches!(result.tool_name, ToolKind::ExploreDatabricksCatalog)
     }
 }
 
