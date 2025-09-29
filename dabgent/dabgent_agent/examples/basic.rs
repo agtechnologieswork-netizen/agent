@@ -1,4 +1,5 @@
-use dabgent_agent::processor::{Pipeline, Processor, ThreadProcessor, ToolProcessor};
+use dabgent_agent::event::Event;
+use dabgent_agent::pipeline::PipelineBuilder;
 use dabgent_agent::toolbox::{self, basic::toolset};
 use dabgent_mq::{EventStore, db::sqlite::SqliteStore};
 use dabgent_sandbox::dagger::{ConnectOpts, Sandbox as DaggerSandbox};
@@ -7,6 +8,7 @@ use eyre::Result;
 use rig::client::ProviderClient;
 
 const MODEL: &str = "claude-sonnet-4-20250514";
+const AGGREGATE_ID: &str = "thread";
 
 const SYSTEM_PROMPT: &str = "
 You are a python software engineer.
@@ -23,32 +25,48 @@ async fn main() {
     let prompt = "minimal script that fetches my ip using some api like ipify.org";
 
     let store = store().await;
-    push_prompt(&store, STREAM_ID, "", prompt).await.unwrap();
-    pipeline_fn(STREAM_ID, store).await.unwrap();
+    push_prompt(&store, STREAM_ID, AGGREGATE_ID, prompt)
+        .await
+        .unwrap();
+    pipeline_fn(STREAM_ID, AGGREGATE_ID, store)
+        .await
+        .unwrap();
 }
 
-pub async fn pipeline_fn(stream_id: &str, store: impl EventStore) -> Result<()> {
+pub async fn pipeline_fn(
+    stream_id: &str,
+    aggregate_id: &str,
+    store: impl EventStore,
+) -> Result<()> {
     let stream_id = stream_id.to_owned();
-    let opts = ConnectOpts::default();
-    opts.connect(|client| async move {
-        let llm = rig::providers::anthropic::Client::from_env();
-        let sandbox = sandbox(&client).await?;
-        let tools = toolset(Validator);
+    let aggregate_id = aggregate_id.to_owned();
+    ConnectOpts::default()
+        .connect(move |client| {
+            let stream_id = stream_id.clone();
+            let aggregate_id = aggregate_id.clone();
+            let store = store.clone();
+            let llm = rig::providers::anthropic::Client::from_env();
 
-        let thread_processor = ThreadProcessor::new(
-            llm.clone(),
-            store.clone(),
-        );
-        let tool_processor = ToolProcessor::new(sandbox.boxed(), store.clone(), tools, None);
-        let pipeline = Pipeline::new(
-            store.clone(),
-            vec![thread_processor.boxed(), tool_processor.boxed()],
-        );
-        pipeline.run(stream_id.clone()).await?;
-        Ok(())
-    })
-    .await
-    .map_err(Into::into)
+            async move {
+                let sandbox = sandbox(&client).await?;
+                let tools = toolset(Validator);
+                PipelineBuilder::new()
+                    .llm(llm)
+                    .store(store.clone())
+                    .sandbox(sandbox.boxed())
+                    .model(MODEL.to_owned())
+                    .preamble(SYSTEM_PROMPT.to_owned())
+                    .temperature(0.0)
+                    .max_tokens(4_096)
+                    .tools(tools)
+                    .build()?
+                    .run(stream_id.clone(), aggregate_id.clone())
+                    .await?;
+                Ok(())
+            }
+        })
+        .await
+        .map_err(Into::into)
 }
 
 async fn sandbox(client: &dagger_sdk::DaggerConn) -> Result<DaggerSandbox> {
@@ -78,8 +96,10 @@ async fn push_prompt<S: EventStore>(
     aggregate_id: &str,
     prompt: &str,
 ) -> Result<()> {
-    let user_content = rig::message::UserContent::Text(rig::message::Text { text: prompt.to_owned() });
-    let event = dabgent_agent::event::Event::UserMessage(rig::OneOrMany::one(user_content));
+    let user_content = rig::message::UserContent::Text(rig::message::Text {
+        text: prompt.to_owned(),
+    });
+    let event = Event::UserMessage(rig::OneOrMany::one(user_content));
     store
         .push_event(stream_id, aggregate_id, &event, &Default::default())
         .await
