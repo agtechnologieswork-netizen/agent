@@ -10,7 +10,7 @@ pub struct DoneToolArgs {
 
 #[derive(Serialize, Deserialize)]
 pub struct FinishDelegationArgs {
-    pub summary: String,
+    pub result: String,
 }
 
 #[derive(Clone)]
@@ -32,14 +32,18 @@ impl Tool for FinishDelegationTool {
             parameters: serde_json::json!({
                 "type": "object",
                 "properties": {
-                    "summary": {
+                    "result": {
                         "type": "string",
                         "description": "Comprehensive summary of delegated work results"
                     }
                 },
-                "required": ["summary"]
+                "required": ["result"]
             }),
         }
+    }
+
+    fn is_terminal(&self) -> bool {
+        true
     }
 
     async fn call(
@@ -47,8 +51,8 @@ impl Tool for FinishDelegationTool {
         args: Self::Args,
         _sandbox: &mut Box<dyn SandboxDyn>,
     ) -> eyre::Result<eyre::Result<Self::Output, Self::Error>> {
-        // This tool just returns the summary - the actual event emission will be handled by ToolProcessor
-        Ok(Ok(args.summary))
+        // This tool just returns the result - the actual event emission will be handled by ToolProcessor
+        Ok(Ok(args.result))
     }
 }
 

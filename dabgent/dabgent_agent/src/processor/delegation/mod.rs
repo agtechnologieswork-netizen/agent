@@ -436,30 +436,41 @@ impl<E: EventStore> DelegationProcessor<E> {
                         }
                     }
                 } else {
-                    // For other delegations, send formatted UserMessage text
-                    let result_content = handler.format_result(summary);
+                    // For other delegations, send ToolResult to match the original tool_use
+                    if let Some(tool_id) = &parent.tool_id {
+                        let result_content = handler.format_result(summary);
 
-                    let user_content = rig::OneOrMany::one(rig::message::UserContent::Text(
-                        rig::message::Text {
-                            text: result_content,
+                        let delegation_tool_result = vec![TypedToolResult {
+                            tool_name: ToolKind::Other(handler.trigger_tool().to_string()),
+                            result: rig::message::ToolResult {
+                                id: tool_id.clone(),
+                                call_id: None,
+                                content: rig::OneOrMany::one(rig::message::ToolResultContent::Text(
+                                    rig::message::Text { text: result_content }
+                                )),
+                            },
+                        }];
+
+                        // Convert ToolResult to UserMessage for thread processing
+                        let tools = delegation_tool_result.iter().map(|t| rig::message::UserContent::ToolResult(t.result.clone()));
+                        let user_content = rig::OneOrMany::many(tools)?;
+
+                        // Load original thread state and process
+                        let original_query = Query::stream(&event.stream_id).aggregate(&parent.aggregate_id);
+                        let events = self.event_store.load_events::<Event>(&original_query, None).await?;
+                        let mut thread = thread::Thread::fold(&events);
+                        let new_events = thread.process(thread::Command::User(user_content))?;
+
+                        for new_event in new_events.iter() {
+                            self.event_store
+                                .push_event(
+                                    &event.stream_id,
+                                    &parent.aggregate_id,
+                                    new_event,
+                                    &Default::default(),
+                                )
+                                .await?;
                         }
-                    ));
-
-                    // Load original thread state and process
-                    let original_query = Query::stream(&event.stream_id).aggregate(&parent.aggregate_id);
-                    let events = self.event_store.load_events::<Event>(&original_query, None).await?;
-                    let mut thread = thread::Thread::fold(&events);
-                    let new_events = thread.process(thread::Command::User(user_content))?;
-
-                    for new_event in new_events.iter() {
-                        self.event_store
-                            .push_event(
-                                &event.stream_id,
-                                &parent.aggregate_id,
-                                new_event,
-                                &Default::default(),
-                            )
-                            .await?;
                     }
                 }
             }

@@ -1,9 +1,9 @@
-use dabgent_agent::processor::{CompactProcessor, DelegationProcessor, FinishProcessor, Pipeline, Processor, ThreadProcessor, ToolProcessor};
+use dabgent_agent::processor::{DelegationProcessor, FinishProcessor, Pipeline, Processor, ThreadProcessor, ToolProcessor};
 use dabgent_agent::toolbox::ToolDyn;
 use dabgent_fastapi::{toolset::dataapps_toolset, validator::DataAppsValidator, artifact_preparer::DataAppsArtifactPreparer};
 use dabgent_fastapi::templates::{EMBEDDED_TEMPLATES, DEFAULT_TEMPLATE_PATH};
 use dabgent_mq::{EventStore, create_store, StoreConfig};
-use dabgent_sandbox::{Sandbox, NoOpSandbox, dagger::{ConnectOpts, Sandbox as DaggerSandbox}};
+use dabgent_sandbox::{Sandbox, dagger::{ConnectOpts, Sandbox as DaggerSandbox}};
 use eyre::Result;
 use rig::client::ProviderClient;
 
@@ -20,7 +20,7 @@ async fn main() {
 
     let opts = ConnectOpts::default();
     opts.connect(|client| async move {
-        let llm = rig::providers::gemini::Client::from_env();
+        let claude_llm = rig::providers::anthropic::Client::from_env();
         let store = create_store(Some(StoreConfig::from_env())).await?;
         tracing::info!("Event store initialized successfully");
         let sandbox = create_sandbox(&client).await?;
@@ -39,9 +39,9 @@ async fn main() {
         push_seed_sandbox(&store, STREAM_ID, AGGREGATE_ID, template_path, "/app").await?;
         push_prompt(&store, STREAM_ID, AGGREGATE_ID, USER_PROMPT).await?;
 
-        tracing::info!("Starting DataApps pipeline with model: {}", MODEL);
+        tracing::info!("Starting DataApps pipeline with main model: {} and delegation model: {}", MAIN_MODEL, DELEGATION_MODEL);
 
-        let thread_processor = ThreadProcessor::new(llm.clone(), store.clone());
+        let thread_processor = ThreadProcessor::new(claude_llm.clone(), store.clone());
 
         // Create export directory path with timestamp
         let timestamp = std::time::SystemTime::now()
@@ -56,7 +56,7 @@ async fn main() {
 
         let delegation_processor = DelegationProcessor::new(
             store.clone(),
-            "gemini-flash-latest".to_string(),
+            DELEGATION_MODEL.to_string(),
             vec![
                 Box::new(dabgent_agent::processor::delegation::databricks::DatabricksHandler::new()?),
                 Box::new(dabgent_agent::processor::delegation::compaction::CompactionHandler::new(2048)?),
@@ -134,18 +134,18 @@ Use the tools available to you as needed.
 ";
 
 const USER_PROMPT: &str = "
-Create a bakery business DataApp by:
+Create a data app to show the core sales data for a bakery.
 
-1. First, explore the Databricks catalog to discover available bakery data tables
-2. Based on what you find, create backend API endpoints that serve the real data
+1. First, explore the Databricks catalog to discover where bakery sales data is stored, i assume it is under `samples` but you need to confirm;
+2. Based on what you find, create backend API endpoints with some sample data from those tables (real integration will be added later);
 3. Build React Admin frontend that displays the discovered data in tables
-4. Include debug logging in both backend and frontend
-5. Make sure the React Admin data provider can fetch and display the data properly
 
 Focus on creating a functional DataApp that showcases real bakery business data from Databricks.
 ";
 
-const MODEL: &str = "gemini-flash-latest";
+
+const MAIN_MODEL: &str = "claude-sonnet-4-20250514";
+const DELEGATION_MODEL: &str = "claude-sonnet-4-20250514";
 
 async fn create_sandbox(client: &dagger_sdk::DaggerConn) -> Result<DaggerSandbox> {
     tracing::info!("Setting up sandbox with DataApps template...");
@@ -180,7 +180,7 @@ async fn push_llm_config<S: EventStore>(
         .collect();
 
     let event = dabgent_agent::event::Event::LLMConfig {
-        model: MODEL.to_owned(),
+        model: MAIN_MODEL.to_owned(),
         temperature: 0.0,
         max_tokens: 8192,
         preamble: Some(SYSTEM_PROMPT.to_owned()),

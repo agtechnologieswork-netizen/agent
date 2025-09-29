@@ -220,7 +220,14 @@ impl<E: EventStore> ToolProcessor<E> {
                         tool_result
                     }
                     None => {
-                        let error = format!("{} not found", call.function.name);
+                        let available_tools: Vec<String> = self.tools.iter()
+                            .map(|tool| tool.name())
+                            .collect();
+                        let error = format!(
+                            "Tool '{}' does not exist. Available tools: [{}]",
+                            call.function.name,
+                            available_tools.join(", ")
+                        );
                         Err(serde_json::json!(error))
                     }
                 };
