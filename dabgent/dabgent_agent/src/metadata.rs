@@ -2,15 +2,14 @@ use dabgent_mq::Metadata;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct WorkerContext {
-    pub worker_id: String,
-    pub thread_id: String,
-    pub sandbox_id: String,
+pub enum AgentExtra {
+    Worker { aggregate_id: String },
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum AgentExtra {
-    Worker(WorkerContext),
+impl AgentExtra {
+    pub fn new_worker(aggregate_id: String) -> Self {
+        Self::Worker { aggregate_id }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -39,8 +38,8 @@ impl AgentMetadata {
         self
     }
 
-    pub fn with_worker_context(mut self, context: WorkerContext) -> Self {
-        self.extra = Some(AgentExtra::Worker(context));
+    pub fn with_extra(mut self, extra: AgentExtra) -> Self {
+        self.extra = Some(extra);
         self
     }
 }
@@ -50,15 +49,15 @@ impl From<AgentMetadata> for Metadata {
         Metadata {
             correlation_id: meta.correlation_id,
             causation_id: meta.causation_id,
-            extra: meta.extra.and_then(|e| serde_json::to_value(e).ok()),
+            extra: meta.extra.map(|e| serde_json::to_value(e).unwrap()),
         }
     }
 }
 
-impl TryFrom<Metadata> for AgentMetadata {
+impl TryFrom<&Metadata> for AgentMetadata {
     type Error = eyre::Error;
 
-    fn try_from(metadata: Metadata) -> Result<Self, Self::Error> {
+    fn try_from(metadata: &Metadata) -> Result<Self, Self::Error> {
         let extra = metadata
             .extra
             .as_ref()

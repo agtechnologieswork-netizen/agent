@@ -9,7 +9,7 @@ use tokio::sync::Mutex;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Command {
-    RequestTools(Vec<ToolCall>),
+    QueueTools(Vec<ToolCall>),
     Execute,
 }
 
@@ -88,7 +88,7 @@ impl Aggregate for Sandbox {
         services: &Self::Services,
     ) -> Result<Vec<Self::Event>, Self::Error> {
         match cmd {
-            Command::RequestTools(calls) => Ok(vec![Event::ToolsRequested(calls)]),
+            Command::QueueTools(calls) => Ok(vec![Event::ToolsRequested(calls)]),
             Command::Execute => {
                 if self.pending_calls.is_empty() {
                     return Err(Error::NoToolsRequested);
@@ -111,8 +111,6 @@ impl Aggregate for Sandbox {
 
                     results.push(call.to_result(output));
                 }
-
-                // Only update sandbox if all tools executed successfully
                 services.set_sandbox(sandbox).await;
 
                 Ok(vec![Event::ToolsExecuted(results)])
@@ -123,7 +121,7 @@ impl Aggregate for Sandbox {
     fn apply(&mut self, event: Self::Event) {
         match event {
             Event::ToolsRequested(calls) => {
-                self.pending_calls = calls;
+                self.pending_calls.extend(calls);
             }
             Event::ToolsExecuted(_) => {
                 self.pending_calls.clear();
