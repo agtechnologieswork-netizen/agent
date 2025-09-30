@@ -100,11 +100,9 @@ The new Rust-based agent is being built from the ground up with:
 - **Type safety and performance** leveraging Rust's strengths
 - **Early stage** - under active development
 
-See `./dabgent/dabgent_mq/README.md` for the event sourcing library documentation.
-
 ## Contributing
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup and contribution guidelines.
+See [LOCAL_SETUP.md](LOCAL_SETUP.md) for development setup.
 
 ## Citation
 
