@@ -163,7 +163,7 @@ impl Thread {
             return Err(Error::Uninitialized);
         }
         match self.messages.last() {
-            Some(rig::completion::Message::Assistant { .. }) => {}
+            None | Some(rig::completion::Message::Assistant { .. }) => {}
             _ => return Err(Error::WrongTurn),
         }
         Ok(vec![Event::UserMessage(content.clone())])
@@ -174,11 +174,21 @@ pub struct CompletionCallback<ES: EventStore> {
     handler: Handler<Thread, ES>,
 }
 
+impl<ES: EventStore> CompletionCallback<ES> {
+    pub fn new(handler: Handler<Thread, ES>) -> Self {
+        Self { handler }
+    }
+}
+
 impl<ES: EventStore> Callback<Thread> for CompletionCallback<ES> {
-    async fn process(&mut self, event: &Envelope<Thread>) -> Result<()> {
-        if matches!(event.data, Event::UserMessage(..)) {
+    async fn process(&mut self, envelope: &Envelope<Thread>) -> Result<()> {
+        if matches!(envelope.data, Event::UserMessage(..)) {
             self.handler
-                .execute(&event.aggregate_id, Command::Completion)
+                .execute_with_metadata(
+                    &envelope.aggregate_id,
+                    Command::Completion,
+                    envelope.metadata.clone(),
+                )
                 .await?;
         }
         Ok(())

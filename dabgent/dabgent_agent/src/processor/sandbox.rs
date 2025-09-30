@@ -141,10 +141,14 @@ impl<ES: EventStore> ExecutionCallback<ES> {
 }
 
 impl<ES: EventStore> Callback<Sandbox> for ExecutionCallback<ES> {
-    async fn process(&mut self, event: &Envelope<Sandbox>) -> Result<()> {
-        if matches!(event.data, Event::ToolsRequested(..)) {
+    async fn process(&mut self, envelope: &Envelope<Sandbox>) -> Result<()> {
+        if matches!(envelope.data, Event::ToolsRequested(..)) {
             self.handler
-                .execute(&event.aggregate_id, Command::Execute)
+                .execute_with_metadata(
+                    &envelope.aggregate_id,
+                    Command::Execute,
+                    envelope.metadata.clone(),
+                )
                 .await?;
         }
         Ok(())

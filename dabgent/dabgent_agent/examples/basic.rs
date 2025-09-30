@@ -1,10 +1,12 @@
-use dabgent_agent::processor::{Pipeline, Processor, ThreadProcessor, ToolProcessor};
+use dabgent_agent::processor::builder::{self, ThreadConfig};
 use dabgent_agent::toolbox::{self, basic::toolset};
-use dabgent_mq::{EventStore, db::sqlite::SqliteStore};
+use dabgent_mq::db::sqlite::SqliteStore;
+use dabgent_mq::listener::PollingQueue;
 use dabgent_sandbox::dagger::{ConnectOpts, Sandbox as DaggerSandbox};
 use dabgent_sandbox::{Sandbox, SandboxDyn};
 use eyre::Result;
 use rig::client::ProviderClient;
+use std::sync::Arc;
 
 const MODEL: &str = "claude-sonnet-4-20250514";
 
@@ -19,32 +21,47 @@ Program will be run using uv run main.py command.
 async fn main() {
     tracing_subscriber::fmt::init();
 
-    const STREAM_ID: &str = "pipeline";
     let prompt = "minimal script that fetches my ip using some api like ipify.org";
 
     let store = store().await;
-    push_prompt(&store, STREAM_ID, "", prompt).await.unwrap();
-    pipeline_fn(STREAM_ID, store).await.unwrap();
+    run_worker(store, prompt).await.unwrap();
 }
 
-pub async fn pipeline_fn(stream_id: &str, store: impl EventStore) -> Result<()> {
-    let stream_id = stream_id.to_owned();
+pub async fn run_worker(store: SqliteStore, prompt: &str) -> Result<()> {
+    let prompt = prompt.to_string();
     let opts = ConnectOpts::default();
-    opts.connect(|client| async move {
-        let llm = rig::providers::anthropic::Client::from_env();
+    opts.connect(move |client| async move {
+        tracing::info!("initializing infrastructure");
+        let llm = Arc::new(rig::providers::anthropic::Client::from_env());
         let sandbox = sandbox(&client).await?;
+        tracing::info!("infrastructure initialized");
         let tools = toolset(Validator);
+        let definitions = tools.iter().map(|tool| tool.definition()).collect();
 
-        let thread_processor = ThreadProcessor::new(
-            llm.clone(),
-            store.clone(),
+        let (worker_handler, thread_handler, sandbox_handler) =
+            builder::create_handlers(store.clone(), llm, sandbox.boxed(), tools);
+
+        let queue = PollingQueue::new(store);
+        let mut listeners = builder::spawn_listeners(
+            worker_handler.clone(),
+            thread_handler.clone(),
+            sandbox_handler,
+            queue,
         );
-        let tool_processor = ToolProcessor::new(sandbox.boxed(), store.clone(), tools, None);
-        let pipeline = Pipeline::new(
-            store.clone(),
-            vec![thread_processor.boxed(), tool_processor.boxed()],
-        );
-        pipeline.run(stream_id.clone()).await?;
+
+        let config = ThreadConfig {
+            model: MODEL.to_string(),
+            preamble: Some(SYSTEM_PROMPT.to_string()),
+            tools: Some(definitions),
+            ..Default::default()
+        };
+
+        builder::start_worker(&worker_handler, &thread_handler, config, prompt).await?;
+
+        while let Some(result) = listeners.join_next().await {
+            result??;
+        }
+
         Ok(())
     })
     .await
@@ -67,23 +84,9 @@ async fn store() -> SqliteStore {
     let pool = sqlx::SqlitePool::connect(":memory:")
         .await
         .expect("Failed to create in-memory SQLite pool");
-    let store = SqliteStore::new(pool);
+    let store = SqliteStore::new(pool, "agent");
     store.migrate().await;
     store
-}
-
-async fn push_prompt<S: EventStore>(
-    store: &S,
-    stream_id: &str,
-    aggregate_id: &str,
-    prompt: &str,
-) -> Result<()> {
-    let user_content = rig::message::UserContent::Text(rig::message::Text { text: prompt.to_owned() });
-    let event = dabgent_agent::event::Event::UserMessage(rig::OneOrMany::one(user_content));
-    store
-        .push_event(stream_id, aggregate_id, &event, &Default::default())
-        .await
-        .map_err(Into::into)
 }
 
 pub struct Validator;
