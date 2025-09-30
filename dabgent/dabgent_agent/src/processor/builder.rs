@@ -132,14 +132,10 @@ pub fn create_handlers<ES: EventStore>(
     llm: Arc<dyn LLMClientDyn>,
     sandbox_handle: SandboxHandle,
     tools: Vec<Box<dyn ToolDyn>>,
-) -> (
-    Handler<Worker, ES>,
-    Handler<Thread, ES>,
-    SandboxHandler<ES>,
-) {
+) -> (Handler<Worker, ES>, Handler<Thread, ES>, SandboxHandler<ES>) {
     let worker_handler = Handler::<Worker, ES>::new(event_store.clone(), ());
     let thread_handler = Handler::<Thread, ES>::new(event_store.clone(), llm);
-    let sandbox_services = Arc::new(SandboxServices::new(sandbox_handle, tools));
+    let sandbox_services = SandboxServices::new(sandbox_handle, tools);
     let sandbox_handler = SandboxHandler::new(event_store, sandbox_services);
 
     (worker_handler, thread_handler, sandbox_handler)

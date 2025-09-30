@@ -52,55 +52,6 @@ pub enum Error {
     InternalError(String),
 }
 
-pub struct SandboxServices {
-    handle: SandboxHandle,
-    pub tools: Vec<Box<dyn ToolDyn>>,
-}
-
-impl SandboxServices {
-    pub fn new(handle: SandboxHandle, tools: Vec<Box<dyn ToolDyn>>) -> Self {
-        Self { handle, tools }
-    }
-
-    fn with_id(&self, id: String) -> SandboxServicesWithId {
-        SandboxServicesWithId {
-            id,
-            handle: self.handle.clone(),
-            tools: &self.tools,
-        }
-    }
-}
-
-pub struct SandboxServicesWithId<'a> {
-    id: String,
-    handle: SandboxHandle,
-    tools: &'a [Box<dyn ToolDyn>],
-}
-
-impl<'a> SandboxServicesWithId<'a> {
-    async fn create_sandbox(&self, host_dir: &str, dockerfile: &str) -> Result<(), Error> {
-        self.handle
-            .create_from_directory(&self.id, host_dir, dockerfile)
-            .await
-            .map_err(|err| Error::InternalError(err.to_string()))
-    }
-
-    async fn get_sandbox(&self) -> Result<DaggerSandbox, Error> {
-        self.handle
-            .get(&self.id)
-            .await
-            .map_err(|err| Error::InternalError(err.to_string()))?
-            .ok_or(Error::NotInitialized)
-    }
-
-    async fn set_sandbox(&self, sandbox: DaggerSandbox) -> Result<(), Error> {
-        self.handle
-            .set(&self.id, sandbox)
-            .await
-            .map_err(|err| Error::InternalError(err.to_string()))
-    }
-}
-
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Sandbox {
     pub initialized: bool,
@@ -112,7 +63,7 @@ impl Aggregate for Sandbox {
     type Command = Command;
     type Event = Event;
     type Error = Error;
-    type Services = SandboxServicesWithId<'static>;
+    type Services = SandboxServicesWithId;
 
     async fn handle(
         &self,
@@ -143,7 +94,6 @@ impl Aggregate for Sandbox {
 
                 let mut results = Vec::new();
                 let mut sandbox = services.get_sandbox().await?;
-
                 for call in &self.pending_calls {
                     let tool = services
                         .tools
@@ -178,13 +128,14 @@ impl Aggregate for Sandbox {
     }
 }
 
+#[derive(Clone)]
 pub struct SandboxHandler<ES: EventStore> {
     store: ES,
-    services: Arc<SandboxServices>,
+    services: SandboxServices,
 }
 
 impl<ES: EventStore> SandboxHandler<ES> {
-    pub fn new(store: ES, services: Arc<SandboxServices>) -> Self {
+    pub fn new(store: ES, services: SandboxServices) -> Self {
         Self { store, services }
     }
 
@@ -200,28 +151,10 @@ impl<ES: EventStore> SandboxHandler<ES> {
         metadata: Metadata,
     ) -> eyre::Result<()> {
         let ctx = self.store.load_aggregate::<Sandbox>(aggregate_id).await?;
-
-        // Create services with the aggregate_id injected
-        let services_with_id = self.services.with_id(aggregate_id.to_string());
-
-        // Safety: We're converting the lifetime to 'static, which is safe because:
-        // 1. The tools Vec is stored in Arc and won't be dropped during handle execution
-        // 2. The handle() method doesn't store the services reference beyond its scope
-        let services_static: SandboxServicesWithId<'static> =
-            unsafe { std::mem::transmute(services_with_id) };
-
-        let events = ctx.aggregate.handle(cmd, &services_static).await?;
+        let services = self.services.with_id(aggregate_id.to_string());
+        let events = ctx.aggregate.handle(cmd, &services).await?;
         self.store.commit(events, metadata, ctx).await?;
         Ok(())
-    }
-}
-
-impl<ES: EventStore> Clone for SandboxHandler<ES> {
-    fn clone(&self) -> Self {
-        Self {
-            store: self.store.clone(),
-            services: self.services.clone(),
-        }
     }
 }
 
@@ -247,5 +180,58 @@ impl<ES: EventStore> Callback<Sandbox> for ExecutionCallback<ES> {
                 .await?;
         }
         Ok(())
+    }
+}
+
+#[derive(Clone)]
+pub struct SandboxServices {
+    handle: SandboxHandle,
+    tools: Arc<Vec<Box<dyn ToolDyn>>>,
+}
+
+impl SandboxServices {
+    pub fn new(handle: SandboxHandle, tools: Vec<Box<dyn ToolDyn>>) -> Self {
+        Self {
+            handle,
+            tools: Arc::new(tools),
+        }
+    }
+
+    fn with_id(&self, id: String) -> SandboxServicesWithId {
+        SandboxServicesWithId {
+            id,
+            handle: self.handle.clone(),
+            tools: self.tools.clone(),
+        }
+    }
+}
+
+pub struct SandboxServicesWithId {
+    id: String,
+    handle: SandboxHandle,
+    tools: Arc<Vec<Box<dyn ToolDyn>>>,
+}
+
+impl SandboxServicesWithId {
+    async fn create_sandbox(&self, host_dir: &str, dockerfile: &str) -> Result<(), Error> {
+        self.handle
+            .create_from_directory(&self.id, host_dir, dockerfile)
+            .await
+            .map_err(|err| Error::InternalError(err.to_string()))
+    }
+
+    async fn get_sandbox(&self) -> Result<DaggerSandbox, Error> {
+        self.handle
+            .get(&self.id)
+            .await
+            .map_err(|err| Error::InternalError(err.to_string()))?
+            .ok_or(Error::NotInitialized)
+    }
+
+    async fn set_sandbox(&self, sandbox: DaggerSandbox) -> Result<(), Error> {
+        self.handle
+            .set(&self.id, sandbox)
+            .await
+            .map_err(|err| Error::InternalError(err.to_string()))
     }
 }
