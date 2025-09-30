@@ -13,6 +13,7 @@ pub enum Command {
         dockerfile: String,
     },
     QueueTools(Vec<ToolCall>),
+    QueueToolsFiltered(Vec<ToolCall>),
     Execute,
 }
 
@@ -83,6 +84,16 @@ impl Aggregate for Sandbox {
                     return Err(Error::NotInitialized);
                 }
                 Ok(vec![Event::ToolsRequested(calls)])
+            }
+            Command::QueueToolsFiltered(calls) => {
+                if !self.initialized {
+                    return Err(Error::NotInitialized);
+                }
+                let calls = services.filter_calls(calls);
+                match calls.is_empty() {
+                    true => Ok(vec![]),
+                    false => Ok(vec![Event::ToolsRequested(calls)]),
+                }
             }
             Command::Execute => {
                 if !self.initialized {
@@ -233,5 +244,16 @@ impl SandboxServicesWithId {
             .set(&self.id, sandbox)
             .await
             .map_err(|err| Error::InternalError(err.to_string()))
+    }
+
+    fn filter_calls(&self, calls: Vec<ToolCall>) -> Vec<ToolCall> {
+        calls
+            .into_iter()
+            .filter(|call| {
+                self.tools
+                    .iter()
+                    .any(|tool| tool.name() == call.function.name)
+            })
+            .collect()
     }
 }

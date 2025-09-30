@@ -38,7 +38,7 @@ impl<ES: EventStore> Callback<Worker> for WorkerOrchestrator<ES> {
                 self.sandbox_handler
                     .execute_with_metadata(
                         sandbox_id,
-                        sandbox::Command::QueueTools(calls.clone()),
+                        sandbox::Command::QueueToolsFiltered(calls.clone()),
                         meta.clone().into(),
                     )
                     .await?;
