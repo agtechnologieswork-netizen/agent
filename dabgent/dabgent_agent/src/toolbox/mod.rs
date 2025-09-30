@@ -1,12 +1,12 @@
 pub mod basic;
-pub mod planning;
+//pub mod planning;
 pub mod databricks;
 use dabgent_sandbox::SandboxDyn;
 use eyre::Result;
 use serde::{Deserialize, Serialize};
 use std::future::Future;
-use std::pin::Pin;
 use std::marker::PhantomData;
+use std::pin::Pin;
 
 pub trait Tool: Send + Sync {
     type Args: for<'a> Deserialize<'a> + Serialize + Send + Sync;
@@ -14,7 +14,9 @@ pub trait Tool: Send + Sync {
     type Error: Serialize + Send + Sync;
     fn name(&self) -> String;
     fn definition(&self) -> rig::completion::ToolDefinition;
-    fn needs_replay(&self) -> bool { true }
+    fn needs_replay(&self) -> bool {
+        true
+    }
     fn call(
         &self,
         args: Self::Args,
@@ -233,4 +235,3 @@ impl<T: ClientTool<C>, C: Send + Sync> Tool for ClientToolAdapter<T, C> {
         self.inner.call(args).await
     }
 }
-

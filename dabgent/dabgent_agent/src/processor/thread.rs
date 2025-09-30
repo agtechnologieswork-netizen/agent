@@ -1,5 +1,5 @@
-use crate::Event;
-use crate::llm::{Completion, LLMClientDyn};
+use crate::llm::{Completion, CompletionResponse, LLMClientDyn};
+use dabgent_mq::Event as MQEvent;
 use dabgent_mq::{Aggregate, Callback, Envelope, EventStore, Handler};
 use eyre::Result;
 use rig::completion::ToolDefinition;
@@ -14,9 +14,37 @@ pub enum Command {
         max_tokens: u64,
         preamble: Option<String>,
         tools: Option<Vec<ToolDefinition>>,
-        recipient: Option<String>,
     },
+    User(rig::OneOrMany<rig::message::UserContent>),
     Completion,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum Event {
+    LLMConfig {
+        model: String,
+        temperature: f64,
+        max_tokens: u64,
+        preamble: Option<String>,
+        tools: Option<Vec<rig::completion::ToolDefinition>>,
+    },
+    AgentMessage(CompletionResponse),
+    UserMessage(rig::OneOrMany<rig::message::UserContent>),
+}
+
+impl MQEvent for Event {
+    fn event_version(&self) -> String {
+        "1.0".to_owned()
+    }
+
+    fn event_type(&self) -> String {
+        match self {
+            Event::LLMConfig { .. } => "llm_config",
+            Event::AgentMessage { .. } => "agent_message",
+            Event::UserMessage { .. } => "user_message",
+        }
+        .to_owned()
+    }
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -31,7 +59,6 @@ pub enum Error {
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Thread {
-    pub recipient: Option<String>,
     pub model: Option<String>,
     pub temperature: Option<f64>,
     pub max_tokens: Option<u64>,
@@ -59,16 +86,14 @@ impl Aggregate for Thread {
                 max_tokens,
                 preamble,
                 tools,
-                recipient,
             } => Ok(vec![Event::LLMConfig {
                 model,
                 temperature: temperature,
                 max_tokens: max_tokens,
                 preamble,
                 tools,
-                recipient,
-                parent: None,
             }]),
+            Command::User(content) => self.handle_user(&content).await,
             Command::Completion => self.handle_completion(services).await,
         }
     }
@@ -81,17 +106,14 @@ impl Aggregate for Thread {
                 max_tokens,
                 preamble,
                 tools,
-                recipient,
-                parent: _,
             } => {
                 self.model = Some(model);
                 self.temperature = Some(temperature);
                 self.max_tokens = Some(max_tokens);
                 self.preamble = preamble;
                 self.tools = tools;
-                self.recipient = recipient;
             }
-            Event::AgentMessage { response, .. } => {
+            Event::AgentMessage(response) => {
                 self.messages.push(response.message());
             }
             Event::UserMessage(content) => {
@@ -99,7 +121,6 @@ impl Aggregate for Thread {
                     content: content.clone(),
                 });
             }
-            _ => {}
         }
     }
 }
@@ -129,12 +150,23 @@ impl Thread {
             completion = completion.tools(tools.clone());
         }
         match llm.completion(completion).await {
-            Ok(response) => Ok(vec![Event::AgentMessage {
-                response,
-                recipient: self.recipient.clone(),
-            }]),
+            Ok(response) => Ok(vec![Event::AgentMessage(response)]),
             Err(_) => Err(Error::LLMCall),
         }
+    }
+
+    async fn handle_user(
+        &self,
+        content: &rig::OneOrMany<rig::message::UserContent>,
+    ) -> Result<Vec<Event>, Error> {
+        if self.model.is_none() || self.temperature.is_none() || self.max_tokens.is_none() {
+            return Err(Error::Uninitialized);
+        }
+        match self.messages.last() {
+            Some(rig::completion::Message::Assistant { .. }) => {}
+            _ => return Err(Error::WrongTurn),
+        }
+        Ok(vec![Event::UserMessage(content.clone())])
     }
 }
 
