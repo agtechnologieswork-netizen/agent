@@ -1,5 +1,7 @@
 # Project Guidelines
 
+> **⚠️ DEPRECATION NOTICE:** This document describes the Python implementation of app.build agent, which is no longer actively maintained. These guidelines are preserved for reference and for those who wish to fork the Python version. Active development has moved to the Rust implementation in `./dabgent/`.
+
 This file contains the core guidelines for working with code in this repository.
 AI assistants (Cursor, Claude, Devin, etc.) should refer to this file for context.
 
