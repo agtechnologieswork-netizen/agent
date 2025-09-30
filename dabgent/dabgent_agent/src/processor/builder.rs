@@ -1,5 +1,5 @@
 use crate::llm::LLMClientDyn;
-use crate::processor::sandbox::{ExecutionCallback, Sandbox, SandboxServices};
+use crate::processor::sandbox::{self, ExecutionCallback, SandboxHandler, SandboxServices};
 use crate::processor::thread::{self, CompletionCallback, Thread};
 use crate::processor::utils::LoggerCallback;
 use crate::processor::worker::{self, Worker};
@@ -7,7 +7,7 @@ use crate::processor::worker_callbacks::{SandboxWatcher, ThreadWatcher, WorkerOr
 use crate::toolbox::ToolDyn;
 use dabgent_mq::listener::PollingQueue;
 use dabgent_mq::{EventStore, Handler};
-use dabgent_sandbox::SandboxDyn;
+use dabgent_sandbox::SandboxHandle;
 use eyre::Result;
 use rig::completion::ToolDefinition;
 use std::sync::Arc;
@@ -37,7 +37,7 @@ impl Default for ThreadConfig {
 pub fn spawn_listeners<ES: EventStore + 'static>(
     worker_handler: Handler<Worker, ES>,
     thread_handler: Handler<Thread, ES>,
-    sandbox_handler: Handler<Sandbox, ES>,
+    sandbox_handler: SandboxHandler<ES>,
     queue: PollingQueue<ES>,
 ) -> JoinSet<Result<()>> {
     let mut set = JoinSet::new();
@@ -76,13 +76,27 @@ pub fn spawn_listeners<ES: EventStore + 'static>(
 pub async fn start_worker<ES: EventStore>(
     worker_handler: &Handler<Worker, ES>,
     thread_handler: &Handler<Thread, ES>,
+    sandbox_handler: &SandboxHandler<ES>,
     config: ThreadConfig,
     message: String,
+    sandbox_host_dir: String,
+    sandbox_dockerfile: String,
 ) -> Result<String> {
     let workflow_id = Uuid::new_v4();
     let worker_id = format!("worker-{}", workflow_id);
     let thread_id = format!("thread-{}", workflow_id);
     let sandbox_id = format!("sandbox-{}", workflow_id);
+
+    // Setup sandbox
+    sandbox_handler
+        .execute(
+            &sandbox_id,
+            sandbox::Command::CreateFromDirectory {
+                host_dir: sandbox_host_dir,
+                dockerfile: sandbox_dockerfile,
+            },
+        )
+        .await?;
 
     // Setup thread
     thread_handler
@@ -116,17 +130,17 @@ pub async fn start_worker<ES: EventStore>(
 pub fn create_handlers<ES: EventStore>(
     event_store: ES,
     llm: Arc<dyn LLMClientDyn>,
-    sandbox: Box<dyn SandboxDyn>,
+    sandbox_handle: SandboxHandle,
     tools: Vec<Box<dyn ToolDyn>>,
 ) -> (
     Handler<Worker, ES>,
     Handler<Thread, ES>,
-    Handler<Sandbox, ES>,
+    SandboxHandler<ES>,
 ) {
     let worker_handler = Handler::<Worker, ES>::new(event_store.clone(), ());
     let thread_handler = Handler::<Thread, ES>::new(event_store.clone(), llm);
-    let sandbox_services = Arc::new(SandboxServices::new(sandbox, tools));
-    let sandbox_handler = Handler::<Sandbox, ES>::new(event_store, sandbox_services);
+    let sandbox_services = Arc::new(SandboxServices::new(sandbox_handle, tools));
+    let sandbox_handler = SandboxHandler::new(event_store, sandbox_services);
 
     (worker_handler, thread_handler, sandbox_handler)
 }

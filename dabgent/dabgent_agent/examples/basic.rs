@@ -2,8 +2,8 @@ use dabgent_agent::processor::builder::{self, ThreadConfig};
 use dabgent_agent::toolbox::{self, basic::toolset};
 use dabgent_mq::db::sqlite::SqliteStore;
 use dabgent_mq::listener::PollingQueue;
-use dabgent_sandbox::dagger::{ConnectOpts, Sandbox as DaggerSandbox};
-use dabgent_sandbox::{Sandbox, SandboxDyn};
+use dabgent_sandbox::dagger::ConnectOpts;
+use dabgent_sandbox::{DaggerSandbox, Sandbox, SandboxHandle};
 use eyre::Result;
 use rig::client::ProviderClient;
 use std::sync::Arc;
@@ -29,55 +29,49 @@ async fn main() {
 
 pub async fn run_worker(store: SqliteStore, prompt: &str) -> Result<()> {
     let prompt = prompt.to_string();
+
+    let llm = Arc::new(rig::providers::anthropic::Client::from_env());
+
     let opts = ConnectOpts::default();
-    opts.connect(move |client| async move {
-        tracing::info!("initializing infrastructure");
-        let llm = Arc::new(rig::providers::anthropic::Client::from_env());
-        let sandbox = sandbox(&client).await?;
-        tracing::info!("infrastructure initialized");
-        let tools = toolset(Validator);
-        let definitions = tools.iter().map(|tool| tool.definition()).collect();
+    let sandbox_handle = SandboxHandle::new(opts).await?;
 
-        let (worker_handler, thread_handler, sandbox_handler) =
-            builder::create_handlers(store.clone(), llm, sandbox.boxed(), tools);
+    let tools = toolset(Validator);
+    let definitions = tools.iter().map(|tool| tool.definition()).collect();
 
-        let queue = PollingQueue::new(store);
-        let mut listeners = builder::spawn_listeners(
-            worker_handler.clone(),
-            thread_handler.clone(),
-            sandbox_handler,
-            queue,
-        );
+    let (worker_handler, thread_handler, sandbox_handler) =
+        builder::create_handlers(store.clone(), llm, sandbox_handle, tools);
 
-        let config = ThreadConfig {
-            model: MODEL.to_string(),
-            preamble: Some(SYSTEM_PROMPT.to_string()),
-            tools: Some(definitions),
-            ..Default::default()
-        };
+    let queue = PollingQueue::new(store);
+    let mut listeners = builder::spawn_listeners(
+        worker_handler.clone(),
+        thread_handler.clone(),
+        sandbox_handler.clone(),
+        queue,
+    );
 
-        builder::start_worker(&worker_handler, &thread_handler, config, prompt).await?;
+    let config = ThreadConfig {
+        model: MODEL.to_string(),
+        preamble: Some(SYSTEM_PROMPT.to_string()),
+        tools: Some(definitions),
+        ..Default::default()
+    };
 
-        while let Some(result) = listeners.join_next().await {
-            result??;
-        }
+    builder::start_worker(
+        &worker_handler,
+        &thread_handler,
+        &sandbox_handler,
+        config,
+        prompt,
+        "./examples".to_string(),
+        "Dockerfile".to_string(),
+    )
+    .await?;
 
-        Ok(())
-    })
-    .await
-    .map_err(Into::into)
-}
+    while let Some(result) = listeners.join_next().await {
+        result??;
+    }
 
-async fn sandbox(client: &dagger_sdk::DaggerConn) -> Result<DaggerSandbox> {
-    let opts = dagger_sdk::ContainerBuildOptsBuilder::default()
-        .dockerfile("Dockerfile")
-        .build()?;
-    let ctr = client
-        .container()
-        .build_opts(client.host().directory("./examples"), opts);
-    ctr.sync().await?;
-    let sandbox = DaggerSandbox::from_container(ctr, client.clone());
-    Ok(sandbox)
+    Ok(())
 }
 
 async fn store() -> SqliteStore {
@@ -92,7 +86,7 @@ async fn store() -> SqliteStore {
 pub struct Validator;
 
 impl toolbox::Validator for Validator {
-    async fn run(&self, sandbox: &mut Box<dyn SandboxDyn>) -> Result<Result<(), String>> {
+    async fn run(&self, sandbox: &mut DaggerSandbox) -> Result<Result<(), String>> {
         sandbox.exec("uv run main.py").await.map(|result| {
             if result.exit_code == 0 {
                 Ok(())

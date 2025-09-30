@@ -1,5 +1,5 @@
 use crate::metadata::{AgentExtra, AgentMetadata};
-use crate::processor::sandbox::{self, Sandbox};
+use crate::processor::sandbox::{self, Sandbox, SandboxHandler};
 use crate::processor::thread::{self, Thread};
 use crate::processor::worker::{self, Worker};
 use dabgent_mq::{Callback, Envelope, EventStore, Handler};
@@ -8,11 +8,11 @@ use eyre::Result;
 #[derive(Clone)]
 pub struct WorkerOrchestrator<ES: EventStore> {
     thread_handler: Handler<Thread, ES>,
-    sandbox_handler: Handler<Sandbox, ES>,
+    sandbox_handler: SandboxHandler<ES>,
 }
 
 impl<ES: EventStore> WorkerOrchestrator<ES> {
-    pub fn new(thread_handler: Handler<Thread, ES>, sandbox_handler: Handler<Sandbox, ES>) -> Self {
+    pub fn new(thread_handler: Handler<Thread, ES>, sandbox_handler: SandboxHandler<ES>) -> Self {
         Self {
             thread_handler,
             sandbox_handler,

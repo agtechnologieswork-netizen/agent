@@ -1,5 +1,5 @@
 use super::{Tool, Validator, ValidatorDyn};
-use dabgent_sandbox::SandboxDyn;
+use dabgent_sandbox::{DaggerSandbox, Sandbox};
 use eyre::Result;
 use serde::{Deserialize, Serialize};
 
@@ -40,15 +40,12 @@ impl Tool for Bash {
     async fn call(
         &self,
         args: Self::Args,
-        sandbox: &mut Box<dyn SandboxDyn>,
+        sandbox: &mut DaggerSandbox,
     ) -> Result<Result<Self::Output, Self::Error>> {
         let result = sandbox.exec(&args.command).await?;
         match result.exit_code {
             0 => Ok(Ok(result.stdout)),
-            _ => Ok(Err(format!(
-                "Error:\n{}\n{}",
-                result.stderr, result.stdout
-            ))),
+            _ => Ok(Err(format!("Error:\n{}\n{}", result.stderr, result.stdout))),
         }
     }
 }
@@ -95,7 +92,7 @@ impl Tool for WriteFile {
     async fn call(
         &self,
         args: Self::Args,
-        sandbox: &mut Box<dyn SandboxDyn>,
+        sandbox: &mut DaggerSandbox,
     ) -> Result<Result<Self::Output, Self::Error>> {
         let WriteFileArgs { path, contents } = args;
         match sandbox.write_file(&path, &contents).await {
@@ -139,12 +136,14 @@ impl Tool for ReadFile {
         }
     }
 
-    fn needs_replay(&self) -> bool { false }
+    fn needs_replay(&self) -> bool {
+        false
+    }
 
     async fn call(
         &self,
         args: Self::Args,
-        sandbox: &mut Box<dyn SandboxDyn>,
+        sandbox: &mut DaggerSandbox,
     ) -> Result<Result<Self::Output, Self::Error>> {
         match sandbox.read_file(&args.path).await {
             Ok(content) => Ok(Ok(content)),
@@ -187,12 +186,14 @@ impl Tool for LsDir {
         }
     }
 
-    fn needs_replay(&self) -> bool { false }
+    fn needs_replay(&self) -> bool {
+        false
+    }
 
     async fn call(
         &self,
         args: Self::Args,
-        sandbox: &mut Box<dyn SandboxDyn>,
+        sandbox: &mut DaggerSandbox,
     ) -> Result<Result<Self::Output, Self::Error>> {
         match sandbox.list_directory(&args.path).await {
             Ok(entries) => Ok(Ok(entries)),
@@ -238,7 +239,7 @@ impl Tool for RmFile {
     async fn call(
         &self,
         args: Self::Args,
-        sandbox: &mut Box<dyn SandboxDyn>,
+        sandbox: &mut DaggerSandbox,
     ) -> eyre::Result<Result<Self::Output, Self::Error>> {
         match sandbox.delete_file(&args.path).await {
             Ok(_) => Ok(Ok("success".to_string())),
@@ -294,7 +295,7 @@ impl Tool for EditFile {
     async fn call(
         &self,
         args: Self::Args,
-        sandbox: &mut Box<dyn SandboxDyn>,
+        sandbox: &mut DaggerSandbox,
     ) -> eyre::Result<Result<Self::Output, Self::Error>> {
         let EditFileArgs {
             path,
@@ -339,7 +340,9 @@ impl Tool for DoneTool {
         "done".to_string()
     }
 
-    fn needs_replay(&self) -> bool { false }
+    fn needs_replay(&self) -> bool {
+        false
+    }
 
     fn definition(&self) -> rig::completion::ToolDefinition {
         rig::completion::ToolDefinition {
@@ -355,7 +358,7 @@ impl Tool for DoneTool {
     async fn call(
         &self,
         _args: Self::Args,
-        sandbox: &mut Box<dyn SandboxDyn>,
+        sandbox: &mut DaggerSandbox,
     ) -> eyre::Result<eyre::Result<Self::Output, Self::Error>> {
         match self.validator.run(sandbox).await {
             Ok(result) => Ok(match result {
@@ -421,7 +424,7 @@ impl<T: TaskList> Tool for TaskListTool<T> {
     async fn call(
         &self,
         args: Self::Args,
-        sandbox: &mut Box<dyn SandboxDyn>,
+        sandbox: &mut DaggerSandbox,
     ) -> Result<Result<Self::Output, Self::Error>> {
         // Read current planning.md file using ReadFile tool
         let read_args = ReadFileArgs {
@@ -434,7 +437,10 @@ impl<T: TaskList> Tool for TaskListTool<T> {
         };
 
         // Update content through TaskList trait
-        let updated_content = match self.task_list.update(current_content, args.instruction.clone()) {
+        let updated_content = match self
+            .task_list
+            .update(current_content, args.instruction.clone())
+        {
             Ok(content) => content,
             Err(e) => return Ok(Err(format!("Failed to update task list: {}", e))),
         };
@@ -476,7 +482,7 @@ impl<V: Validator> TaskListValidator<V> {
 }
 
 impl<V: Validator + Send + Sync> Validator for TaskListValidator<V> {
-    async fn run(&self, sandbox: &mut Box<dyn SandboxDyn>) -> Result<Result<(), String>> {
+    async fn run(&self, sandbox: &mut DaggerSandbox) -> Result<Result<(), String>> {
         match sandbox.read_file("planning.md").await {
             Ok(content) => {
                 // Check for incomplete tasks with various formats
@@ -550,64 +556,83 @@ mod tests {
         use dabgent_sandbox::dagger::{ConnectOpts, Sandbox as DaggerSandbox};
 
         let opts = ConnectOpts::default();
-        let result = opts.connect(|client| async move {
-            let container = client
-                .container()
-                .from("python:3.11-slim")
-                .with_workdir("/workspace");
+        let result = opts
+            .connect(|client| async move {
+                let container = client
+                    .container()
+                    .from("python:3.11-slim")
+                    .with_workdir("/workspace");
 
-            container.sync().await?;
-            let mut sandbox: Box<dyn SandboxDyn> = Box::new(DaggerSandbox::from_container(container, client.clone()));
+                container.sync().await?;
+                let mut sandbox = DaggerSandbox::from_container(container, client.clone());
 
-            // Create a mock inner validator that always passes
-            struct AlwaysPassValidator;
-            impl Validator for AlwaysPassValidator {
-                async fn run(&self, _sandbox: &mut Box<dyn SandboxDyn>) -> Result<Result<(), String>> {
-                    Ok(Ok(()))
+                // Create a mock inner validator that always passes
+                struct AlwaysPassValidator;
+                impl Validator for AlwaysPassValidator {
+                    async fn run(
+                        &self,
+                        _sandbox: &mut DaggerSandbox,
+                    ) -> Result<Result<(), String>> {
+                        Ok(Ok(()))
+                    }
                 }
-            }
 
-            let task_list_validator = TaskListValidator::new(AlwaysPassValidator);
+                let task_list_validator = TaskListValidator::new(AlwaysPassValidator);
 
-            // Test 1: No planning.md file - should pass (file is optional)
-            let result = Validator::run(&task_list_validator, &mut sandbox).await?;
-            assert!(result.is_ok(), "Should pass when planning.md doesn't exist");
+                // Test 1: No planning.md file - should pass (file is optional)
+                let result = Validator::run(&task_list_validator, &mut sandbox).await?;
+                assert!(result.is_ok(), "Should pass when planning.md doesn't exist");
 
-            // Test 2: planning.md with incomplete tasks - should fail
-            sandbox.write_file("planning.md", "# Tasks\n- [ ] Task 1\n- [x] Task 2").await?;
-            let result = Validator::run(&task_list_validator, &mut sandbox).await?;
-            assert!(result.is_err(), "Should fail when there are incomplete tasks");
-            assert!(result.unwrap_err().contains("Not all tasks are completed"));
+                // Test 2: planning.md with incomplete tasks - should fail
+                sandbox
+                    .write_file("planning.md", "# Tasks\n- [ ] Task 1\n- [x] Task 2")
+                    .await?;
+                let result = Validator::run(&task_list_validator, &mut sandbox).await?;
+                assert!(
+                    result.is_err(),
+                    "Should fail when there are incomplete tasks"
+                );
+                assert!(result.unwrap_err().contains("Not all tasks are completed"));
 
-            // Test 3: planning.md with all tasks completed - should pass
-            sandbox.write_file("planning.md", "# Tasks\n- [x] Task 1\n- [x] Task 2").await?;
-            let result = Validator::run(&task_list_validator, &mut sandbox).await?;
-            assert!(result.is_ok(), "Should pass when all tasks are completed");
+                // Test 3: planning.md with all tasks completed - should pass
+                sandbox
+                    .write_file("planning.md", "# Tasks\n- [x] Task 1\n- [x] Task 2")
+                    .await?;
+                let result = Validator::run(&task_list_validator, &mut sandbox).await?;
+                assert!(result.is_ok(), "Should pass when all tasks are completed");
 
-            // Test 4: planning.md with no tasks - should fail
-            sandbox.write_file("planning.md", "# Tasks\nNo tasks defined yet").await?;
-            let result = Validator::run(&task_list_validator, &mut sandbox).await?;
-            assert!(result.is_err(), "Should fail when no tasks are defined");
-            assert!(result.unwrap_err().contains("No completed tasks found"));
+                // Test 4: planning.md with no tasks - should fail
+                sandbox
+                    .write_file("planning.md", "# Tasks\nNo tasks defined yet")
+                    .await?;
+                let result = Validator::run(&task_list_validator, &mut sandbox).await?;
+                assert!(result.is_err(), "Should fail when no tasks are defined");
+                assert!(result.unwrap_err().contains("No completed tasks found"));
 
-            // Test with inner validator that fails
-            struct AlwaysFailValidator;
-            impl Validator for AlwaysFailValidator {
-                async fn run(&self, _sandbox: &mut Box<dyn SandboxDyn>) -> Result<Result<(), String>> {
-                    Ok(Err("Inner validation failed".to_string()))
+                // Test with inner validator that fails
+                struct AlwaysFailValidator;
+                impl Validator for AlwaysFailValidator {
+                    async fn run(
+                        &self,
+                        _sandbox: &mut DaggerSandbox,
+                    ) -> Result<Result<(), String>> {
+                        Ok(Err("Inner validation failed".to_string()))
+                    }
                 }
-            }
 
-            let task_list_validator_fail = TaskListValidator::new(AlwaysFailValidator);
+                let task_list_validator_fail = TaskListValidator::new(AlwaysFailValidator);
 
-            // Test 5: All tasks completed but inner validator fails - should fail
-            sandbox.write_file("planning.md", "# Tasks\n- [x] Task 1\n- [x] Task 2").await?;
-            let result = Validator::run(&task_list_validator_fail, &mut sandbox).await?;
-            assert!(result.is_err(), "Should fail when inner validator fails");
-            assert_eq!(result.unwrap_err(), "Inner validation failed");
+                // Test 5: All tasks completed but inner validator fails - should fail
+                sandbox
+                    .write_file("planning.md", "# Tasks\n- [x] Task 1\n- [x] Task 2")
+                    .await?;
+                let result = Validator::run(&task_list_validator_fail, &mut sandbox).await?;
+                assert!(result.is_err(), "Should fail when inner validator fails");
+                assert_eq!(result.unwrap_err(), "Inner validation failed");
 
-            Ok::<(), eyre::Error>(())
-        }).await;
+                Ok::<(), eyre::Error>(())
+            })
+            .await;
 
         if result.is_err() {
             eprintln!("Skipping test - Docker/Dagger not available");
@@ -620,53 +645,58 @@ mod tests {
 
         // Skip test if Docker/Dagger not available
         let opts = ConnectOpts::default();
-        let result = opts.connect(|client| async move {
-            // Create a simple container for testing
-            let container = client
-                .container()
-                .from("alpine:latest")
-                .with_exec(vec!["sh", "-c", "echo 'test environment ready'"]);
+        let result = opts
+            .connect(|client| async move {
+                // Create a simple container for testing
+                let container = client.container().from("alpine:latest").with_exec(vec![
+                    "sh",
+                    "-c",
+                    "echo 'test environment ready'",
+                ]);
 
-            container.sync().await?;
-            let mut sandbox: Box<dyn SandboxDyn> = Box::new(DaggerSandbox::from_container(container, client.clone()));
+                container.sync().await?;
+                let mut sandbox = DaggerSandbox::from_container(container, client.clone());
 
-            // Create mock task list that adds "- Task completed" to content
-            let mock_tasklist = MockTaskList::new(|content| {
-                format!("{}\n- Task completed", content)
-            });
+                // Create mock task list that adds "- Task completed" to content
+                let mock_tasklist =
+                    MockTaskList::new(|content| format!("{}\n- Task completed", content));
 
-            let tool = TaskListTool::new(mock_tasklist);
+                let tool = TaskListTool::new(mock_tasklist);
 
-            // Write initial file
-            sandbox.write_file("planning.md", "# Planning\n\nNo tasks yet.\n").await.unwrap();
+                // Write initial file
+                sandbox
+                    .write_file("planning.md", "# Planning\n\nNo tasks yet.\n")
+                    .await
+                    .unwrap();
 
-            // Test with existing file
-            let args = TaskListArgs {
-                instruction: "Mark first task as complete".to_string(),
-            };
+                // Test with existing file
+                let args = TaskListArgs {
+                    instruction: "Mark first task as complete".to_string(),
+                };
 
-            let result = tool.call(args, &mut sandbox).await.unwrap();
-            assert!(result.is_ok());
+                let result = tool.call(args, &mut sandbox).await.unwrap();
+                assert!(result.is_ok());
 
-            // Verify file was updated
-            let content = sandbox.read_file("planning.md").await.unwrap();
-            assert!(content.contains("# Planning"));
-            assert!(content.contains("- Task completed"));
+                // Verify file was updated
+                let content = sandbox.read_file("planning.md").await.unwrap();
+                assert!(content.contains("# Planning"));
+                assert!(content.contains("- Task completed"));
 
-            // Test with existing file again
-            let args2 = TaskListArgs {
-                instruction: "Add another task".to_string(),
-            };
+                // Test with existing file again
+                let args2 = TaskListArgs {
+                    instruction: "Add another task".to_string(),
+                };
 
-            let result2 = tool.call(args2, &mut sandbox).await.unwrap();
-            assert!(result2.is_ok());
+                let result2 = tool.call(args2, &mut sandbox).await.unwrap();
+                assert!(result2.is_ok());
 
-            // Verify content was updated
-            let content2 = sandbox.read_file("planning.md").await.unwrap();
-            assert_eq!(content2.matches("- Task completed").count(), 2);
+                // Verify content was updated
+                let content2 = sandbox.read_file("planning.md").await.unwrap();
+                assert_eq!(content2.matches("- Task completed").count(), 2);
 
-            Ok::<(), eyre::Error>(())
-        }).await;
+                Ok::<(), eyre::Error>(())
+            })
+            .await;
 
         if result.is_err() {
             eprintln!("Skipping test - Docker/Dagger not available");
