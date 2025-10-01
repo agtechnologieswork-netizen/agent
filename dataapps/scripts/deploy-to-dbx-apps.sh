@@ -15,6 +15,11 @@ set -e  # Exit on any error
 DATABRICKS_HOST="<PLACEHOLDER_DBX_HOST>"
 DATABRICKS_TOKEN="<PLACEHOLDER_DBX_TOKEN>"
 
+# Central LogFood host
+# DATABRICKS_HOST="https://adb-2548836972759138.18.azuredatabricks.net/"
+# Dogfood host
+# DATABRICKS_HOST="https://e2-dogfood.staging.cloud.databricks.com"
+
 # Colors for output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -126,7 +131,31 @@ import_code() {
 
     log_info "Importing code to workspace: $workspace_path"
 
-    if databricks workspace import-dir --overwrite "$source_path" "$workspace_path"; then
+    # Create temporary directory for filtered files
+    local temp_dir=$(mktemp -d)
+    trap "rm -rf $temp_dir" EXIT
+
+    log_info "Filtering files to temporary directory..."
+
+    # Use rsync to copy files while excluding unwanted directories
+    rsync -a \
+        --exclude='.venv' \
+        --exclude='venv' \
+        --exclude='node_modules' \
+        --exclude='dist' \
+        --exclude='build' \
+        --exclude='.git' \
+        --exclude='.env' \
+        --exclude='Dockerfile' \
+        --exclude='*.pyc' \
+        --exclude='__pycache__' \
+        --exclude='.DS_Store' \
+        --exclude='.dockerignore' \
+        --exclude='.gitignore' \
+        --exclude='docker-compose.yml' \
+        "$source_path/" "$temp_dir/"
+
+    if databricks workspace import-dir --overwrite "$temp_dir" "$workspace_path"; then
         log_success "Code imported to workspace"
     else
         log_error "Failed to import code to workspace"
