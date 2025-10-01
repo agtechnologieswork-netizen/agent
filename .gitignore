@@ -175,3 +175,6 @@ agent/bin/*.*
 agent/laravel_agent/template_backup_*/**
 agent/benchmark_results*/*
 dabgent/claude_code.json
+
+# Serena
+.serena

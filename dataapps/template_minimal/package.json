@@ -18,10 +18,9 @@
     "setup": "npm run setup:backend && npm run setup:frontend",
     "setup:backend": "cd backend && uv sync",
     "setup:frontend": "cd frontend && npm install",
-    "install": "npm run setup",
     
     "_comment_build": "Build frontend for production",
-    "build:frontend": "cd frontend && npm run build",
+    "build:frontend": "cd frontend && npm install && npm run build",
     "build": "npm run build:frontend",
     
     "_comment_docker": "Docker deployment",
