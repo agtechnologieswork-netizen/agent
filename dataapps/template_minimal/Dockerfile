@@ -32,7 +32,7 @@ WORKDIR /app/backend
 RUN uv sync --no-install-project
 
 # Copy built frontend from previous stage
-COPY --from=frontend-builder /app/frontend/dist/ ./static/
+COPY --from=frontend-builder /app/frontend/dist/ ./dist/
 
 # Create non-root user for security
 RUN adduser --disabled-password --gecos '' appuser && \
