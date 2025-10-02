@@ -13,7 +13,8 @@ use rig::message::{ToolResult, ToolResultContent, UserContent};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
-const MODEL: &str = "claude-sonnet-4-20250514";
+const ANTHROPIC_MODEL: &str = "claude-sonnet-4.5-20250929";
+const OPENROUTER_MODEL: &str = "deepseek/deepseek-v3.2-exp";
 
 const SYSTEM_PROMPT: &str = "
 You are a python software engineer.
@@ -26,6 +27,7 @@ const USER_PROMPT: &str = "minimal script that fetches my ip using some api like
 
 #[tokio::main]
 async fn main() {
+    dotenvy::dotenv().ok();
     tracing_subscriber::fmt::init();
     run_worker().await.unwrap();
 }
