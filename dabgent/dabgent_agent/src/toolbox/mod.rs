@@ -1,12 +1,10 @@
 pub mod basic;
-pub mod planning;
-pub mod databricks;
-use dabgent_sandbox::SandboxDyn;
+use dabgent_sandbox::DaggerSandbox;
 use eyre::Result;
 use serde::{Deserialize, Serialize};
 use std::future::Future;
-use std::pin::Pin;
 use std::marker::PhantomData;
+use std::pin::Pin;
 
 pub trait Tool: Send + Sync {
     type Args: for<'a> Deserialize<'a> + Serialize + Send + Sync;
@@ -14,11 +12,13 @@ pub trait Tool: Send + Sync {
     type Error: Serialize + Send + Sync;
     fn name(&self) -> String;
     fn definition(&self) -> rig::completion::ToolDefinition;
-    fn needs_replay(&self) -> bool { true }
+    fn needs_replay(&self) -> bool {
+        true
+    }
     fn call(
         &self,
         args: Self::Args,
-        sandbox: &mut Box<dyn SandboxDyn>,
+        sandbox: &mut DaggerSandbox,
     ) -> impl Future<Output = Result<Result<Self::Output, Self::Error>>> + Send;
 }
 
@@ -31,7 +31,7 @@ pub trait ToolDyn: Send + Sync {
     fn call<'a>(
         &'a self,
         args: serde_json::Value,
-        sandbox: &'a mut Box<dyn SandboxDyn>,
+        sandbox: &'a mut DaggerSandbox,
     ) -> Pin<Box<dyn Future<Output = ToolDynResult> + Send + 'a>>;
 }
 
@@ -51,7 +51,7 @@ impl<T: Tool> ToolDyn for T {
     fn call<'a>(
         &'a self,
         args: serde_json::Value,
-        sandbox: &'a mut Box<dyn SandboxDyn>,
+        sandbox: &'a mut DaggerSandbox,
     ) -> Pin<Box<dyn Future<Output = ToolDynResult> + Send + 'a>> {
         Box::pin(async move {
             match serde_json::from_value::<<Self as Tool>::Args>(args) {
@@ -72,7 +72,7 @@ impl<T: Tool> ToolDyn for T {
 pub trait Validator {
     fn run(
         &self,
-        sandbox: &mut Box<dyn SandboxDyn>,
+        sandbox: &mut DaggerSandbox,
     ) -> impl Future<Output = Result<Result<(), String>>> + Send;
 
     fn boxed(self) -> Box<dyn ValidatorDyn>
@@ -86,14 +86,14 @@ pub trait Validator {
 pub trait ValidatorDyn: Send + Sync {
     fn run<'a>(
         &'a self,
-        sandbox: &'a mut Box<dyn SandboxDyn>,
+        sandbox: &'a mut DaggerSandbox,
     ) -> Pin<Box<dyn Future<Output = Result<Result<(), String>>> + Send + 'a>>;
 }
 
 impl<T: Validator + Send + Sync + 'static> ValidatorDyn for T {
     fn run<'a>(
         &'a self,
-        sandbox: &'a mut Box<dyn SandboxDyn>,
+        sandbox: &'a mut DaggerSandbox,
     ) -> Pin<Box<dyn Future<Output = Result<Result<(), String>>> + Send + 'a>> {
         Box::pin(self.run(sandbox))
     }
@@ -171,7 +171,7 @@ impl<T: NoSandboxTool> Tool for NoSandboxAdapter<T> {
     async fn call(
         &self,
         args: Self::Args,
-        _sandbox: &mut Box<dyn SandboxDyn>,
+        _sandbox: &mut DaggerSandbox,
     ) -> Result<Result<Self::Output, Self::Error>> {
         self.inner.call(args).await
     }
@@ -228,9 +228,8 @@ impl<T: ClientTool<C>, C: Send + Sync> Tool for ClientToolAdapter<T, C> {
     async fn call(
         &self,
         args: Self::Args,
-        _sandbox: &mut Box<dyn SandboxDyn>,
+        _sandbox: &mut DaggerSandbox,
     ) -> Result<Result<Self::Output, Self::Error>> {
         self.inner.call(args).await
     }
 }
-

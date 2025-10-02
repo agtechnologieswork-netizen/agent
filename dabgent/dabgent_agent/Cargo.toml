@@ -33,4 +33,7 @@ dotenvy = "0.15"
 name = "basic"
 
 [[example]]
-name = "databricks_explorer"
+name = "databricks_worker"
+
+[[example]]
+name = "planner_worker"

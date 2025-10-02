@@ -1,8 +1,11 @@
 pub mod dagger;
+pub mod manager;
 pub mod noop;
 
-pub use noop::NoOpSandbox;
+pub use dagger::Sandbox as DaggerSandbox;
 use eyre::Result;
+pub use manager::SandboxHandle;
+pub use noop::NoOpSandbox;
 use serde::{Deserialize, Serialize};
 use std::pin::Pin;
 
@@ -16,15 +19,16 @@ pub struct ExecResult {
 pub trait Sandbox {
     fn exec(&mut self, command: &str) -> impl Future<Output = Result<ExecResult>> + Send;
     fn write_file(&mut self, path: &str, content: &str) -> impl Future<Output = Result<()>> + Send;
-    fn write_files(
-        &mut self,
-        files: Vec<(&str, &str)>,
-    ) -> impl Future<Output = Result<()>> + Send;
+    fn write_files(&mut self, files: Vec<(&str, &str)>) -> impl Future<Output = Result<()>> + Send;
     fn read_file(&self, path: &str) -> impl Future<Output = Result<String>> + Send;
     fn delete_file(&mut self, path: &str) -> impl Future<Output = Result<()>> + Send;
     fn list_directory(&self, path: &str) -> impl Future<Output = Result<Vec<String>>> + Send;
     fn set_workdir(&mut self, path: &str) -> impl Future<Output = Result<()>> + Send;
-    fn export_directory(&self, container_path: &str, host_path: &str) -> impl Future<Output = Result<String>> + Send;
+    fn export_directory(
+        &self,
+        container_path: &str,
+        host_path: &str,
+    ) -> impl Future<Output = Result<String>> + Send;
 
     fn fork(&self) -> impl Future<Output = Result<Self>> + Send
     where

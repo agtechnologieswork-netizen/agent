@@ -1,15 +1,90 @@
 use dabgent_mq::db::{sqlite::SqliteStore, *};
-use dabgent_mq::models::Event;
+use dabgent_mq::listener::PollingQueue;
+use dabgent_mq::*;
 use serde::{Deserialize, Serialize};
 use sqlx::SqlitePool;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-struct TestEvent(usize);
+enum TestEvent {
+    Increment(usize),
+    Decrement(usize),
+}
 
 impl Event for TestEvent {
-    const EVENT_VERSION: &'static str = "1.0";
-    fn event_type(&self) -> &'static str {
-        "TestEvent"
+    fn event_version(&self) -> String {
+        "1.0".to_owned()
+    }
+
+    fn event_type(&self) -> String {
+        "TestEvent".to_owned()
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+enum TestCommand {
+    Increment(usize),
+    Decrement(usize),
+}
+
+#[derive(Debug, thiserror::Error)]
+enum TestError {
+    #[error("Cannot decrement below zero")]
+    DecrementBelowZero,
+}
+
+#[derive(Debug, Default, Clone, Serialize, Deserialize, PartialEq)]
+struct TestAggregate(usize);
+
+impl Aggregate for TestAggregate {
+    const TYPE: &'static str = "TestAggregate";
+    type Command = TestCommand;
+    type Event = TestEvent;
+    type Error = TestError;
+    type Services = ();
+
+    async fn handle(
+        &self,
+        cmd: Self::Command,
+        _services: &Self::Services,
+    ) -> Result<Vec<Self::Event>, Self::Error> {
+        match cmd {
+            TestCommand::Increment(amount) => Ok(vec![TestEvent::Increment(amount)]),
+            TestCommand::Decrement(amount) => {
+                if self.0 < amount {
+                    Err(TestError::DecrementBelowZero)
+                } else {
+                    Ok(vec![TestEvent::Decrement(amount)])
+                }
+            }
+        }
+    }
+
+    fn apply(&mut self, event: Self::Event) {
+        match event {
+            TestEvent::Increment(amount) => self.0 += amount,
+            TestEvent::Decrement(amount) => self.0 -= amount,
+        }
+    }
+}
+
+struct TestCallback<ES: EventStore> {
+    handler: Handler<TestAggregate, ES>,
+    tx: tokio::sync::mpsc::UnboundedSender<()>,
+}
+
+impl<ES: EventStore> Callback<TestAggregate> for TestCallback<ES> {
+    async fn process(&mut self, event: &dabgent_mq::Envelope<TestAggregate>) -> eyre::Result<()> {
+        match event.data {
+            TestEvent::Increment(..) => {
+                let result = self
+                    .handler
+                    .execute(&event.aggregate_id, TestCommand::Decrement(1))
+                    .await;
+                let _ = self.tx.send(());
+                result.map_err(Into::into)
+            }
+            _ => Ok(()),
+        }
     }
 }
 
@@ -17,152 +92,92 @@ async fn setup_test_store() -> SqliteStore {
     let pool = SqlitePool::connect(":memory:")
         .await
         .expect("Failed to create in-memory SQLite pool");
-    let store = SqliteStore::new(pool);
+    let store = SqliteStore::new(pool, "test_stream");
     store.migrate().await;
     store
 }
 
 #[tokio::test]
-async fn test_push_and_load_events() {
+async fn test_handler_commands() {
     let store = setup_test_store().await;
-    let stream_id = "test-stream";
     let aggregate_id = "test-aggregate";
+    let handler = Handler::<TestAggregate, _>::new(store.clone(), ());
 
-    let event1 = TestEvent(0);
-    let event2 = TestEvent(1);
-    let metadata = Metadata::default();
-    store
-        .push_event(stream_id, aggregate_id, &event1, &metadata)
+    let command = TestCommand::Increment(3);
+    handler
+        .execute(aggregate_id, command)
         .await
-        .expect("Failed to push first event");
-    store
-        .push_event(stream_id, aggregate_id, &event2, &metadata)
+        .expect("Failed to execute command");
+
+    handler
+        .execute(aggregate_id, command)
         .await
-        .expect("Failed to push second event");
+        .expect("Failed to execute command");
 
-    let query = Query {
-        stream_id: stream_id.to_string(),
-        event_type: None,
-        aggregate_id: None,
-    };
-
-    let loaded_events: Vec<TestEvent> = store
-        .load_events(&query, None)
+    let ctx = store
+        .load_aggregate::<TestAggregate>(aggregate_id)
         .await
-        .expect("Failed to load events");
-
-    assert_eq!(loaded_events.len(), 2);
-    assert_eq!(loaded_events[0], event1);
-    assert_eq!(loaded_events[1], event2);
+        .expect("Failed to load aggregate");
+    assert_eq!(ctx.aggregate.0, 6);
+    assert_eq!(ctx.current_sequence, 2);
 }
 
 #[tokio::test]
-async fn test_load_events_by_aggregate_id() {
+async fn test_latest_sequences() {
     let store = setup_test_store().await;
-    let stream_id = "test-stream";
+    let aggregate_id = "test-aggregate";
+    let handler = Handler::<TestAggregate, _>::new(store.clone(), ());
 
-    let event1 = TestEvent(0);
-    let event2 = TestEvent(1);
-    let metadata = Metadata::default();
-
-    store
-        .push_event(stream_id, "aggregate1", &event1, &metadata)
+    let latest_sequences = store
+        .load_sequence_nums::<TestAggregate>()
         .await
-        .expect("Failed to push first event");
+        .expect("Failed to load sequence numbers");
+    assert!(latest_sequences.is_empty());
 
-    store
-        .push_event(stream_id, "aggregate2", &event2, &metadata)
+    let command = TestCommand::Increment(3);
+    handler
+        .execute(aggregate_id, command)
         .await
-        .expect("Failed to push second event");
+        .expect("Failed to execute command");
 
-    let query = Query {
-        stream_id: stream_id.to_string(),
-        event_type: None,
-        aggregate_id: Some("aggregate1".to_string()),
-    };
-
-    let loaded_events: Vec<TestEvent> = store
-        .load_events(&query, None)
+    let mut latest_sequences = store
+        .load_sequence_nums::<TestAggregate>()
         .await
-        .expect("Failed to load events");
-
-    assert_eq!(loaded_events.len(), 1);
-    assert_eq!(loaded_events[0], event1);
+        .expect("Failed to load sequence numbers");
+    assert_eq!(latest_sequences.len(), 1);
+    let (id, sequence) = latest_sequences.pop().unwrap();
+    assert_eq!(id, aggregate_id);
+    assert_eq!(sequence, 1);
 }
 
 #[tokio::test]
-async fn test_subscription() {
-    let store = setup_test_store().await;
-    let stream_id = "test-stream";
+async fn test_single_callback() {
+    let store = PollingQueue::new(setup_test_store().await);
     let aggregate_id = "test-aggregate";
+    let handler = Handler::<TestAggregate, _>::new(store.clone(), ());
 
-    let query = Query {
-        stream_id: stream_id.to_string(),
-        event_type: None,
-        aggregate_id: None,
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+    let callback = TestCallback {
+        handler: handler.clone(),
+        tx,
     };
 
-    let mut receiver = store
-        .subscribe::<TestEvent>(&query)
-        .expect("Failed to subscribe");
+    let mut listener = store.listener();
+    listener.register(callback);
 
-    let event1 = TestEvent(0);
-    let metadata = Metadata::default();
-    store
-        .push_event(&stream_id, &aggregate_id, &event1, &metadata)
+    tokio::spawn(async move {
+        let _ = listener.run().await;
+    });
+
+    handler
+        .execute(aggregate_id, TestCommand::Increment(3))
         .await
-        .expect("Failed to push event");
-
-    let received = tokio::time::timeout(tokio::time::Duration::from_secs(2), receiver.next())
+        .expect("Failed to execute command");
+    let _ = rx.recv().await;
+    let ctx = store
+        .load_aggregate::<TestAggregate>(aggregate_id)
         .await
-        .expect("Timeout waiting for event")
-        .expect("Failed to receive event")
-        .expect("Failed to deserialize event");
-
-    assert_eq!(received, event1);
-}
-
-#[tokio::test]
-async fn test_multiple_subscribers() {
-    let store = setup_test_store().await;
-    let stream_id = "test-stream";
-    let aggregate_id = "test-aggregate";
-
-    let query = Query {
-        stream_id: stream_id.to_string(),
-        event_type: None,
-        aggregate_id: None,
-    };
-
-    // Create two subscribers
-    let mut receiver1 = store
-        .subscribe::<TestEvent>(&query)
-        .expect("Failed to subscribe");
-
-    let mut receiver2 = store
-        .subscribe::<TestEvent>(&query)
-        .expect("Failed to subscribe");
-
-    let event = TestEvent(0);
-    let metadata = Metadata::default();
-    store
-        .push_event(&stream_id, &aggregate_id, &event, &metadata)
-        .await
-        .expect("Failed to push event");
-
-    // Both receivers should get the event
-    let received1 = tokio::time::timeout(tokio::time::Duration::from_secs(2), receiver1.next())
-        .await
-        .expect("Timeout waiting for event on receiver1")
-        .expect("Failed to receive event on receiver1")
-        .expect("Failed to deserialize event on receiver1");
-
-    let received2 = tokio::time::timeout(tokio::time::Duration::from_secs(2), receiver2.next())
-        .await
-        .expect("Timeout waiting for event on receiver2")
-        .expect("Failed to receive event on receiver2")
-        .expect("Failed to deserialize event on receiver2");
-
-    assert_eq!(received1, event);
-    assert_eq!(received2, event);
+        .expect("Failed to load aggregate");
+    assert_eq!(ctx.current_sequence, 2);
+    assert_eq!(ctx.aggregate.0, 2);
 }
