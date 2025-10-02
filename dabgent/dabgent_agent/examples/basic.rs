@@ -1,6 +1,8 @@
 use dabgent_agent::processor::agent::{Agent, AgentState, Command, Event, Request, Runtime};
 use dabgent_agent::processor::llm::{LLMConfig, LLMHandler};
-use dabgent_agent::processor::tools::{TemplateConfig, ToolHandler};
+use dabgent_agent::processor::tools::{
+    get_dockerfile_dir_from_src_ws, TemplateConfig, ToolHandler,
+};
 use dabgent_agent::processor::utils::LogHandler;
 use dabgent_agent::toolbox::{self, basic::toolset};
 use dabgent_mq::Event as MQEvent;
@@ -47,7 +49,7 @@ pub async fn run_worker() -> Result<()> {
     let tool_handler = ToolHandler::new(
         tools,
         SandboxHandle::new(Default::default()),
-        TemplateConfig::default_dir("./examples"),
+        TemplateConfig::default_dir(get_dockerfile_dir_from_src_ws()),
     );
 
     let runtime = Runtime::<Basic, _>::new(store, ())
