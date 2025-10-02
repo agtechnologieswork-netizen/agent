@@ -1,5 +1,4 @@
 pub mod basic;
-pub mod databricks;
 use dabgent_sandbox::DaggerSandbox;
 use eyre::Result;
 use serde::{Deserialize, Serialize};
