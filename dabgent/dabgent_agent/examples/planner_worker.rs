@@ -17,7 +17,7 @@ use rig::message::{ToolCall, ToolResult, ToolResultContent, UserContent};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
-const MODEL: &str = "claude-sonnet-4-20250514";
+const MODEL: &str = "claude-sonnet-4-5-20250929";
 
 const PLANNER_PROMPT: &str = "
 You are a planning assistant.
