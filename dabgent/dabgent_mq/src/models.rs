@@ -44,6 +44,10 @@ impl<A: Aggregate, ES: EventStore> Handler<A, ES> {
         Self { store, services }
     }
 
+    pub fn store(&self) -> &ES {
+        &self.store
+    }
+
     pub async fn execute(&self, aggregate_id: &str, cmd: A::Command) -> eyre::Result<()> {
         self.execute_with_metadata(aggregate_id, cmd, Default::default())
             .await

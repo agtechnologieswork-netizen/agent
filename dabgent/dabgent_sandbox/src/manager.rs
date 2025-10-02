@@ -14,7 +14,7 @@ enum ManagerMessage {
         id: String,
         host_dir: String,
         dockerfile: String,
-        respond_to: oneshot::Sender<Result<()>>,
+        respond_to: oneshot::Sender<Result<DaggerSandbox>>,
     },
     Get {
         id: String,
@@ -62,7 +62,12 @@ impl SandboxManager {
         }
     }
 
-    async fn create_sandbox(&mut self, id: &str, host_dir: &str, dockerfile: &str) -> Result<()> {
+    async fn create_sandbox(
+        &mut self,
+        id: &str,
+        host_dir: &str,
+        dockerfile: &str,
+    ) -> Result<DaggerSandbox> {
         let opts = dagger_sdk::ContainerBuildOptsBuilder::default()
             .dockerfile(dockerfile)
             .build()?;
@@ -74,9 +79,8 @@ impl SandboxManager {
 
         ctr.sync().await?;
         let sandbox = DaggerSandbox::from_container(ctr, self.client.clone());
-        self.registry.insert(id.to_string(), sandbox);
-
-        Ok(())
+        self.registry.insert(id.to_string(), sandbox.clone());
+        Ok(sandbox)
     }
 }
 
@@ -92,7 +96,7 @@ pub struct SandboxHandle {
 }
 
 impl SandboxHandle {
-    pub async fn new(opts: ConnectOpts) -> Result<Self> {
+    pub fn new(opts: ConnectOpts) -> Self {
         let (sender, receiver) = mpsc::channel(32);
 
         tokio::spawn(async move {
@@ -105,7 +109,7 @@ impl SandboxHandle {
                 .await;
         });
 
-        Ok(Self { sender })
+        Self { sender }
     }
 
     pub async fn create_from_directory(
@@ -113,7 +117,7 @@ impl SandboxHandle {
         id: &str,
         host_dir: &str,
         dockerfile: &str,
-    ) -> Result<()> {
+    ) -> Result<DaggerSandbox> {
         let (send, recv) = oneshot::channel();
         let msg = ManagerMessage::CreateFromDirectory {
             id: id.to_owned(),

@@ -1,21 +1,26 @@
-use dabgent_mq::{Aggregate, Callback, Envelope};
+use super::agent::{Agent, AgentState, EventHandler};
+use dabgent_mq::{Aggregate, Callback, Envelope, EventStore, Handler};
 use eyre::Result;
 
-pub struct LoggerCallback<T: Aggregate> {
-    _phantom: std::marker::PhantomData<T>,
-}
+pub struct LogHandler;
 
-impl<T: Aggregate> LoggerCallback<T> {
-    pub fn new() -> Self {
-        Self {
-            _phantom: std::marker::PhantomData,
-        }
+impl<T: Aggregate + std::fmt::Debug> Callback<T> for LogHandler {
+    async fn process(&mut self, envelope: &Envelope<T>) -> Result<()> {
+        tracing::info!(aggregate = T::TYPE, envelope = ?envelope, "event");
+        Ok(())
     }
 }
 
-impl<T: Aggregate + std::fmt::Debug> Callback<T> for LoggerCallback<T> {
-    async fn process(&mut self, envelope: &Envelope<T>) -> Result<()> {
-        tracing::info!(aggregate = T::TYPE, envelope = ?envelope, "event");
+impl<A: Agent, ES: EventStore> EventHandler<A, ES> for LogHandler
+where
+    AgentState<A>: std::fmt::Debug,
+{
+    async fn process(
+        &mut self,
+        _handler: &Handler<AgentState<A>, ES>,
+        event: &Envelope<AgentState<A>>,
+    ) -> Result<()> {
+        tracing::info!(agent = A::TYPE, envelope = ?event, "event");
         Ok(())
     }
 }

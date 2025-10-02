@@ -95,14 +95,20 @@ impl<ES: EventStore> EventStore for PollingQueue<ES> {
     }
 }
 
+pub trait EventQueue: EventStore {
+    fn listener<A: Aggregate + 'static>(&self) -> Listener<A, Self>;
+}
+
+impl<ES: EventStore> EventQueue for PollingQueue<ES> {
+    fn listener<A: Aggregate + 'static>(&self) -> Listener<A, Self> {
+        Listener::new(self.clone(), self.wake_tx.subscribe())
+    }
+}
+
 impl<ES: EventStore> PollingQueue<ES> {
     pub fn new(store: ES) -> Self {
         let (wake_tx, _) = broadcast::channel(WAKE_CHANNEL_SIZE);
         Self { store, wake_tx }
-    }
-
-    pub fn listener<A: Aggregate + 'static>(&self) -> Listener<A, ES> {
-        Listener::new(self.store.clone(), self.wake_tx.subscribe())
     }
 }
 
