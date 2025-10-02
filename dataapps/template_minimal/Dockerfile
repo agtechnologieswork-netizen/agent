@@ -32,12 +32,17 @@ WORKDIR /app/backend
 RUN uv sync --no-install-project
 
 # Copy built frontend from previous stage
-COPY --from=frontend-builder /app/frontend/dist/ ./static/
+WORKDIR /app
+RUN mkdir -p frontend
+COPY --from=frontend-builder /app/frontend/dist/ ./frontend/dist/
 
 # Create non-root user for security
 RUN adduser --disabled-password --gecos '' appuser && \
     chown -R appuser:appuser /app
 USER appuser
+
+# Set working directory back to backend for running the app
+WORKDIR /app/backend
 
 # Expose port
 EXPOSE 8000

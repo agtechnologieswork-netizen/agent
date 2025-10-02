@@ -26,7 +26,8 @@ app.add_middleware(
     expose_headers=["X-Total-Count", "Content-Range"],  # React Admin needs these
 )
 
-# Root endpoint (will be overridden by static files in production)
+# Root endpoint (will be overridden by frontend in production)
+
 
 @app.get("/health")
 def health_check():
@@ -35,8 +36,9 @@ def health_check():
         "status": "ok",
         "timestamp": int(time.time()),
         "service": "dataapps-template",
-        "version": "1.0.0"
+        "version": "1.0.0",
     }
+
 
 # TODO: Add your API resources here
 # React Admin expects REST endpoints like:
@@ -54,23 +56,20 @@ def health_check():
 #     return users[skip:skip+limit]
 #
 # Serve React Admin frontend (in production/Docker)
-static_dir = Path("static")
-if static_dir.exists():
-    app.mount("/static", StaticFiles(directory="static"), name="static")
-
-    # Serve React Admin at root path
-    @app.get("/")
-    async def serve_react_admin():
-        return FileResponse("static/index.html")
-
-    # Catch-all for React Admin routes
-    @app.get("/{path:path}")
-    async def serve_react_admin_routes(path: str):
-        # Don't serve static files through this route
-        if path.startswith(("api/", "health", "docs", "redoc", "openapi.json")):
-            # Let FastAPI handle these routes normally
-            raise HTTPException(404)
-        return FileResponse("static/index.html")
+# Get the directory where this file is located and go up to project root
+backend_dir = Path(__file__).parent
+project_root = backend_dir.parent
+frontend_dist = project_root / "frontend" / "dist"
+print(f"Backend dir: {backend_dir}")
+print(f"Project root: {project_root}")
+print(f"Looking for frontend at: {frontend_dist}")
+print(f"Frontend dist exists: {frontend_dist.exists()}")
+if frontend_dist.exists():
+    print(f"Files in dist: {list(frontend_dist.iterdir())}")
+    app.mount(
+        "/", StaticFiles(directory=str(frontend_dist), html=True), name="frontend"
+    )
+    print("Mounted frontend at /")
 else:
     # Development mode - frontend served by Vite
     @app.get("/")
@@ -78,9 +77,11 @@ else:
         return {
             "message": "DataApps API running in development mode",
             "frontend": "http://localhost:3000",
-            "docs": "http://localhost:8000/docs"
+            "docs": "http://localhost:8000/docs",
         }
+
 
 if __name__ == "__main__":
     import uvicorn
+
     uvicorn.run(app, host="0.0.0.0", port=8000)
