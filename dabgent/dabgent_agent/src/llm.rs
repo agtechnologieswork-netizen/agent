@@ -108,6 +108,24 @@ impl CompletionResponse {
             content: self.choice.clone(),
         }
     }
+
+    pub fn tool_calls(&self) -> Option<Vec<rig::message::ToolCall>> {
+        if self.finish_reason != FinishReason::ToolUse {
+            return None;
+        }
+        let calls = self
+            .choice
+            .iter()
+            .filter_map(|choice| match choice {
+                rig::message::AssistantContent::ToolCall(call) => Some(call.clone()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        if calls.is_empty() {
+            return None;
+        }
+        Some(calls)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
@@ -222,7 +240,9 @@ impl<T: LLMClient> WithRetryExt for T {}
 
 fn jitter_ms(base_ms: u64) -> u64 {
     use std::time::{SystemTime, UNIX_EPOCH};
-    let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default();
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default();
     let nanos = now.subsec_nanos() as u64;
     // 50% - 150% jitter
     let pct = 50 + (nanos % 101);
@@ -271,11 +291,12 @@ impl LLMClient for rig::providers::gemini::Client {
         };
         let result = model.completion(completion.into()).await.map(|response| {
             let finish_reason = response.raw_response.candidates[0].finish_reason.as_ref();
-            let mut finish_reason = finish_reason.map_or(FinishReason::None, |reason| match reason {
-                gemini_api_types::FinishReason::Stop => FinishReason::Stop,
-                gemini_api_types::FinishReason::MaxTokens => FinishReason::MaxTokens,
-                _ => FinishReason::Other(format!("{reason:?}")),
-            });
+            let mut finish_reason =
+                finish_reason.map_or(FinishReason::None, |reason| match reason {
+                    gemini_api_types::FinishReason::Stop => FinishReason::Stop,
+                    gemini_api_types::FinishReason::MaxTokens => FinishReason::MaxTokens,
+                    _ => FinishReason::Other(format!("{reason:?}")),
+                });
             // If the model emitted tool calls, treat finish as ToolUse to drive the tool executor
             if response
                 .choice

@@ -1,25 +1,21 @@
 use crate::db::*;
-use chrono::Utc;
-use serde_json::Value as JsonValue;
 use sqlx::SqlitePool;
-use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
-use tokio::sync::mpsc;
+use std::sync::Arc;
 
 static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("./migrations/sqlite");
 
 #[derive(Clone)]
 pub struct SqliteStore {
     pool: SqlitePool,
-    watchers: Arc<Mutex<HashMap<Query, Vec<mpsc::UnboundedSender<Event<JsonValue>>>>>>,
+    stream_id: String,
     write_lock: Arc<tokio::sync::Mutex<()>>,
 }
 
 impl SqliteStore {
-    pub fn new(pool: SqlitePool) -> Self {
+    pub fn new<T: AsRef<str>>(pool: SqlitePool, stream_id: T) -> Self {
         Self {
             pool,
-            watchers: Arc::new(Mutex::new(HashMap::new())),
+            stream_id: stream_id.as_ref().to_string(),
             write_lock: Arc::new(tokio::sync::Mutex::new(())),
         }
     }
@@ -28,25 +24,25 @@ impl SqliteStore {
         MIGRATOR.run(&self.pool).await.expect("Migration failed")
     }
 
-    fn build_query(query: &Query, last_sequence: Option<i64>) -> (String, Vec<String>) {
-        let mut conditions = vec!["stream_id = ?".to_string()];
-        let mut params = vec![query.stream_id.clone()];
-
-        if let Some(event_type) = &query.event_type {
-            conditions.push("event_type = ?".to_string());
-            params.push(event_type.clone());
+    fn select_query<T: AsRef<str>>(
+        &self,
+        aggregate_type: T,
+        aggregate_id: Option<T>,
+        offset: Option<i64>,
+    ) -> (String, Vec<String>) {
+        let mut conditions = vec!["stream_id = ?".to_owned(), "aggregate_type = ?".to_owned()];
+        let mut params = vec![
+            self.stream_id.to_owned(),
+            aggregate_type.as_ref().to_string(),
+        ];
+        if let Some(aggregate_id) = aggregate_id {
+            conditions.push("aggregate_id = ?".to_owned());
+            params.push(aggregate_id.as_ref().to_owned());
         }
-
-        if let Some(aggregate_id) = &query.aggregate_id {
-            conditions.push("aggregate_id = ?".to_string());
-            params.push(aggregate_id.clone());
+        if let Some(offset) = offset {
+            conditions.push("sequence > ?".to_owned());
+            params.push(offset.to_string())
         }
-
-        if let Some(last_seq) = last_sequence {
-            conditions.push("sequence > ?".to_string());
-            params.push(last_seq.to_string());
-        }
-
         let where_clause = conditions.join(" AND ");
         let sql = format!("SELECT * FROM events WHERE {where_clause} ORDER BY sequence ASC");
         (sql, params)
@@ -54,70 +50,105 @@ impl SqliteStore {
 }
 
 impl EventStore for SqliteStore {
-    async fn push_event<T: models::Event>(
+    async fn commit<A: Aggregate>(
         &self,
-        stream_id: &str,
-        aggregate_id: &str,
-        event: &T,
-        metadata: &Metadata,
-    ) -> Result<(), Error> {
-        let event_data = serde_json::to_value(event).map_err(Error::Serialization)?;
-        let metadata_json = serde_json::to_value(metadata).map_err(Error::Serialization)?;
-
+        events: Vec<A::Event>,
+        metadata: Metadata,
+        context: AggregateContext<A>,
+    ) -> Result<Vec<Envelope<A>>, Error> {
+        let wrapped = wrap_events::<A>(
+            &context.aggregate_id,
+            context.current_sequence,
+            events,
+            metadata,
+        );
+        let serialized = wrapped
+            .iter()
+            .map(SerializedEvent::try_from)
+            .collect::<Result<Vec<_>, _>>()?;
         let _write_lock = self.write_lock.lock().await;
         let mut tx = self.pool.begin().await.map_err(Error::Database)?;
-
-        let next_sequence: i64 = sqlx::query_scalar(
-            "SELECT COALESCE(MAX(sequence), 0) + 1 FROM events WHERE stream_id = ?",
-        )
-        .bind(stream_id)
-        .fetch_one(&mut *tx)
-        .await
-        .map_err(Error::Database)?;
-
-        sqlx::query(
-            r#"
-            INSERT INTO events (stream_id, event_type, aggregate_id, sequence, event_version, data, metadata, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            "#
-        )
-        .bind(stream_id)
-        .bind(event.event_type())
-        .bind(aggregate_id)
-        .bind(next_sequence)
-        .bind(T::EVENT_VERSION)
-        .bind(event_data)
-        .bind(metadata_json)
-        .bind(Utc::now())
-        .execute(&mut *tx)
-        .await
-        .map_err(Error::Database)?;
-
-        tx.commit().await.map_err(Error::Database)?;
-
-        Ok(())
-    }
-
-    async fn load_events_raw(
-        &self,
-        query: &Query,
-        sequence: Option<i64>,
-    ) -> Result<Vec<Event<JsonValue>>, Error> {
-        let (sql, params) = Self::build_query(query, sequence);
-        let mut sqlx_query = sqlx::query_as::<_, Event<JsonValue>>(&sql);
-        for param in params.iter() {
-            sqlx_query = sqlx_query.bind(param);
-        }
-        let events = sqlx_query
-            .fetch_all(&self.pool)
+        for event in serialized {
+            sqlx::query(
+                r#"
+                INSERT INTO events (stream_id, aggregate_type, aggregate_id, sequence, event_type, event_version, data, metadata)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?);
+                "#
+            )
+            .bind(&self.stream_id)
+            .bind(A::TYPE)
+            .bind(event.aggregate_id)
+            .bind(event.sequence)
+            .bind(event.event_type)
+            .bind(event.event_version)
+            .bind(event.data)
+            .bind(event.metadata)
+            .execute(&mut *tx)
             .await
             .map_err(Error::Database)?;
-        Ok(events)
+        }
+        tx.commit().await.map_err(Error::Database)?;
+        Ok(wrapped)
     }
 
-    fn get_watchers(
+    async fn load_aggregate<A: Aggregate>(
         &self,
-    ) -> &Arc<Mutex<HashMap<Query, Vec<mpsc::UnboundedSender<Event<JsonValue>>>>>> {
-        &self.watchers
+        aggregate_id: &str,
+    ) -> Result<AggregateContext<A>, Error> {
+        let events = self.load_events::<A>(aggregate_id).await?;
+        let mut aggregate = A::default();
+        let mut current_sequence = 0;
+        for event in events {
+            current_sequence = event.sequence;
+            aggregate.apply(event.data)
+        }
+        Ok(AggregateContext {
+            aggregate_id: aggregate_id.to_owned(),
+            current_sequence,
+            aggregate,
+        })
+    }
+
+    async fn load_events<A: Aggregate>(
+        &self,
+        aggregate_id: &str,
+    ) -> Result<Vec<Envelope<A>>, Error> {
+        let (sql, params) = self.select_query(A::TYPE, Some(aggregate_id), None);
+        let mut query = sqlx::query_as::<_, SerializedEvent>(&sql);
+        for param in params {
+            query = query.bind(param);
+        }
+        let serialized = query.fetch_all(&self.pool).await.map_err(Error::Database)?;
+        serialized
+            .into_iter()
+            .map(Envelope::try_from)
+            .collect::<Result<Vec<_>, _>>()
+    }
+
+    async fn load_latest_events<A: Aggregate>(
+        &self,
+        aggregate_id: &str,
+        sequence_from: i64,
+    ) -> Result<Vec<Envelope<A>>, Error> {
+        let (sql, params) = self.select_query(A::TYPE, Some(aggregate_id), Some(sequence_from));
+        let mut query = sqlx::query_as::<_, SerializedEvent>(&sql);
+        for param in params {
+            query = query.bind(param);
+        }
+        let serialized = query.fetch_all(&self.pool).await.map_err(Error::Database)?;
+        serialized
+            .into_iter()
+            .map(Envelope::try_from)
+            .collect::<Result<Vec<_>, _>>()
+    }
+
+    async fn load_sequence_nums<A: Aggregate>(&self) -> Result<Vec<(String, i64)>, Error> {
+        sqlx::query_as::<_, (String, i64)>(
+            r#"SELECT aggregate_id, MAX(sequence) FROM events WHERE stream_id = ? GROUP BY aggregate_id;"#
+        )
+        .bind(&self.stream_id)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(Error::Database)
     }
 }
