@@ -13,8 +13,7 @@ use rig::message::{ToolResult, ToolResultContent, UserContent};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
-const ANTHROPIC_MODEL: &str = "claude-sonnet-4.5-20250929";
-const OPENROUTER_MODEL: &str = "deepseek/deepseek-v3.2-exp";
+const MODEL: &str = "claude-sonnet-4.5-20250929";
 
 const SYSTEM_PROMPT: &str = "
 You are a python software engineer.
