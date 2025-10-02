@@ -1,7 +1,7 @@
 use dabgent_agent::processor::agent::{
     Agent, AgentState, Command, Event, Request, Response, Runtime,
 };
-use dabgent_agent::processor::databricks::DatabricksToolHandler;
+use dabgent_agent::processor::databricks::{self, DatabricksToolHandler};
 use dabgent_agent::processor::link::{Link, link_runtimes};
 use dabgent_agent::processor::llm::{LLMConfig, LLMHandler};
 use dabgent_agent::processor::utils::LogHandler;
@@ -77,6 +77,7 @@ pub async fn run_databricks_worker() -> Result<()> {
         .with_handler(LogHandler);
 
     // Databricks worker setup
+    let tools = databricks::toolbox();
     let databricks_client =
         Arc::new(DatabricksRestClient::new().map_err(|e| eyre::eyre!("{}", e))?);
     let databricks_llm = LLMHandler::new(
@@ -84,11 +85,11 @@ pub async fn run_databricks_worker() -> Result<()> {
         LLMConfig {
             model: MODEL.to_string(),
             preamble: Some(DATABRICKS_PROMPT.to_string()),
-            tools: Some(databricks_tool_definitions()),
+            tools: Some(tools.iter().map(|tool| tool.definition()).collect()),
             ..Default::default()
         },
     );
-    let databricks_tool_handler = DatabricksToolHandler::new(databricks_client);
+    let databricks_tool_handler = DatabricksToolHandler::new(databricks_client, tools);
     let mut databricks_runtime = Runtime::<DatabricksWorker, _>::new(store.clone(), ())
         .with_handler(databricks_llm)
         .with_handler(databricks_tool_handler)
@@ -360,90 +361,6 @@ fn explore_databricks_tool_definition() -> ToolDefinition {
             "required": ["catalog", "prompt"]
         }),
     }
-}
-
-fn databricks_tool_definitions() -> Vec<ToolDefinition> {
-    vec![
-        ToolDefinition {
-            name: "databricks_list_catalogs".to_string(),
-            description: "List all available catalogs in Unity Catalog".to_string(),
-            parameters: serde_json::json!({
-                "type": "object",
-                "properties": {},
-                "required": [],
-            }),
-        },
-        ToolDefinition {
-            name: "databricks_list_schemas".to_string(),
-            description: "List all schemas in a specific catalog".to_string(),
-            parameters: serde_json::json!({
-                "type": "object",
-                "properties": {
-                    "catalog_name": {
-                        "type": "string",
-                        "description": "Name of the catalog"
-                    }
-                },
-                "required": ["catalog_name"],
-            }),
-        },
-        ToolDefinition {
-            name: "databricks_list_tables".to_string(),
-            description: "List tables in a catalog and schema".to_string(),
-            parameters: serde_json::json!({
-                "type": "object",
-                "properties": {
-                    "catalog_name": {"type": "string"},
-                    "schema_name": {"type": "string"},
-                    "exclude_inaccessible": {"type": "boolean", "default": true}
-                },
-                "required": ["catalog_name", "schema_name"],
-            }),
-        },
-        ToolDefinition {
-            name: "databricks_describe_table".to_string(),
-            description: "Get comprehensive table details including metadata, columns, sample data"
-                .to_string(),
-            parameters: serde_json::json!({
-                "type": "object",
-                "properties": {
-                    "table_full_name": {
-                        "type": "string",
-                        "description": "Full table name in format 'catalog.schema.table'"
-                    },
-                    "sample_size": {"type": "integer", "default": 10}
-                },
-                "required": ["table_full_name"],
-            }),
-        },
-        ToolDefinition {
-            name: "databricks_execute_query".to_string(),
-            description: "Execute a SELECT query on Databricks".to_string(),
-            parameters: serde_json::json!({
-                "type": "object",
-                "properties": {
-                    "query": {"type": "string"},
-                    "timeout": {"type": "integer", "default": 45}
-                },
-                "required": ["query"],
-            }),
-        },
-        ToolDefinition {
-            name: "finish_delegation".to_string(),
-            description: "Complete databricks exploration and return comprehensive summary"
-                .to_string(),
-            parameters: serde_json::json!({
-                "type": "object",
-                "properties": {
-                    "summary": {
-                        "type": "string",
-                        "description": "Comprehensive summary of databricks exploration"
-                    }
-                },
-                "required": ["summary"]
-            }),
-        },
-    ]
 }
 
 async fn store() -> PollingQueue<SqliteStore> {

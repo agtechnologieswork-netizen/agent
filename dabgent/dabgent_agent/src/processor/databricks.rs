@@ -614,16 +614,7 @@ pub struct DatabricksToolHandler {
 }
 
 impl DatabricksToolHandler {
-    pub fn new(client: Arc<DatabricksRestClient>) -> Self {
-        let tools: Vec<Box<dyn DatabricksToolDyn>> = vec![
-            Box::new(DatabricksListCatalogs),
-            Box::new(DatabricksListSchemas),
-            Box::new(DatabricksListTables),
-            Box::new(DatabricksDescribeTable),
-            Box::new(DatabricksExecuteQuery),
-            Box::new(FinishDelegation),
-        ];
-
+    pub fn new(client: Arc<DatabricksRestClient>, tools: Vec<Box<dyn DatabricksToolDyn>>) -> Self {
         Self { tools, client }
     }
 
@@ -674,4 +665,16 @@ impl<A: Agent, ES: EventStore> EventHandler<A, ES> for DatabricksToolHandler {
         }
         Ok(())
     }
+}
+
+pub fn toolbox() -> Vec<Box<dyn DatabricksToolDyn>> {
+    let tools: Vec<Box<dyn DatabricksToolDyn>> = vec![
+        Box::new(DatabricksListCatalogs),
+        Box::new(DatabricksListSchemas),
+        Box::new(DatabricksListTables),
+        Box::new(DatabricksDescribeTable),
+        Box::new(DatabricksExecuteQuery),
+        Box::new(FinishDelegation),
+    ];
+    tools
 }
