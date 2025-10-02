@@ -12,8 +12,12 @@
 set -e  # Exit on any error
 
 # Configuration - Replace with your actual values
-DATABRICKS_HOST="<PLACEHOLDER_DBX_HOST>"
-DATABRICKS_TOKEN="<PLACEHOLDER_DBX_TOKEN>"
+# DATABRICKS_HOST="<PLACEHOLDER_DBX_HOST>"
+# DATABRICKS_TOKEN="<PLACEHOLDER_DBX_TOKEN>"
+# # Set environment variables for databricks CLI
+# export DATABRICKS_HOST="$DATABRICKS_HOST"
+# export DATABRICKS_TOKEN="$DATABRICKS_TOKEN"
+
 
 # Central LogFood host
 # DATABRICKS_HOST="https://adb-2548836972759138.18.azuredatabricks.net/"
@@ -212,9 +216,6 @@ deploy_to_databricks() {
 
     log_info "App name: $app_name"
 
-    # Set environment variables for databricks CLI
-    export DATABRICKS_HOST="$DATABRICKS_HOST"
-    export DATABRICKS_TOKEN="$DATABRICKS_TOKEN"
 
     # Get current user for workspace path
     local user_email
