@@ -1,5 +1,5 @@
 use dabgent_agent::toolbox::Validator;
-use dabgent_sandbox::SandboxDyn;
+use dabgent_sandbox::{DaggerSandbox, Sandbox};
 use eyre::Result;
 
 pub struct DataAppsValidator;
@@ -15,7 +15,7 @@ impl DataAppsValidator {
         Self
     }
 
-    async fn check_python_dependencies(&self, sandbox: &mut Box<dyn SandboxDyn>) -> Result<(), String> {
+    async fn check_python_dependencies(&self, sandbox: &mut DaggerSandbox) -> Result<(), String> {
         tracing::info!("Starting Python dependencies check...");
 
         // Try to install dependencies - need to be in backend directory for uv sync
@@ -44,7 +44,7 @@ impl DataAppsValidator {
     }
 
 
-    async fn check_linting(&self, sandbox: &mut Box<dyn SandboxDyn>) -> Result<(), String> {
+    async fn check_linting(&self, sandbox: &mut DaggerSandbox) -> Result<(), String> {
         tracing::info!("Starting linting check...");
 
         let result = sandbox.exec("cd /app/backend && uv run ruff check . --fix")
@@ -69,7 +69,7 @@ impl DataAppsValidator {
         Ok(())
     }
 
-    async fn check_frontend_build(&self, sandbox: &mut Box<dyn SandboxDyn>) -> Result<(), String> {
+    async fn check_frontend_build(&self, sandbox: &mut DaggerSandbox) -> Result<(), String> {
         tracing::info!("Starting frontend build check...");
 
         // Check if package.json exists
@@ -122,7 +122,7 @@ impl DataAppsValidator {
         Ok(())
     }
 
-    async fn check_tests(&self, sandbox: &mut Box<dyn SandboxDyn>) -> Result<(), String> {
+    async fn check_tests(&self, sandbox: &mut DaggerSandbox) -> Result<(), String> {
         tracing::info!("Starting tests check...");
 
         let result = sandbox.exec("cd /app/backend && uv run pytest . -v")
@@ -150,7 +150,7 @@ impl DataAppsValidator {
 }
 
 impl Validator for DataAppsValidator {
-    async fn run(&self, sandbox: &mut Box<dyn SandboxDyn>) -> Result<Result<(), String>> {
+    async fn run(&self, sandbox: &mut DaggerSandbox) -> Result<Result<(), String>> {
         // Initial setup: ensure we're in the backend directory and sync dependencies
         match sandbox.exec("cd /app/backend && uv sync --dev").await {
             Ok(_) => (),

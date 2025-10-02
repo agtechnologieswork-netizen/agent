@@ -1,5 +1,5 @@
 use dabgent_agent::toolbox::{Tool, ToolDyn, Validator, basic::{WriteFile, ReadFile, EditFile, LsDir, RmFile, DoneTool}};
-use dabgent_sandbox::SandboxDyn;
+use dabgent_sandbox::{DaggerSandbox, Sandbox};
 use eyre::Result;
 use serde::{Deserialize, Serialize};
 
@@ -46,7 +46,7 @@ impl Tool for UvAdd {
     async fn call(
         &self,
         args: Self::Args,
-        sandbox: &mut Box<dyn SandboxDyn>,
+        sandbox: &mut DaggerSandbox,
     ) -> Result<Result<Self::Output, Self::Error>> {
         let UvAddArgs { package, dev } = args;
 
