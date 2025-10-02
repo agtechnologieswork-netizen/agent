@@ -29,19 +29,19 @@ NC='\033[0m' # No Color
 
 # Logging functions
 log_info() {
-    echo -e "${BLUE}ℹ${NC} $1"
+    echo -e "${BLUE}ℹ${NC} $1" >&2
 }
 
 log_success() {
-    echo -e "${GREEN}✓${NC} $1"
+    echo -e "${GREEN}✓${NC} $1" >&2
 }
 
 log_warning() {
-    echo -e "${YELLOW}⚠${NC} $1"
+    echo -e "${YELLOW}⚠${NC} $1" >&2
 }
 
 log_error() {
-    echo -e "${RED}✗${NC} $1"
+    echo -e "${RED}✗${NC} $1" >&2
 }
 
 # Function to validate inputs
@@ -56,31 +56,25 @@ validate_inputs() {
         log_error "Folder does not exist: $1"
         exit 1
     fi
-
-    if [ -z "$DATABRICKS_HOST" ] || [ "$DATABRICKS_HOST" = "your-databricks-host" ]; then
-        log_error "DATABRICKS_HOST is not configured"
-        exit 1
-    fi
-
-    if [ -z "$DATABRICKS_TOKEN" ] || [ "$DATABRICKS_TOKEN" = "your-databricks-token" ]; then
-        log_error "DATABRICKS_TOKEN is not configured"
-        exit 1
-    fi
 }
 
 # Function to check if databricks CLI is installed
 check_databricks_cli() {
+    log_info "Checking Databricks CLI..."
     if ! command -v databricks &> /dev/null; then
         log_error "Databricks CLI is not installed"
         echo "Install from: https://docs.databricks.com/dev-tools/cli/install.html"
         exit 1
     fi
+    log_success "Databricks CLI found"
 }
 
 # Function to get current user from Databricks CLI
 get_current_user() {
+    log_info "Getting current user..."
+
     local user_json
-    user_json=$(databricks current-user me --output json 2>&1)
+    user_json=$(databricks current-user me --output json)
     if [ $? -ne 0 ]; then
         log_error "Could not determine current user. Ensure you're authenticated."
         exit 1
@@ -93,6 +87,7 @@ get_current_user() {
         exit 1
     fi
 
+    log_success "Authenticated as: $user_email"
     echo "$user_email"
 }
 
@@ -101,8 +96,11 @@ check_app_exists() {
     local app_name="$1"
     local apps_json
 
+    log_info "Checking if app exists..."
     apps_json=$(databricks apps list --output json 2>&1)
     if [ $? -ne 0 ]; then
+        log_error "Failed to list apps"
+        echo "CLI output: $apps_json"
         return 1
     fi
 
@@ -116,7 +114,8 @@ create_app() {
     local app_name="$1"
     log_info "Creating app: $app_name"
 
-    if databricks apps create "$app_name"; then
+    databricks apps create "$app_name"
+    if [ $? -eq 0 ]; then
         log_success "App created: $app_name"
     else
         log_error "Failed to create app: $app_name"
@@ -155,7 +154,8 @@ import_code() {
         --exclude='docker-compose.yml' \
         "$source_path/" "$temp_dir/"
 
-    if databricks workspace import-dir --overwrite "$temp_dir" "$workspace_path"; then
+    databricks workspace import-dir --overwrite "$temp_dir" "$workspace_path"
+    if [ $? -eq 0 ]; then
         log_success "Code imported to workspace"
     else
         log_error "Failed to import code to workspace"
@@ -170,7 +170,8 @@ deploy_app() {
 
     log_info "Deploying app: $app_name"
 
-    if databricks apps deploy "$app_name" --source-code-path "$workspace_path"; then
+    databricks apps deploy "$app_name" --source-code-path "$workspace_path"
+    if [ $? -eq 0 ]; then
         log_success "App deployed successfully"
     else
         log_error "Failed to deploy app"
@@ -199,6 +200,8 @@ deploy_to_databricks() {
     local folder_path="$1"
     local app_name="$2"
 
+    log_info "Preparing deployment..."
+
     # Convert to absolute path
     folder_path=$(realpath "$folder_path")
 
@@ -206,6 +209,8 @@ deploy_to_databricks() {
     if [ -z "$app_name" ]; then
         app_name="app-$(basename "$folder_path" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]/-/g')"
     fi
+
+    log_info "App name: $app_name"
 
     # Set environment variables for databricks CLI
     export DATABRICKS_HOST="$DATABRICKS_HOST"
@@ -253,12 +258,15 @@ main() {
     echo ""
 
     # Validate inputs
+    log_info "Validating inputs..."
     validate_inputs "$@"
+    log_success "Inputs validated"
 
     # Check prerequisites
     check_databricks_cli
 
     # Run deployment
+    log_info "Starting deployment process..."
     deploy_to_databricks "$1" "$2"
 }
 
