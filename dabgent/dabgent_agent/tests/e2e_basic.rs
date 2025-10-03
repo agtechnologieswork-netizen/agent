@@ -1,7 +1,7 @@
 mod common;
 
 use common::{create_test_store, PythonValidator};
-use dabgent_agent::llm::LLMClientDyn;
+use dabgent_agent::llm::{LLMClientDyn, WithRetryExt};
 use dabgent_agent::processor::agent::{Agent, AgentState, Command, Event, Request, Runtime};
 use dabgent_agent::processor::llm::{LLMConfig, LLMHandler};
 use dabgent_agent::processor::tools::{
@@ -98,7 +98,7 @@ async fn test_e2e_basic_anthropic() {
 
     let result = timeout(Duration::from_secs(180), run_basic_workflow(
         "claude-sonnet-4-5-20250929",
-        Arc::new(rig::providers::anthropic::Client::from_env()),
+        Arc::new(rig::providers::anthropic::Client::from_env().with_retry()),
         "anthropic_basic",
     )).await;
 
@@ -120,7 +120,7 @@ async fn test_e2e_basic_openrouter() {
 
     let result = timeout(Duration::from_secs(180), run_basic_workflow(
         "deepseek/deepseek-v3.2-exp",
-        Arc::new(rig::providers::openrouter::Client::from_env()),
+        Arc::new(rig::providers::openrouter::Client::from_env().with_retry()),
         "openrouter_basic",
     )).await;
 

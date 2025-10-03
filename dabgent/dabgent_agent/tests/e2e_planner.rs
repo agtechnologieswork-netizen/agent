@@ -1,7 +1,7 @@
 mod common;
 
 use common::{create_test_store, PythonValidator};
-use dabgent_agent::llm::LLMClientDyn;
+use dabgent_agent::llm::{LLMClientDyn, WithRetryExt};
 use dabgent_agent::processor::agent::{
     Agent, AgentState, Command, Event, Request, Response, Runtime,
 };
@@ -269,7 +269,7 @@ async fn test_e2e_planner_anthropic() {
         Duration::from_secs(240),
         run_planner_workflow(
             "claude-sonnet-4-5-20250929",
-            Arc::new(rig::providers::anthropic::Client::from_env()),
+            Arc::new(rig::providers::anthropic::Client::from_env().with_retry()),
             "anthropic_planner",
         ),
     )
@@ -295,7 +295,7 @@ async fn test_e2e_planner_openrouter() {
         Duration::from_secs(240),
         run_planner_workflow(
             "deepseek/deepseek-v3.2-exp",
-            Arc::new(rig::providers::openrouter::Client::from_env()),
+            Arc::new(rig::providers::openrouter::Client::from_env().with_retry()),
             "openrouter_planner",
         ),
     )
