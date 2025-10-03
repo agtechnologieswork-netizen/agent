@@ -5,6 +5,7 @@ use dabgent_sandbox::SandboxHandle;
 use eyre::Result;
 use rig::message::{ToolCall, ToolResult};
 
+#[derive(Clone)]
 pub struct TemplateConfig {
     pub host_dir: String,
     pub dockerfile: String,

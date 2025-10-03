@@ -1,28 +1,27 @@
-use dabgent_agent::processor::agent::{Agent, AgentState, Command, Event};
-use dabgent_agent::processor::link::Runtime;
+use dabgent_agent::processor::agent::{Agent, AgentState, Command, Event, Request, Runtime};
+use dabgent_agent::processor::finish::FinishHandler;
 use dabgent_agent::processor::llm::{LLMConfig, LLMHandler};
-use dabgent_agent::processor::tools::{
-    TemplateConfig, ToolHandler, get_dockerfile_dir_from_src_ws,
-};
+use dabgent_agent::processor::tools::{TemplateConfig, ToolHandler};
 use dabgent_agent::processor::utils::LogHandler;
-use dabgent_agent::toolbox::{self, basic::toolset};
+use dabgent_agent::toolbox::basic::toolset;
 use dabgent_mq::Event as MQEvent;
 use dabgent_mq::db::sqlite::SqliteStore;
 use dabgent_mq::listener::PollingQueue;
-use dabgent_sandbox::{DaggerSandbox, Sandbox, SandboxHandle};
+use dabgent_sandbox::{Sandbox, SandboxHandle};
 use eyre::Result;
 use rig::client::ProviderClient;
-use rig::message::{ToolResult, ToolResultContent};
+use rig::message::ToolResult;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
-const MODEL: &str = "claude-sonnet-4-5-20250929";
+const MODEL: &str = "claude-sonnet-4.5-20250929";
 
 const SYSTEM_PROMPT: &str = "
 You are a python software engineer.
 Workspace is already set up using uv init.
 Use uv package manager if you need to add extra libraries.
 Program will be run using uv run main.py command.
+When you finish the task, call the done tool to signal completion.
 ";
 
 const USER_PROMPT: &str = "minimal script that fetches my ip using some api like ipify.org";
@@ -37,9 +36,10 @@ async fn main() {
 pub async fn run_worker() -> Result<()> {
     let store = store().await;
     let tools = toolset(Validator);
+    let tools_for_finish = toolset(Validator);  // Create a separate copy for finish handler
 
     let llm = LLMHandler::new(
-        Arc::new(rig::providers::anthropic::Client::from_env()), 
+        Arc::new(rig::providers::anthropic::Client::from_env()),
         LLMConfig {
             model: MODEL.to_string(),
             preamble: Some(SYSTEM_PROMPT.to_string()),
@@ -47,20 +47,33 @@ pub async fn run_worker() -> Result<()> {
             ..Default::default()
         },
     );
+
+    let sandbox_handle = SandboxHandle::new(Default::default());
+    let template_config = TemplateConfig::default_dir("./examples");
+
     let tool_handler = ToolHandler::new(
         tools,
-        SandboxHandle::new(Default::default()),
-        TemplateConfig::default_dir(get_dockerfile_dir_from_src_ws()),
+        sandbox_handle.clone(),
+        template_config.clone(),
     );
 
-    let runtime = Runtime::<AgentState<Basic>, _>::new(store, ())
+    // Add FinishHandler to export artifacts when done
+    let finish_handler = FinishHandler::new(
+        sandbox_handle,
+        "./output".to_string(),  // Export to ./output directory
+        tools_for_finish,
+        template_config,
+    );
+
+    let runtime = Runtime::<Basic, _>::new(store, ())
         .with_handler(llm)
         .with_handler(tool_handler)
+        .with_handler(finish_handler)  // Add the finish handler
         .with_handler(LogHandler);
 
-    let command = Command::PutUserMessage {
+    let command = Command::SendRequest(Request::Completion {
         content: rig::OneOrMany::one(rig::message::UserContent::text(USER_PROMPT)),
-    };
+    });
     runtime.handler.execute("basic", command).await?;
 
     runtime.start().await
@@ -103,11 +116,11 @@ impl Agent for Basic {
         _: &Self::Services,
         incoming: Vec<ToolResult>,
     ) -> Result<Vec<Event<Self::AgentEvent>>, Self::AgentError> {
-        let completed = state.merge_tool_results(&incoming);
+        let completed = state.merge_tool_results(incoming);
         if let Some(done_id) = &state.agent.done_call_id {
             if let Some(result) = completed.iter().find(|r| done_id == &r.id) {
                 let is_done = result.content.iter().any(|c| match c {
-                    ToolResultContent::Text(text) => text.text.contains("success"),
+                    rig::message::ToolResultContent::Text(text) => text.text.contains("success"),
                     _ => false,
                 });
                 if is_done {
@@ -115,12 +128,14 @@ impl Agent for Basic {
                 }
             }
         }
-        Ok(vec![state.results_passthrough(&incoming)])
+        let content = completed.into_iter().map(rig::message::UserContent::ToolResult);
+        let content = rig::OneOrMany::many(content).unwrap();
+        Ok(vec![Event::Request(Request::Completion { content })])
     }
 
     fn apply_event(state: &mut AgentState<Self>, event: Event<Self::AgentEvent>) {
         match event {
-            Event::ToolCalls { ref calls } => {
+            Event::Request(Request::ToolCalls { ref calls }) => {
                 for call in calls {
                     if call.function.name == "done" {
                         state.agent.done_call_id = Some(call.id.clone());
@@ -133,6 +148,23 @@ impl Agent for Basic {
     }
 }
 
+struct Validator;
+impl dabgent_agent::toolbox::Validator for Validator {
+    async fn run(
+        &self,
+        sandbox: &mut dabgent_sandbox::DaggerSandbox,
+    ) -> Result<Result<(), String>> {
+        let result = sandbox.exec("uv run main.py").await?;
+        match result.exit_code {
+            0 => Ok(Ok(())),
+            _ => Ok(Err(format!(
+                "Validation failed:\nstdout: {}\nstderr: {}",
+                result.stdout, result.stderr
+            ))),
+        }
+    }
+}
+
 async fn store() -> PollingQueue<SqliteStore> {
     let pool = sqlx::SqlitePool::connect(":memory:")
         .await
@@ -140,21 +172,4 @@ async fn store() -> PollingQueue<SqliteStore> {
     let store = SqliteStore::new(pool, "agent");
     store.migrate().await;
     PollingQueue::new(store)
-}
-
-pub struct Validator;
-
-impl toolbox::Validator for Validator {
-    async fn run(&self, sandbox: &mut DaggerSandbox) -> Result<Result<(), String>> {
-        sandbox.exec("uv run main.py").await.map(|result| {
-            if result.exit_code == 0 {
-                Ok(())
-            } else {
-                Err(format!(
-                    "code: {}\nstdout: {}\nstderr: {}",
-                    result.exit_code, result.stdout, result.stderr
-                ))
-            }
-        })
-    }
 }
