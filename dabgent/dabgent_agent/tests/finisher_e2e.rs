@@ -1,13 +1,15 @@
-use dabgent_agent::processor::agent::{Agent, AgentState, Command, Event, Request, Runtime};
+mod common;
+
+use common::{create_test_store, PythonValidator};
+use dabgent_agent::processor::agent::{Agent, AgentState, Command, Event};
 use dabgent_agent::processor::finish::FinishHandler;
+use dabgent_agent::processor::link::Runtime;
 use dabgent_agent::processor::llm::{LLMConfig, LLMHandler};
 use dabgent_agent::processor::tools::{TemplateConfig, ToolHandler};
 use dabgent_agent::processor::utils::LogHandler;
 use dabgent_agent::toolbox::basic::toolset;
 use dabgent_mq::Event as MQEvent;
-use dabgent_mq::db::sqlite::SqliteStore;
-use dabgent_mq::listener::PollingQueue;
-use dabgent_sandbox::{Sandbox, SandboxHandle};
+use dabgent_sandbox::SandboxHandle;
 use eyre::Result;
 use rig::client::ProviderClient;
 use rig::message::ToolResult;
@@ -65,7 +67,7 @@ impl Agent for Basic {
         _: &Self::Services,
         incoming: Vec<ToolResult>,
     ) -> Result<Vec<Event<Self::AgentEvent>>, Self::AgentError> {
-        let completed = state.merge_tool_results(incoming);
+        let completed = state.merge_tool_results(&incoming);
         if let Some(done_id) = &state.agent.done_call_id {
             if let Some(result) = completed.iter().find(|r| done_id == &r.id) {
                 let is_done = result.content.iter().any(|c| match c {
@@ -77,14 +79,12 @@ impl Agent for Basic {
                 }
             }
         }
-        let content = completed.into_iter().map(rig::message::UserContent::ToolResult);
-        let content = rig::OneOrMany::many(content).unwrap();
-        Ok(vec![Event::Request(Request::Completion { content })])
+        Ok(vec![state.results_passthrough(&incoming)])
     }
 
     fn apply_event(state: &mut AgentState<Self>, event: Event<Self::AgentEvent>) {
         match event {
-            Event::Request(Request::ToolCalls { ref calls }) => {
+            Event::ToolCalls { ref calls } => {
                 for call in calls {
                     if call.function.name == "done" {
                         state.agent.done_call_id = Some(call.id.clone());
@@ -95,32 +95,6 @@ impl Agent for Basic {
             _ => {}
         }
     }
-}
-
-struct Validator;
-impl dabgent_agent::toolbox::Validator for Validator {
-    async fn run(
-        &self,
-        sandbox: &mut dabgent_sandbox::DaggerSandbox,
-    ) -> Result<Result<(), String>> {
-        let result = sandbox.exec("uv run main.py").await?;
-        match result.exit_code {
-            0 => Ok(Ok(())),
-            _ => Ok(Err(format!(
-                "Validation failed:\nstdout: {}\nstderr: {}",
-                result.stdout, result.stderr
-            ))),
-        }
-    }
-}
-
-async fn create_store() -> PollingQueue<SqliteStore> {
-    let pool = sqlx::SqlitePool::connect(":memory:")
-        .await
-        .expect("Failed to create in-memory SQLite pool");
-    let store = SqliteStore::new(pool, "finisher_e2e_test");
-    store.migrate().await;
-    PollingQueue::new(store)
 }
 
 fn get_llm_client() -> Option<Arc<rig::providers::anthropic::Client>> {
@@ -150,9 +124,9 @@ async fn test_finisher_e2e_with_real_dagger() -> Result<()> {
     println!("Export path: {}", export_path);
 
     // Setup store and tools
-    let store = create_store().await;
-    let tools = toolset(Validator);
-    let tools_for_finish = toolset(Validator);
+    let store = create_test_store().await;
+    let tools = toolset(PythonValidator);
+    let tools_for_finish = toolset(PythonValidator);
 
     // Setup LLM handler
     let llm = LLMHandler::new(
@@ -189,16 +163,16 @@ async fn test_finisher_e2e_with_real_dagger() -> Result<()> {
     );
 
     // Create runtime with all handlers
-    let runtime = Runtime::<Basic, _>::new(store, ())
+    let runtime = Runtime::<AgentState<Basic>, _>::new(store, ())
         .with_handler(llm)
         .with_handler(tool_handler)
         .with_handler(finish_handler)
         .with_handler(LogHandler);
 
     // Execute agent with test prompt
-    let command = Command::SendRequest(Request::Completion {
+    let command = Command::PutUserMessage {
         content: rig::OneOrMany::one(rig::message::UserContent::text(USER_PROMPT)),
-    });
+    };
     runtime.handler.execute("finisher-e2e-test", command).await?;
 
     // Run runtime in background (it will run forever, we just need artifacts to be exported)

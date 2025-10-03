@@ -1,22 +1,18 @@
-use super::agent::{Agent, AgentState, Event, EventHandler};
-use super::replay::SandboxReplayer;
+use super::agent::{Agent, AgentState, Event};
 use super::tools::TemplateConfig;
+use crate::llm::FinishReason;
 use crate::toolbox::ToolDyn;
+use dabgent_mq::listener::EventHandler;
 use dabgent_mq::{Envelope, EventStore, Handler};
-use dabgent_sandbox::{Sandbox, SandboxHandle, SandboxDyn};
+use dabgent_sandbox::{DaggerSandbox, Sandbox, SandboxHandle, SandboxDyn};
 use eyre::Result;
+use rig::message::AssistantContent;
 use std::path::Path;
 
-/// Trait for preparing artifacts before export.
-/// Implementations can run additional commands (e.g., freezing dependencies)
-/// before the sandbox contents are exported.
 pub trait ArtifactPreparer: Send + Sync {
     fn prepare(&self, sandbox: &mut Box<dyn SandboxDyn>) -> impl std::future::Future<Output = Result<()>> + Send;
 }
 
-/// Handler that exports artifacts from the sandbox when the agent task is finished.
-/// It replays all tool calls to rebuild the sandbox state, then exports the
-/// artifacts using git-aware export (respecting .gitignore).
 pub struct FinishHandler {
     sandbox_handle: SandboxHandle,
     export_path: String,
@@ -44,19 +40,9 @@ impl FinishHandler {
         handler: &Handler<AgentState<A>, ES>,
         aggregate_id: &str,
     ) -> Result<()> {
-        tracing::info!("Starting artifact export for aggregate: {}", aggregate_id);
-
-        // Try to get existing sandbox, or create a fresh one from template
         let mut sandbox = match self.sandbox_handle.get(aggregate_id).await? {
-            Some(s) => {
-                tracing::info!("Found existing sandbox for aggregate: {}", aggregate_id);
-                s
-            }
+            Some(s) => s,
             None => {
-                tracing::info!(
-                    "Creating fresh sandbox from template for aggregate: {}",
-                    aggregate_id
-                );
                 self.sandbox_handle
                     .create_from_directory(
                         aggregate_id,
@@ -67,117 +53,96 @@ impl FinishHandler {
             }
         };
 
-        // Load all events for this aggregate
         let envelopes = handler.store().load_events::<AgentState<A>>(aggregate_id).await?;
         let events: Vec<Event<A::AgentEvent>> = envelopes.into_iter().map(|e| e.data).collect();
 
-        // Replay all tool calls to rebuild complete sandbox state
-        // This ensures we have all files created/modified during execution
-        tracing::info!("Replaying {} events to rebuild sandbox state", events.len());
-        let mut replayer = SandboxReplayer::new(&mut sandbox, &self.tools);
-        replayer.apply_all(&events).await?;
-
-        // Export artifacts using git-aware export
+        self.replay_events(&mut sandbox, &events).await?;
         self.export_artifacts(&mut sandbox).await?;
-
-        // Clean up: we don't store the sandbox back since export is the final step
-        tracing::info!("Artifact export completed for aggregate: {}", aggregate_id);
 
         Ok(())
     }
 
-    async fn export_artifacts(&mut self, sandbox: &mut dabgent_sandbox::DaggerSandbox) -> Result<String> {
-        tracing::info!(
-            "Exporting artifacts (git-aware) from /app to {}",
-            self.export_path
-        );
+    async fn replay_events<T>(&self, sandbox: &mut DaggerSandbox, events: &[Event<T>]) -> Result<()> {
+        for event in events {
+            if let Event::AgentCompletion { response } = event {
+                if response.finish_reason == FinishReason::ToolUse {
+                    self.replay_tool_calls(sandbox, response).await?;
+                }
+            }
+        }
+        Ok(())
+    }
 
-        // Ensure export directory exists
+    async fn replay_tool_calls(&self, sandbox: &mut DaggerSandbox, response: &crate::llm::CompletionResponse) -> Result<()> {
+        for content in response.choice.iter() {
+            if let AssistantContent::ToolCall(call) = content {
+                let tool_name = &call.function.name;
+                let args = call.function.arguments.clone();
+
+                if let Some(tool) = self.tools.iter().find(|t| t.name() == *tool_name) {
+                    if tool.needs_replay() {
+                        if let Err(e) = tool.call(args, sandbox).await {
+                            tracing::warn!("Failed tool call during replay {}: {:?}", tool_name, e);
+                        }
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
+    async fn export_artifacts(&mut self, sandbox: &mut DaggerSandbox) -> Result<String> {
         if let Some(parent) = Path::new(&self.export_path).parent() {
             std::fs::create_dir_all(parent)?;
         } else {
             std::fs::create_dir_all(&self.export_path)?;
         }
 
-        // Deterministic git-based export: build /output inside sandbox, then export it
-        // 1) Prepare output directory
-        tracing::debug!("Preparing /output directory in sandbox");
         let prep = Sandbox::exec(sandbox, "rm -rf /output && mkdir -p /output").await?;
         if prep.exit_code != 0 {
-            tracing::error!("Failed to prepare /output: stderr={}, stdout={}", prep.stderr, prep.stdout);
             eyre::bail!("Failed to prepare /output: {}", prep.stderr);
         }
 
-        // 2) Check if /app exists and has content
-        let check_app = Sandbox::exec(sandbox, "ls -la /app 2>&1 || echo 'no /app dir'").await?;
-        tracing::debug!("Contents of /app: {}", check_app.stdout);
-
-        // 3) Initialize git and stage non-ignored files
-        tracing::debug!("Initializing git repository in /app");
         let git_commands = [
-            ("git init", "git -C /app init"),
-            ("git config user.email", "git -C /app config user.email agent@appbuild.com"),
-            ("git config user.name", "git -C /app config user.name Agent"),
-            ("git add", "git -C /app add -A"),
+            "git -C /app init",
+            "git -C /app config user.email agent@appbuild.com",
+            "git -C /app config user.name Agent",
+            "git -C /app add -A",
         ];
 
-        for (desc, cmd) in git_commands {
+        for cmd in git_commands {
             let res = Sandbox::exec(sandbox, cmd).await?;
-            if res.exit_code != 0 {
-                tracing::warn!("{} returned non-zero: stderr={}, stdout={}", desc, res.stderr, res.stdout);
-                // Don't fail immediately, log and continue
-                if !res.stderr.contains("already exists") && !res.stderr.is_empty() {
-                    eyre::bail!("Git command failed ({}): stderr={}, stdout={}", cmd, res.stderr, res.stdout);
-                }
+            if res.exit_code != 0 && !res.stderr.contains("already exists") && !res.stderr.is_empty() {
+                eyre::bail!("Git command failed ({}): {}", cmd, res.stderr);
             }
         }
 
-        // 4) Populate /output from the index (respects .gitignore)
-        tracing::debug!("Checking out files to /output");
         let checkout = Sandbox::exec(sandbox, "git -C /app checkout-index --all --prefix=/output/ 2>&1")
             .await?;
         if checkout.exit_code != 0 {
-            tracing::error!("git checkout-index failed: {}", checkout.stderr);
-            // Try a fallback: just copy everything
-            tracing::warn!("Falling back to direct copy of /app to /output");
-            let fallback = Sandbox::exec(sandbox, "cp -r /app/* /output/ 2>&1 || true").await?;
-            tracing::debug!("Fallback copy result: {}", fallback.stdout);
+            Sandbox::exec(sandbox, "cp -r /app/* /output/ 2>&1 || true").await?;
         }
 
-        // 5) Verify /output has content
-        let check_output = Sandbox::exec(sandbox, "ls -la /output").await?;
-        tracing::info!("Contents of /output before export: {}", check_output.stdout);
-
-        // 6) Export /output
-        tracing::info!("Exporting /output to {}", self.export_path);
-        Sandbox::export_directory(sandbox, "/output", &self.export_path)
-            .await?;
-
-        tracing::info!("Artifacts exported successfully to {}", self.export_path);
+        Sandbox::export_directory(sandbox, "/output", &self.export_path).await?;
         Ok(self.export_path.clone())
     }
 }
 
-impl<A: Agent, ES: EventStore> EventHandler<A, ES> for FinishHandler {
+impl<A: Agent, ES: EventStore> EventHandler<AgentState<A>, ES> for FinishHandler {
     async fn process(
         &mut self,
         handler: &Handler<AgentState<A>, ES>,
         envelope: &Envelope<AgentState<A>>,
     ) -> Result<()> {
-        // Look for agent-specific Finished events
         if let Event::Agent(_) = &envelope.data {
-            // Check if this is a "Finished" event by examining the event type
             use dabgent_mq::Event as MQEvent;
             let event_type = envelope.data.event_type();
             if event_type.contains("finished") || event_type.contains("done") {
-                tracing::info!("Agent finished, starting artifact export");
-
                 if let Err(e) = self.replay_and_export(handler, &envelope.aggregate_id).await {
                     tracing::error!("Failed to export artifacts: {}", e);
                 }
             }
         }
-
         Ok(())
     }
 }
