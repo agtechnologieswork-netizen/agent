@@ -22,6 +22,7 @@ You are a python software engineer.
 Workspace is already set up using uv init.
 Use uv package manager if you need to add extra libraries.
 Program will be run using uv run main.py command.
+IMPORTANT: After the script runs successfully, you MUST call the 'done' tool to complete the task.
 ";
 
 const USER_PROMPT: &str = "write a simple python script that prints 'Hello from DeepSeek!' and the result of 2+2";
