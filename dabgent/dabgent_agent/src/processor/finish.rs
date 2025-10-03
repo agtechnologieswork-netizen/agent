@@ -3,9 +3,16 @@ use super::replay::SandboxReplayer;
 use super::tools::TemplateConfig;
 use crate::toolbox::ToolDyn;
 use dabgent_mq::{Envelope, EventStore, Handler};
-use dabgent_sandbox::{Sandbox, SandboxHandle};
+use dabgent_sandbox::{Sandbox, SandboxHandle, SandboxDyn};
 use eyre::Result;
 use std::path::Path;
+
+/// Trait for preparing artifacts before export.
+/// Implementations can run additional commands (e.g., freezing dependencies)
+/// before the sandbox contents are exported.
+pub trait ArtifactPreparer: Send + Sync {
+    fn prepare(&self, sandbox: &mut Box<dyn SandboxDyn>) -> impl std::future::Future<Output = Result<()>> + Send;
+}
 
 /// Handler that exports artifacts from the sandbox when the agent task is finished.
 /// It replays all tool calls to rebuild the sandbox state, then exports the
@@ -95,14 +102,14 @@ impl FinishHandler {
         // Deterministic git-based export: build /output inside sandbox, then export it
         // 1) Prepare output directory
         tracing::debug!("Preparing /output directory in sandbox");
-        let prep = sandbox.exec("rm -rf /output && mkdir -p /output").await?;
+        let prep = Sandbox::exec(sandbox, "rm -rf /output && mkdir -p /output").await?;
         if prep.exit_code != 0 {
             tracing::error!("Failed to prepare /output: stderr={}, stdout={}", prep.stderr, prep.stdout);
             eyre::bail!("Failed to prepare /output: {}", prep.stderr);
         }
 
         // 2) Check if /app exists and has content
-        let check_app = sandbox.exec("ls -la /app 2>&1 || echo 'no /app dir'").await?;
+        let check_app = Sandbox::exec(sandbox, "ls -la /app 2>&1 || echo 'no /app dir'").await?;
         tracing::debug!("Contents of /app: {}", check_app.stdout);
 
         // 3) Initialize git and stage non-ignored files
@@ -115,7 +122,7 @@ impl FinishHandler {
         ];
 
         for (desc, cmd) in git_commands {
-            let res = sandbox.exec(cmd).await?;
+            let res = Sandbox::exec(sandbox, cmd).await?;
             if res.exit_code != 0 {
                 tracing::warn!("{} returned non-zero: stderr={}, stdout={}", desc, res.stderr, res.stdout);
                 // Don't fail immediately, log and continue
@@ -127,25 +134,23 @@ impl FinishHandler {
 
         // 4) Populate /output from the index (respects .gitignore)
         tracing::debug!("Checking out files to /output");
-        let checkout = sandbox
-            .exec("git -C /app checkout-index --all --prefix=/output/ 2>&1")
+        let checkout = Sandbox::exec(sandbox, "git -C /app checkout-index --all --prefix=/output/ 2>&1")
             .await?;
         if checkout.exit_code != 0 {
             tracing::error!("git checkout-index failed: {}", checkout.stderr);
             // Try a fallback: just copy everything
             tracing::warn!("Falling back to direct copy of /app to /output");
-            let fallback = sandbox.exec("cp -r /app/* /output/ 2>&1 || true").await?;
+            let fallback = Sandbox::exec(sandbox, "cp -r /app/* /output/ 2>&1 || true").await?;
             tracing::debug!("Fallback copy result: {}", fallback.stdout);
         }
 
         // 5) Verify /output has content
-        let check_output = sandbox.exec("ls -la /output").await?;
+        let check_output = Sandbox::exec(sandbox, "ls -la /output").await?;
         tracing::info!("Contents of /output before export: {}", check_output.stdout);
 
         // 6) Export /output
         tracing::info!("Exporting /output to {}", self.export_path);
-        sandbox
-            .export_directory("/output", &self.export_path)
+        Sandbox::export_directory(sandbox, "/output", &self.export_path)
             .await?;
 
         tracing::info!("Artifacts exported successfully to {}", self.export_path);
