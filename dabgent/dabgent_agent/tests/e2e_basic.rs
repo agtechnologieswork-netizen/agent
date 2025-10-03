@@ -1,14 +1,15 @@
+mod common;
+
+use common::{create_test_store, PythonValidator};
 use dabgent_agent::llm::LLMClientDyn;
 use dabgent_agent::processor::agent::{Agent, AgentState, Command, Event, Request, Runtime};
 use dabgent_agent::processor::llm::{LLMConfig, LLMHandler};
 use dabgent_agent::processor::tools::{
     get_dockerfile_dir_from_src_ws, TemplateConfig, ToolHandler,
 };
-use dabgent_agent::toolbox::{self, basic::toolset};
-use dabgent_mq::db::sqlite::SqliteStore;
-use dabgent_mq::listener::PollingQueue;
+use dabgent_agent::toolbox::basic::toolset;
 use dabgent_mq::{Event as MQEvent, EventStore};
-use dabgent_sandbox::{DaggerSandbox, Sandbox, SandboxHandle};
+use dabgent_sandbox::SandboxHandle;
 use eyre::Result;
 use rig::client::ProviderClient;
 use rig::message::{ToolResult, ToolResultContent, UserContent};
@@ -86,32 +87,6 @@ impl Agent for BasicAgent {
     }
 }
 
-pub struct Validator;
-
-impl toolbox::Validator for Validator {
-    async fn run(&self, sandbox: &mut DaggerSandbox) -> Result<Result<(), String>> {
-        sandbox.exec("uv run main.py").await.map(|result| {
-            if result.exit_code == 0 {
-                Ok(())
-            } else {
-                Err(format!(
-                    "code: {}\nstdout: {}\nstderr: {}",
-                    result.exit_code, result.stdout, result.stderr
-                ))
-            }
-        })
-    }
-}
-
-async fn create_store() -> PollingQueue<SqliteStore> {
-    let pool = sqlx::SqlitePool::connect(":memory:")
-        .await
-        .expect("Failed to create in-memory SQLite pool");
-    let store = SqliteStore::new(pool, "agent");
-    store.migrate().await;
-    PollingQueue::new(store)
-}
-
 /// Test with Anthropic (Claude)
 #[tokio::test]
 async fn test_e2e_basic_anthropic() {
@@ -161,8 +136,8 @@ async fn run_basic_workflow(
     client: Arc<dyn LLMClientDyn>,
     aggregate_id: &str,
 ) -> Result<()> {
-    let store = create_store().await;
-    let tools = toolset(Validator);
+    let store = create_test_store().await;
+    let tools = toolset(PythonValidator);
 
     let system_prompt = "
 You are a python software engineer.

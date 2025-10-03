@@ -1,3 +1,6 @@
+mod common;
+
+use common::{create_test_store, PythonValidator};
 use dabgent_agent::llm::LLMClientDyn;
 use dabgent_agent::processor::agent::{
     Agent, AgentState, Command, Event, Request, Response, Runtime,
@@ -7,11 +10,9 @@ use dabgent_agent::processor::llm::{LLMConfig, LLMHandler};
 use dabgent_agent::processor::tools::{
     get_dockerfile_dir_from_src_ws, TemplateConfig, ToolHandler,
 };
-use dabgent_agent::toolbox::{self, basic::toolset, ToolCallExt};
-use dabgent_mq::db::sqlite::SqliteStore;
-use dabgent_mq::listener::PollingQueue;
+use dabgent_agent::toolbox::{basic::toolset, ToolCallExt};
 use dabgent_mq::{Event as MQEvent, EventStore, Handler};
-use dabgent_sandbox::{DaggerSandbox, Sandbox, SandboxHandle};
+use dabgent_sandbox::SandboxHandle;
 use eyre::Result;
 use rig::client::ProviderClient;
 use rig::completion::ToolDefinition;
@@ -238,23 +239,6 @@ impl<ES: EventStore> Link<ES> for PlannerWorkerLink {
     }
 }
 
-pub struct Validator;
-
-impl toolbox::Validator for Validator {
-    async fn run(&self, sandbox: &mut DaggerSandbox) -> Result<Result<(), String>> {
-        sandbox.exec("uv run main.py").await.map(|result| {
-            if result.exit_code == 0 {
-                Ok(())
-            } else {
-                Err(format!(
-                    "code: {}\nstdout: {}\nstderr: {}",
-                    result.exit_code, result.stdout, result.stderr
-                ))
-            }
-        })
-    }
-}
-
 fn send_task_tool_definition() -> ToolDefinition {
     ToolDefinition {
         name: "send_task".to_string(),
@@ -270,15 +254,6 @@ fn send_task_tool_definition() -> ToolDefinition {
             "required": ["description"]
         }),
     }
-}
-
-async fn create_store() -> PollingQueue<SqliteStore> {
-    let pool = sqlx::SqlitePool::connect(":memory:")
-        .await
-        .expect("Failed to create in-memory SQLite pool");
-    let store = SqliteStore::new(pool, "agent");
-    store.migrate().await;
-    PollingQueue::new(store)
 }
 
 /// Test planner-worker workflow with Anthropic (Claude)
@@ -338,7 +313,7 @@ async fn run_planner_workflow(
     client: Arc<dyn LLMClientDyn>,
     planner_id: &str,
 ) -> Result<()> {
-    let store = create_store().await;
+    let store = create_test_store().await;
 
     let planner_prompt = "
 You are a planning assistant.
@@ -369,7 +344,7 @@ IMPORTANT: After the script runs successfully, you MUST call the 'done' tool to 
         .with_handler(planner_llm);
 
     // Setup worker
-    let worker_tools = toolset(Validator);
+    let worker_tools = toolset(PythonValidator);
     let worker_llm = LLMHandler::new(
         client,
         LLMConfig {
