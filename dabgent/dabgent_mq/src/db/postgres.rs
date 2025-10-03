@@ -33,7 +33,7 @@ impl PostgresStore {
             params.push(aggregate_id.as_ref().to_string());
         }
         if let Some(offset) = offset {
-            conditions.push("sequence > $4".to_owned());
+            conditions.push("sequence > $4::biginteger".to_owned());
             params.push(offset.to_string());
         }
         let where_clause = conditions.join(" AND ");
