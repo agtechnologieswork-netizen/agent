@@ -15,7 +15,7 @@ use rig::message::{ToolResult, ToolResultContent, UserContent};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
-const MODEL: &str = "claude-sonnet-4.5-20250929";
+const MODEL: &str = "claude-sonnet-4-5-20250929";
 
 const SYSTEM_PROMPT: &str = "
 You are a python software engineer.
