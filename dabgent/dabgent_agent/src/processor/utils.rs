@@ -1,5 +1,5 @@
-use super::agent::{Agent, AgentState, EventHandler};
-use dabgent_mq::{Aggregate, Callback, Envelope, EventStore, Handler};
+use super::agent::{Agent, AgentState, Event, EventHandler};
+use dabgent_mq::{Aggregate, Callback, Envelope, Event as MQEvent, EventStore, Handler};
 use eyre::Result;
 
 pub struct LogHandler;
@@ -20,6 +20,14 @@ where
         _handler: &Handler<AgentState<A>, ES>,
         event: &Envelope<AgentState<A>>,
     ) -> Result<()> {
+        // Check if this is a Finished event and print a clear completion message
+        if let Event::Agent(agent_event) = &event.data {
+            if agent_event.event_type() == "finished" {
+                eprintln!("\n========================================");
+                eprintln!("✓ WORKFLOW COMPLETED SUCCESSFULLY");
+                eprintln!("========================================\n");
+            }
+        }
         tracing::info!(agent = A::TYPE, envelope = ?event, "event");
         Ok(())
     }
