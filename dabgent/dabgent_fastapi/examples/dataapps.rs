@@ -1,4 +1,4 @@
-use dabgent_agent::processor::agent::{Agent, AgentState, Command, Event};
+use dabgent_agent::processor::agent::{Agent, AgentError, AgentState, Command, Event};
 use dabgent_agent::processor::link::Runtime;
 use dabgent_agent::processor::finish::FinishHandler;
 use dabgent_agent::processor::llm::{LLMConfig, LLMHandler};
@@ -10,7 +10,7 @@ use dabgent_mq::{create_store, Event as MQEvent, StoreConfig};
 use dabgent_sandbox::SandboxHandle;
 use eyre::Result;
 use rig::client::ProviderClient;
-use rig::message::{ToolResult, ToolResultContent};
+use rig::message::{Text, ToolResult, ToolResultContent};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tokio::sync::oneshot;
@@ -145,6 +145,24 @@ pub struct DataAppsAgent {
     pub done_call_id: Option<String>,
 }
 
+impl DataAppsAgent {
+    fn is_success(&self, result: &ToolResult) -> bool {
+        result.content.iter().any(|c| match c {
+            ToolResultContent::Text(Text { text }) => text.contains("success"),
+            _ => false,
+        })
+    }
+
+    fn is_done(&self, results: &[ToolResult]) -> bool {
+        self.done_call_id.as_ref().map_or(false, |id| {
+            results
+                .iter()
+                .find(|r| &r.id == id)
+                .map_or(false, |r| self.is_success(r))
+        })
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum DataAppsEvent {
     Finished,
@@ -162,16 +180,8 @@ impl MQEvent for DataAppsEvent {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum DataAppsError {}
-
-impl std::fmt::Display for DataAppsError {
-    fn fmt(&self, _f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        Ok(())
-    }
-}
-
-impl std::error::Error for DataAppsError {}
 
 impl Agent for DataAppsAgent {
     const TYPE: &'static str = "dataapps_worker";
@@ -180,29 +190,24 @@ impl Agent for DataAppsAgent {
     type AgentError = DataAppsError;
     type Services = ();
 
-    async fn handle_tool_results(
+    async fn handle(
         state: &AgentState<Self>,
-        _: &Self::Services,
-        incoming: Vec<ToolResult>,
-    ) -> Result<Vec<Event<Self::AgentEvent>>, Self::AgentError> {
-        let completed = state.merge_tool_results(&incoming);
-        if let Some(done_id) = &state.agent.done_call_id {
-            if let Some(result) = completed.iter().find(|r| done_id == &r.id) {
-                let is_done = result.content.iter().any(|c| match c {
-                    ToolResultContent::Text(text) => text.text.contains("success"),
-                    _ => false,
-                });
-                if is_done {
-                    return Ok(vec![Event::Agent(DataAppsEvent::Finished)]);
-                }
+        cmd: Command<Self::AgentCommand>,
+        services: &Self::Services,
+    ) -> Result<Vec<Event<Self::AgentEvent>>, AgentError<Self::AgentError>> {
+        match cmd {
+            Command::PutToolResults { results } if state.agent.is_done(&results) => {
+                let mut events = state.shared_put_results(&results)?;
+                events.push(Event::Agent(DataAppsEvent::Finished));
+                Ok(events)
             }
+            _ => state.handle_shared(cmd, services).await,
         }
-        Ok(vec![state.results_passthrough(&incoming)])
     }
 
-    fn apply_event(state: &mut AgentState<Self>, event: Event<Self::AgentEvent>) {
-        match event {
-            Event::ToolCalls { ref calls } => {
+    fn apply(state: &mut AgentState<Self>, event: Event<Self::AgentEvent>) {
+        match &event {
+            Event::ToolCalls { calls } => {
                 for call in calls {
                     if call.function.name == "done" {
                         state.agent.done_call_id = Some(call.id.clone());
@@ -212,6 +217,7 @@ impl Agent for DataAppsAgent {
             }
             _ => {}
         }
+        state.apply_shared(event);
     }
 }
 
