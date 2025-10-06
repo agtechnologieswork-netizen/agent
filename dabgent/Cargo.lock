@@ -695,6 +695,7 @@ name = "dabgent_fastapi"
 version = "0.1.0"
 dependencies = [
  "dabgent_agent",
+ "dabgent_integrations",
  "dabgent_mq",
  "dabgent_sandbox",
  "dagger-sdk",

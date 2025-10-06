@@ -25,6 +25,7 @@ enum ManagerMessage {
         sandbox: DaggerSandbox,
         respond_to: oneshot::Sender<()>,
     },
+    Shutdown,
 }
 
 impl SandboxManager {
@@ -36,7 +37,7 @@ impl SandboxManager {
         }
     }
 
-    async fn handle_message(&mut self, msg: ManagerMessage) {
+    async fn handle_message(&mut self, msg: ManagerMessage) -> bool {
         match msg {
             ManagerMessage::CreateFromDirectory {
                 id,
@@ -46,10 +47,12 @@ impl SandboxManager {
             } => {
                 let result = self.create_sandbox(&id, &host_dir, &dockerfile).await;
                 let _ = respond_to.send(result);
+                true
             }
             ManagerMessage::Get { id, respond_to } => {
                 let sandbox = self.registry.get(&id).cloned();
                 let _ = respond_to.send(sandbox);
+                true
             }
             ManagerMessage::Set {
                 id,
@@ -58,7 +61,9 @@ impl SandboxManager {
             } => {
                 self.registry.insert(id, sandbox);
                 let _ = respond_to.send(());
+                true
             }
+            ManagerMessage::Shutdown => false,
         }
     }
 
@@ -86,13 +91,31 @@ impl SandboxManager {
 
 async fn run_sandbox_manager(mut manager: SandboxManager) {
     while let Some(msg) = manager.receiver.recv().await {
-        manager.handle_message(msg).await;
+        if !manager.handle_message(msg).await {
+            break;
+        }
     }
 }
 
-#[derive(Clone)]
 pub struct SandboxHandle {
     sender: mpsc::Sender<ManagerMessage>,
+}
+
+impl Clone for SandboxHandle {
+    fn clone(&self) -> Self {
+        Self {
+            sender: self.sender.clone(),
+        }
+    }
+}
+
+impl Drop for SandboxHandle {
+    fn drop(&mut self) {
+        let sender = self.sender.clone();
+        tokio::spawn(async move {
+            let _ = sender.send(ManagerMessage::Shutdown).await;
+        });
+    }
 }
 
 impl SandboxHandle {

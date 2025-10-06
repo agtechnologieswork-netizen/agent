@@ -75,3 +75,26 @@ pub fn dataapps_toolset<T: Validator + Send + Sync + 'static>(validator: T) -> V
         Box::new(DoneTool::new(validator)),
     ]
 }
+
+/// Tool definition for delegating Databricks catalog exploration to a specialist worker.
+/// This is a virtual tool intercepted by the Link - not executed directly.
+pub fn explore_databricks_tool_definition() -> rig::completion::ToolDefinition {
+    rig::completion::ToolDefinition {
+        name: "explore_databricks_catalog".to_string(),
+        description: "Explore a Databricks Unity Catalog to understand data structure and schema. Use this when you need to know what tables, columns, and data are available before building data APIs.".to_string(),
+        parameters: serde_json::json!({
+            "type": "object",
+            "properties": {
+                "catalog": {
+                    "type": "string",
+                    "description": "Catalog name to explore (e.g., 'main', 'dev', 'prod')"
+                },
+                "prompt": {
+                    "type": "string",
+                    "description": "What to look for in the catalog (e.g., 'sales data', 'customer tables', 'bakery information')"
+                }
+            },
+            "required": ["catalog", "prompt"]
+        }),
+    }
+}

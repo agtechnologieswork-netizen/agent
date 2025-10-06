@@ -5,6 +5,7 @@ edition = "2021"
 
 [dependencies]
 dabgent_agent = { path = "../dabgent_agent" }
+dabgent_integrations = { path = "../dabgent_integrations" }
 dabgent_mq = { path = "../dabgent_mq" }
 dabgent_sandbox = { path = "../dabgent_sandbox" }
 eyre = "0.6"
