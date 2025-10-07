@@ -46,16 +46,6 @@ impl Agent for PlannerAgent {
     type AgentEvent = PlannerEvent;
     type AgentError = PlannerError;
     type Services = ();
-
-    async fn handle_tool_results(
-        state: &AgentState<Self>,
-        _: &Self::Services,
-        incoming: Vec<ToolResult>,
-    ) -> Result<Vec<Event<Self::AgentEvent>>, Self::AgentError> {
-        Ok(vec![state.results_passthrough(&incoming)])
-    }
-
-    fn apply_event(_state: &mut AgentState<Self>, _event: Event<Self::AgentEvent>) {}
 }
 
 // Worker Agent
@@ -100,6 +90,24 @@ pub enum WorkerCommand {
 #[derive(Debug, thiserror::Error)]
 pub enum WorkerError {}
 
+impl WorkerAgent {
+    fn is_success(&self, result: &ToolResult) -> bool {
+        result.content.iter().any(|c| match c {
+            ToolResultContent::Text(text) => text.text.contains("success"),
+            _ => false,
+        })
+    }
+
+    fn is_done(&self, results: &[ToolResult]) -> bool {
+        self.done_call_id.as_ref().map_or(false, |id| {
+            results
+                .iter()
+                .find(|r| &r.id == id)
+                .map_or(false, |r| self.is_success(r))
+        })
+    }
+}
+
 impl Agent for WorkerAgent {
     const TYPE: &'static str = "e2e_worker";
     type AgentCommand = WorkerCommand;
@@ -107,37 +115,13 @@ impl Agent for WorkerAgent {
     type AgentError = WorkerError;
     type Services = ();
 
-    async fn handle_tool_results(
+    async fn handle(
         state: &AgentState<Self>,
-        _: &Self::Services,
-        incoming: Vec<ToolResult>,
-    ) -> Result<Vec<Event<Self::AgentEvent>>, Self::AgentError> {
-        let completed = state.merge_tool_results(&incoming);
-        if let Some(done_id) = &state.agent.done_call_id {
-            if let Some(result) = completed.iter().find(|r| done_id == &r.id) {
-                let is_done = result.content.iter().any(|c| match c {
-                    ToolResultContent::Text(text) => text.text.contains("success"),
-                    _ => false,
-                });
-                if is_done {
-                    return Ok(vec![Event::Agent(WorkerEvent::Finished {
-                        parent_id: state.agent.parent_id.clone().unwrap(),
-                        call: state.agent.parent_call.clone().unwrap(),
-                        result: "task completed".to_string(),
-                    })]);
-                }
-            }
-        }
-        Ok(vec![state.results_passthrough(&incoming)])
-    }
-
-    async fn handle_command(
-        _state: &AgentState<Self>,
-        cmd: Self::AgentCommand,
-        _: &Self::Services,
-    ) -> Result<Vec<Event<Self::AgentEvent>>, Self::AgentError> {
+        cmd: Command<Self::AgentCommand>,
+        services: &Self::Services,
+    ) -> Result<Vec<Event<Self::AgentEvent>>, dabgent_agent::processor::agent::AgentError<Self::AgentError>> {
         match cmd {
-            WorkerCommand::Grab { parent_id, call } => {
+            Command::Agent(WorkerCommand::Grab { parent_id, call }) => {
                 let description = call
                     .function
                     .arguments
@@ -153,10 +137,20 @@ impl Agent for WorkerAgent {
                     Event::UserCompletion { content },
                 ])
             }
+            Command::PutToolResults { results } if state.agent.is_done(&results) => {
+                let mut events = state.shared_put_results(&results)?;
+                events.push(Event::Agent(WorkerEvent::Finished {
+                    parent_id: state.agent.parent_id.clone().unwrap(),
+                    call: state.agent.parent_call.clone().unwrap(),
+                    result: "task completed".to_string(),
+                }));
+                Ok(events)
+            }
+            _ => state.handle_shared(cmd, services).await,
         }
     }
 
-    fn apply_event(state: &mut AgentState<Self>, event: Event<Self::AgentEvent>) {
+    fn apply(state: &mut AgentState<Self>, event: Event<Self::AgentEvent>) {
         match event {
             Event::ToolCalls { ref calls } => {
                 for call in calls {
@@ -165,12 +159,13 @@ impl Agent for WorkerAgent {
                         break;
                     }
                 }
+                state.apply_shared(event);
             }
             Event::Agent(WorkerEvent::Grabbed { parent_id, call }) => {
                 state.agent.parent_id = Some(parent_id);
                 state.agent.parent_call = Some(call);
             }
-            _ => {}
+            _ => state.apply_shared(event),
         }
     }
 }

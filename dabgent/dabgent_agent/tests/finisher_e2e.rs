@@ -56,6 +56,24 @@ impl MQEvent for BasicEvent {
 #[derive(Debug, thiserror::Error)]
 pub enum BasicError {}
 
+impl Basic {
+    fn is_success(&self, result: &ToolResult) -> bool {
+        result.content.iter().any(|c| match c {
+            rig::message::ToolResultContent::Text(text) => text.text.contains("success"),
+            _ => false,
+        })
+    }
+
+    fn is_done(&self, results: &[ToolResult]) -> bool {
+        self.done_call_id.as_ref().map_or(false, |id| {
+            results
+                .iter()
+                .find(|r| &r.id == id)
+                .map_or(false, |r| self.is_success(r))
+        })
+    }
+}
+
 impl Agent for Basic {
     const TYPE: &'static str = "finisher_e2e_test";
     type AgentCommand = ();
@@ -63,27 +81,22 @@ impl Agent for Basic {
     type AgentError = BasicError;
     type Services = ();
 
-    async fn handle_tool_results(
+    async fn handle(
         state: &AgentState<Self>,
-        _: &Self::Services,
-        incoming: Vec<ToolResult>,
-    ) -> Result<Vec<Event<Self::AgentEvent>>, Self::AgentError> {
-        let completed = state.merge_tool_results(&incoming);
-        if let Some(done_id) = &state.agent.done_call_id {
-            if let Some(result) = completed.iter().find(|r| done_id == &r.id) {
-                let is_done = result.content.iter().any(|c| match c {
-                    rig::message::ToolResultContent::Text(text) => text.text.contains("success"),
-                    _ => false,
-                });
-                if is_done {
-                    return Ok(vec![Event::Agent(BasicEvent::Finished)]);
-                }
+        cmd: Command<Self::AgentCommand>,
+        services: &Self::Services,
+    ) -> Result<Vec<Event<Self::AgentEvent>>, dabgent_agent::processor::agent::AgentError<Self::AgentError>> {
+        match cmd {
+            Command::PutToolResults { results } if state.agent.is_done(&results) => {
+                let mut events = state.shared_put_results(&results)?;
+                events.push(Event::Agent(BasicEvent::Finished));
+                Ok(events)
             }
+            _ => state.handle_shared(cmd, services).await,
         }
-        Ok(vec![state.results_passthrough(&incoming)])
     }
 
-    fn apply_event(state: &mut AgentState<Self>, event: Event<Self::AgentEvent>) {
+    fn apply(state: &mut AgentState<Self>, event: Event<Self::AgentEvent>) {
         match event {
             Event::ToolCalls { ref calls } => {
                 for call in calls {
@@ -92,8 +105,9 @@ impl Agent for Basic {
                         break;
                     }
                 }
+                state.apply_shared(event);
             }
-            _ => {}
+            _ => state.apply_shared(event),
         }
     }
 }

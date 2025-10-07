@@ -39,6 +39,10 @@ jobs:
         working-directory: ./dabgent
         run: cargo check --workspace --exclude dabgent_cli  # TEMP: Exclude dabgent_cli due to compilation issues
 
+      - name: Run cargo check all targets
+        working-directory: ./dabgent
+        run: cargo check --all-targets --workspace --exclude dabgent_cli
+
       - name: Run cargo clippy
         working-directory: ./dabgent
         run: cargo clippy --workspace --exclude dabgent_cli -- -W warnings  # TEMP: Exclude dabgent_cli

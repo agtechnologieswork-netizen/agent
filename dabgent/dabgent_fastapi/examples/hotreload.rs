@@ -25,6 +25,7 @@ pub async fn run_worker() -> Result<()> {
             "reload",
             &template_config.host_dir,
             &template_config.dockerfile,
+            vec![],
         )
         .await?;
     let template_files = dabgent_agent::sandbox_seed::collect_template_files(
