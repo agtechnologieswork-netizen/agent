@@ -88,19 +88,22 @@ impl<ES: EventStore> Callback<TestAggregate> for TestCallback<ES> {
     }
 }
 
-async fn setup_test_store() -> PostgresStore {
-    let dsn = std::env::var("DATABASE_URL").unwrap();
+async fn setup_test_store() -> Option<PostgresStore> {
+    let dsn = std::env::var("DATABASE_URL").ok()?;
     let pool = PgPool::connect(&dsn)
         .await
         .expect("Failed to connect to PostgreSQL");
     let store = PostgresStore::new(pool, "test_stream");
     store.migrate().await;
-    store
+    Some(store)
 }
 
 #[tokio::test]
 async fn test_handler_commands() {
-    let store = setup_test_store().await;
+    let Some(store) = setup_test_store().await else {
+        eprintln!("Skipping test_handler_commands: DATABASE_URL not set");
+        return;
+    };
     let aggregate_id = "test-aggregate";
     let handler = Handler::<TestAggregate, _>::new(store.clone(), ());
 
@@ -125,7 +128,10 @@ async fn test_handler_commands() {
 
 #[tokio::test]
 async fn test_latest_sequences() {
-    let store = setup_test_store().await;
+    let Some(store) = setup_test_store().await else {
+        eprintln!("Skipping test_latest_sequences: DATABASE_URL not set");
+        return;
+    };
     let aggregate_id = "test-aggregate";
     let handler = Handler::<TestAggregate, _>::new(store.clone(), ());
 
@@ -153,7 +159,11 @@ async fn test_latest_sequences() {
 
 #[tokio::test]
 async fn test_single_callback() {
-    let store = PollingQueue::new(setup_test_store().await);
+    let Some(pg_store) = setup_test_store().await else {
+        eprintln!("Skipping test_single_callback: DATABASE_URL not set");
+        return;
+    };
+    let store = PollingQueue::new(pg_store);
     let aggregate_id = "test-aggregate";
     let handler = Handler::<TestAggregate, _>::new(store.clone(), ());
 

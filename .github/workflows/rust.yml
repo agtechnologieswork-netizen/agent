@@ -37,15 +37,15 @@ jobs:
 
       - name: Run cargo check
         working-directory: ./dabgent
-        run: cargo check --workspace --exclude dabgent_cli  # TEMP: Exclude dabgent_cli due to compilation issues
+        run: cargo check --workspace
 
       - name: Run cargo check all targets
         working-directory: ./dabgent
-        run: cargo check --all-targets --workspace --exclude dabgent_cli
+        run: cargo check --all-targets --workspace
 
       - name: Run cargo clippy
         working-directory: ./dabgent
-        run: cargo clippy --workspace --exclude dabgent_cli -- -W warnings  # TEMP: Exclude dabgent_cli
+        run: cargo clippy --workspace -- -W warnings
         continue-on-error: true
 
   rust-tests:
@@ -72,10 +72,10 @@ jobs:
 
       - name: Run unit tests
         working-directory: ./dabgent
-        run: cargo test --lib --workspace --exclude dabgent_cli  # TEMP: Exclude dabgent_cli
+        run: cargo test --lib --workspace
         continue-on-error: true
 
-      - name: Run integration tests (excluding e2e)
+      - name: Run integration tests
         working-directory: ./dabgent
-        run: cargo test --workspace --exclude dabgent_cli --test '*' -- --skip e2e_generation  # TEMP: Exclude dabgent_cli
+        run: cargo test --workspace --test '*'
         continue-on-error: true
