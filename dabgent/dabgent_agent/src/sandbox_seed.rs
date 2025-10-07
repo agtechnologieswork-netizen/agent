@@ -16,13 +16,24 @@ pub struct TemplateFiles {
 }
 
 /// Default directories to skip when collecting files from a template.
-pub const DEFAULT_TEMPLATE_SKIP_DIRS: &[&str] = &["node_modules", ".git", ".venv", "target", "dist", "build", ".ruff_cache"];
+pub const DEFAULT_TEMPLATE_SKIP_DIRS: &[&str] = &[
+    "node_modules",
+    ".git",
+    ".venv",
+    "target",
+    "dist",
+    "build",
+    ".ruff_cache",
+];
 
 /// Recursively collect all text files from `template_path`, mapping them under `base_sandbox_path`,
 /// and compute a deterministic content hash.
 ///
 /// Binary files (that cannot be read as UTF-8 text) are skipped.
-pub fn collect_template_files(template_path: &Path, base_sandbox_path: &str) -> Result<TemplateFiles> {
+pub fn collect_template_files(
+    template_path: &Path,
+    base_sandbox_path: &str,
+) -> Result<TemplateFiles> {
     tracing::info!(
         "Collecting template files from path: {:?}, base_sandbox_path: {}",
         template_path,
@@ -30,7 +41,13 @@ pub fn collect_template_files(template_path: &Path, base_sandbox_path: &str) -> 
     );
 
     let mut files: Vec<(String, String)> = Vec::new();
-    walk_collect(template_path, template_path, base_sandbox_path, &mut files, DEFAULT_TEMPLATE_SKIP_DIRS)?;
+    walk_collect(
+        template_path,
+        template_path,
+        base_sandbox_path,
+        &mut files,
+        DEFAULT_TEMPLATE_SKIP_DIRS,
+    )?;
     files.sort_by(|a, b| a.0.cmp(&b.0));
 
     let hash = compute_template_hash(&files);
@@ -58,13 +75,22 @@ pub fn compute_template_hash(files: &[(String, String)]) -> String {
 }
 
 /// Write collected template files into the sandbox, returning the count of files written.
-pub async fn write_template_files(sandbox: &mut Box<dyn SandboxDyn>, files: &[(String, String)]) -> Result<usize> {
+pub async fn write_template_files(
+    sandbox: &mut Box<dyn SandboxDyn>,
+    files: &[(String, String)],
+) -> Result<usize> {
     tracing::info!("Writing {} template files to sandbox", files.len());
 
-    let refs: Vec<(&str, &str)> = files.iter().map(|(p, c)| (p.as_str(), c.as_str())).collect();
+    let refs: Vec<(&str, &str)> = files
+        .iter()
+        .map(|(p, c)| (p.as_str(), c.as_str()))
+        .collect();
     sandbox.write_files(refs).await?;
 
-    tracing::info!("Successfully wrote {} template files to sandbox", files.len());
+    tracing::info!(
+        "Successfully wrote {} template files to sandbox",
+        files.len()
+    );
 
     Ok(files.len())
 }
@@ -98,7 +124,10 @@ fn walk_collect(
                 }
                 Err(_) => {
                     // Likely a binary file; skip it.
-                    tracing::warn!("Skipping non-text file during template collection: {:?}", path);
+                    tracing::warn!(
+                        "Skipping non-text file during template collection: {:?}",
+                        path
+                    );
                 }
             }
         }

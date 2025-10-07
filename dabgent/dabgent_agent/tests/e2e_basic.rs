@@ -1,12 +1,12 @@
 mod common;
 
-use common::{create_test_store, PythonValidator};
+use common::{PythonValidator, create_test_store};
 use dabgent_agent::llm::{LLMClientDyn, WithRetryExt};
 use dabgent_agent::processor::agent::{Agent, AgentState, Command, Event};
 use dabgent_agent::processor::link::Runtime;
 use dabgent_agent::processor::llm::{LLMConfig, LLMHandler};
 use dabgent_agent::processor::tools::{
-    get_dockerfile_dir_from_src_ws, TemplateConfig, ToolHandler,
+    TemplateConfig, ToolHandler, get_dockerfile_dir_from_src_ws,
 };
 use dabgent_agent::toolbox::basic::toolset;
 use dabgent_mq::{Event as MQEvent, EventStore};
@@ -95,11 +95,15 @@ async fn test_e2e_basic_anthropic() {
         return;
     }
 
-    let result = timeout(Duration::from_secs(180), run_basic_workflow(
-        "claude-sonnet-4-5-20250929",
-        Arc::new(rig::providers::anthropic::Client::from_env().with_retry()),
-        "anthropic_basic",
-    )).await;
+    let result = timeout(
+        Duration::from_secs(180),
+        run_basic_workflow(
+            "claude-sonnet-4-5-20250929",
+            Arc::new(rig::providers::anthropic::Client::from_env().with_retry()),
+            "anthropic_basic",
+        ),
+    )
+    .await;
 
     match result {
         Ok(Ok(())) => eprintln!("✓ E2E test completed successfully with Anthropic"),
@@ -117,11 +121,15 @@ async fn test_e2e_basic_openrouter() {
         return;
     }
 
-    let result = timeout(Duration::from_secs(180), run_basic_workflow(
-        "deepseek/deepseek-v3.2-exp",
-        Arc::new(rig::providers::openrouter::Client::from_env().with_retry()),
-        "openrouter_basic",
-    )).await;
+    let result = timeout(
+        Duration::from_secs(180),
+        run_basic_workflow(
+            "deepseek/deepseek-v3.2-exp",
+            Arc::new(rig::providers::openrouter::Client::from_env().with_retry()),
+            "openrouter_basic",
+        ),
+    )
+    .await;
 
     match result {
         Ok(Ok(())) => eprintln!("✓ E2E test completed successfully with OpenRouter"),
@@ -146,7 +154,8 @@ Program will be run using uv run main.py command.
 IMPORTANT: After the script runs successfully, you MUST call the 'done' tool to complete the task.
 ";
 
-    let user_prompt = "write a simple python script that prints 'Hello World!' and the result of 1+1";
+    let user_prompt =
+        "write a simple python script that prints 'Hello World!' and the result of 1+1";
 
     let llm = LLMHandler::new(
         client,
@@ -174,9 +183,7 @@ IMPORTANT: After the script runs successfully, you MUST call the 'done' tool to 
     runtime.handler.execute(aggregate_id, command).await?;
 
     // Start the runtime in the background
-    let runtime_handle = tokio::spawn(async move {
-        runtime.start().await
-    });
+    let runtime_handle = tokio::spawn(async move { runtime.start().await });
 
     // Poll for the Finished event
     let mut interval = tokio::time::interval(Duration::from_millis(500));
@@ -188,13 +195,20 @@ IMPORTANT: After the script runs successfully, you MUST call the 'done' tool to 
 
         // Check if we've timed out
         if start.elapsed() > max_wait {
-            return Err(eyre::eyre!("Workflow did not complete within {} seconds", max_wait.as_secs()));
+            return Err(eyre::eyre!(
+                "Workflow did not complete within {} seconds",
+                max_wait.as_secs()
+            ));
         }
 
         // Load events and check for Finished
-        let events = store.load_events::<AgentState<BasicAgent>>(aggregate_id).await?;
+        let events = store
+            .load_events::<AgentState<BasicAgent>>(aggregate_id)
+            .await?;
 
-        let finished = events.iter().any(|e| matches!(e.data, Event::Agent(BasicEvent::Finished)));
+        let finished = events
+            .iter()
+            .any(|e| matches!(e.data, Event::Agent(BasicEvent::Finished)));
 
         if finished {
             eprintln!("✓ Workflow completed - Finished event detected");

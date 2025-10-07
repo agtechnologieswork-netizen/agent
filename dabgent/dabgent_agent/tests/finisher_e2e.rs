@@ -1,6 +1,6 @@
 mod common;
 
-use common::{create_test_store, PythonValidator};
+use common::{PythonValidator, create_test_store};
 use dabgent_agent::processor::agent::{Agent, AgentState, Command, Event};
 use dabgent_agent::processor::finish::FinishHandler;
 use dabgent_agent::processor::link::Runtime;
@@ -28,7 +28,8 @@ Program will be run using uv run main.py command.
 When you finish the task, call the done tool to signal completion.
 ";
 
-const USER_PROMPT: &str = "Write a minimal Python script that prints 'Hello from Finisher E2E Test!'";
+const USER_PROMPT: &str =
+    "Write a minimal Python script that prints 'Hello from Finisher E2E Test!'";
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Basic {
@@ -148,11 +149,7 @@ async fn test_finisher_e2e_with_real_dagger() -> Result<()> {
     let template_config = TemplateConfig::default_dir(examples_dir.to_str().unwrap());
 
     // Setup tool handler
-    let tool_handler = ToolHandler::new(
-        tools,
-        sandbox_handle.clone(),
-        template_config.clone(),
-    );
+    let tool_handler = ToolHandler::new(tools, sandbox_handle.clone(), template_config.clone());
 
     // Setup finish handler
     let finish_handler = FinishHandler::new(
@@ -173,12 +170,13 @@ async fn test_finisher_e2e_with_real_dagger() -> Result<()> {
     let command = Command::PutUserMessage {
         content: rig::OneOrMany::one(rig::message::UserContent::text(USER_PROMPT)),
     };
-    runtime.handler.execute("finisher-e2e-test", command).await?;
+    runtime
+        .handler
+        .execute("finisher-e2e-test", command)
+        .await?;
 
     // Run runtime in background (it will run forever, we just need artifacts to be exported)
-    let _runtime_handle = tokio::spawn(async move {
-        runtime.start().await
-    });
+    let _runtime_handle = tokio::spawn(async move { runtime.start().await });
 
     // Give it time to complete the task and export artifacts
     // The agent typically finishes in 15-30 seconds, export takes ~1 second

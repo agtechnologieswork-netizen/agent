@@ -84,7 +84,8 @@ impl ToolHandler {
                     self.config.host_dir,
                     self.config.dockerfile
                 );
-                let mut sandbox = self.dagger
+                let mut sandbox = self
+                    .dagger
                     .create_from_directory(
                         aggregate_id,
                         &self.config.host_dir,
@@ -103,7 +104,7 @@ impl ToolHandler {
 
                     let template_files = crate::sandbox_seed::collect_template_files(
                         std::path::Path::new(template_path),
-                        &self.config.template_base_path
+                        &self.config.template_base_path,
                     )?;
 
                     let hash = crate::sandbox_seed::compute_template_hash(&template_files.files);

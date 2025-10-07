@@ -1,14 +1,14 @@
 mod common;
 
-use common::{create_test_store, PythonValidator};
+use common::{PythonValidator, create_test_store};
 use dabgent_agent::llm::{LLMClientDyn, WithRetryExt};
 use dabgent_agent::processor::agent::{Agent, AgentState, Command, Event};
 use dabgent_agent::processor::link::{Link, Runtime, link_runtimes};
 use dabgent_agent::processor::llm::{LLMConfig, LLMHandler};
 use dabgent_agent::processor::tools::{
-    get_dockerfile_dir_from_src_ws, TemplateConfig, ToolHandler,
+    TemplateConfig, ToolHandler, get_dockerfile_dir_from_src_ws,
 };
-use dabgent_agent::toolbox::{basic::toolset, ToolCallExt};
+use dabgent_agent::toolbox::{ToolCallExt, basic::toolset};
 use dabgent_mq::{Envelope, Event as MQEvent, EventStore, Handler};
 use dabgent_sandbox::SandboxHandle;
 use eyre::Result;
@@ -318,7 +318,8 @@ Program will be run using uv run main.py command.
 IMPORTANT: After the script runs successfully, you MUST call the 'done' tool to complete the task.
 ";
 
-    let user_prompt = "Create a simple Python script that prints 'Hello from E2E Test!' and the result of 5+5";
+    let user_prompt =
+        "Create a simple Python script that prints 'Hello from E2E Test!' and the result of 5+5";
 
     // Setup planner
     let planner_llm = LLMHandler::new(
@@ -330,8 +331,8 @@ IMPORTANT: After the script runs successfully, you MUST call the 'done' tool to 
             ..Default::default()
         },
     );
-    let mut planner_runtime = Runtime::<AgentState<PlannerAgent>, _>::new(store.clone(), ())
-        .with_handler(planner_llm);
+    let mut planner_runtime =
+        Runtime::<AgentState<PlannerAgent>, _>::new(store.clone(), ()).with_handler(planner_llm);
 
     // Setup worker
     let worker_tools = toolset(PythonValidator);
@@ -386,12 +387,19 @@ IMPORTANT: After the script runs successfully, you MUST call the 'done' tool to 
 
         // Load all worker aggregates and check for any Finished event
         // Since we don't know the specific worker aggregate_id, we need to list all aggregates
-        let sequence_nums = store.load_sequence_nums::<AgentState<WorkerAgent>>().await?;
+        let sequence_nums = store
+            .load_sequence_nums::<AgentState<WorkerAgent>>()
+            .await?;
 
         let mut finished = false;
         for (worker_id, _) in sequence_nums {
-            let events = store.load_events::<AgentState<WorkerAgent>>(&worker_id).await?;
-            if events.iter().any(|e| matches!(e.data, Event::Agent(WorkerEvent::Finished { .. }))) {
+            let events = store
+                .load_events::<AgentState<WorkerAgent>>(&worker_id)
+                .await?;
+            if events
+                .iter()
+                .any(|e| matches!(e.data, Event::Agent(WorkerEvent::Finished { .. })))
+            {
                 finished = true;
                 break;
             }

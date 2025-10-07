@@ -1,11 +1,10 @@
+use dabgent_agent::toolbox;
 /// Common test utilities for e2e tests
 ///
 /// This module contains only truly duplicated code that is identical across tests.
-
 use dabgent_mq::db::sqlite::SqliteStore;
 use dabgent_mq::listener::PollingQueue;
 use dabgent_sandbox::{DaggerSandbox, Sandbox};
-use dabgent_agent::toolbox;
 use eyre::Result;
 
 /// Standard Python validator using uv

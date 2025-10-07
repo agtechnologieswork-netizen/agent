@@ -4,13 +4,16 @@ use crate::llm::FinishReason;
 use crate::toolbox::ToolDyn;
 use dabgent_mq::listener::EventHandler;
 use dabgent_mq::{Envelope, EventStore, Handler};
-use dabgent_sandbox::{DaggerSandbox, Sandbox, SandboxHandle, SandboxDyn};
+use dabgent_sandbox::{DaggerSandbox, Sandbox, SandboxDyn, SandboxHandle};
 use eyre::Result;
 use rig::message::AssistantContent;
 use std::path::Path;
 
 pub trait ArtifactPreparer: Send + Sync {
-    fn prepare(&self, sandbox: &mut Box<dyn SandboxDyn>) -> impl std::future::Future<Output = Result<()>> + Send;
+    fn prepare(
+        &self,
+        sandbox: &mut Box<dyn SandboxDyn>,
+    ) -> impl std::future::Future<Output = Result<()>> + Send;
 }
 
 pub struct FinishHandler {
@@ -54,7 +57,10 @@ impl FinishHandler {
             }
         };
 
-        let envelopes = handler.store().load_events::<AgentState<A>>(aggregate_id).await?;
+        let envelopes = handler
+            .store()
+            .load_events::<AgentState<A>>(aggregate_id)
+            .await?;
         let events: Vec<Event<A::AgentEvent>> = envelopes.into_iter().map(|e| e.data).collect();
 
         self.replay_events(&mut sandbox, &events).await?;
@@ -63,7 +69,11 @@ impl FinishHandler {
         Ok(())
     }
 
-    async fn replay_events<T>(&self, sandbox: &mut DaggerSandbox, events: &[Event<T>]) -> Result<()> {
+    async fn replay_events<T>(
+        &self,
+        sandbox: &mut DaggerSandbox,
+        events: &[Event<T>],
+    ) -> Result<()> {
         for event in events {
             if let Event::AgentCompletion { response } = event {
                 if response.finish_reason == FinishReason::ToolUse {
@@ -74,7 +84,11 @@ impl FinishHandler {
         Ok(())
     }
 
-    async fn replay_tool_calls(&self, sandbox: &mut DaggerSandbox, response: &crate::llm::CompletionResponse) -> Result<()> {
+    async fn replay_tool_calls(
+        &self,
+        sandbox: &mut DaggerSandbox,
+        response: &crate::llm::CompletionResponse,
+    ) -> Result<()> {
         for content in response.choice.iter() {
             if let AssistantContent::ToolCall(call) = content {
                 let tool_name = &call.function.name;
@@ -113,13 +127,19 @@ impl FinishHandler {
 
         for cmd in git_commands {
             let res = Sandbox::exec(sandbox, cmd).await?;
-            if res.exit_code != 0 && !res.stderr.contains("already exists") && !res.stderr.is_empty() {
+            if res.exit_code != 0
+                && !res.stderr.contains("already exists")
+                && !res.stderr.is_empty()
+            {
                 eyre::bail!("Git command failed ({}): {}", cmd, res.stderr);
             }
         }
 
-        let checkout = Sandbox::exec(sandbox, "git -C /app checkout-index --all --prefix=/output/ 2>&1")
-            .await?;
+        let checkout = Sandbox::exec(
+            sandbox,
+            "git -C /app checkout-index --all --prefix=/output/ 2>&1",
+        )
+        .await?;
         if checkout.exit_code != 0 {
             Sandbox::exec(sandbox, "cp -r /app/* /output/ 2>&1 || true").await?;
         }
@@ -139,7 +159,10 @@ impl<A: Agent, ES: EventStore> EventHandler<AgentState<A>, ES> for FinishHandler
             use dabgent_mq::Event as MQEvent;
             let event_type = envelope.data.event_type();
             if event_type.contains("finished") || event_type.contains("done") {
-                match self.replay_and_export(handler, &envelope.aggregate_id).await {
+                match self
+                    .replay_and_export(handler, &envelope.aggregate_id)
+                    .await
+                {
                     Ok(_) => {
                         tracing::info!("Export completed, triggering shutdown");
                         handler
