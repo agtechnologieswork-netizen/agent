@@ -13,17 +13,6 @@
     "dev:client": "npm run --workspace=app-build-client dev",
     "dev:all": "npm run dev:server & npm run dev:client"
   },
-  "overrides": {
-    "cmdk": {
-      "react": "19.0.0",
-      "react-dom": "19.0.0"
-    },
-    "react-day-picker": {
-      "react": "19.0.0",
-      "react-dom": "19.0.0",
-      "date-fns": "4.1.0"
-    }
-  },
   "dependencies": {
     "app-build": "."
   },
