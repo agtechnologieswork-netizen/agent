@@ -6,6 +6,7 @@
     "server"
   ],
   "scripts": {
+    "build": "./build.sh",
     "db:push": "npm run --workspace=app-build-server db:push",
     "db:push-ci": "npm run --workspace=app-build-server db:push-ci",
     "dev:server": "npm run --workspace=app-build-server dev",

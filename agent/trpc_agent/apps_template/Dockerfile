@@ -20,8 +20,8 @@ RUN bun install --frozen-lockfile
 # Copy the entire project
 COPY . .
 
-# Build client
-RUN cd client && bun run build
+# Build client and move to server/dist
+RUN chmod +x build.sh && ./build.sh
 
 # Build server
 RUN cd server && bun run build
@@ -32,16 +32,12 @@ FROM oven/bun:1.2.2-alpine
 # Env vars for the end image should be here
 ENV APP_DATABASE_URL=${APP_DATABASE_URL}
 ENV SERVER_PORT=${SERVER_PORT:-2022}
-# Install curl for healthcheck, Caddy, and supervisor
-RUN apk add --no-cache curl caddy supervisor
+# Install curl for healthcheck and supervisor
+RUN apk add --no-cache curl supervisor
 
 WORKDIR /app
 
-# Copy built client files and Caddyfile
-COPY --from=builder /app/client/ /app/client/
-COPY --from=builder /app/client/Caddyfile /app/client/Caddyfile
-
-# Copy server files
+# Copy server files (includes built frontend in dist/)
 COPY --from=builder /app/server/ /app/server/
 COPY --from=builder /app/server/package.json /app/server/
 
@@ -56,6 +52,6 @@ RUN bun install --frozen-lockfile
 WORKDIR /app
 COPY supervisord.conf /etc/supervisord.conf
 
-EXPOSE ${SERVER_PORT} 80
+EXPOSE ${SERVER_PORT}
 
 CMD ["sh", "-c", "bun db:push-ci && /usr/bin/supervisord -c /etc/supervisord.conf"]
