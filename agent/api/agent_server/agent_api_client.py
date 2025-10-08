@@ -19,7 +19,7 @@ from api.docker_utils import setup_docker_env, start_docker_compose, stop_docker
 logger = get_logger(__name__)
 
 DEFAULT_APP_REQUEST = "Implement a simple app with a counter of clicks on a single button with a backend with persistence in DB and a frontend"
-DEFAULT_EDIT_REQUEST = "Add message with emojis to the app to make it more fun"
+DEFAULT_EDIT_REQUEST = "Add an emoji to the header of the app"
 
 
 @contextlib.contextmanager

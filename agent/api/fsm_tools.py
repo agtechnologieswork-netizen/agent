@@ -11,6 +11,7 @@ from log import get_logger
 import ujson as json
 import os
 from integrations.analyze_spreadsheet import SpreadsheetAnalyzer
+from integrations.analyze_powerapps import PowerAppsAnalyzer
 
 logger = get_logger(__name__)
 
@@ -148,6 +149,23 @@ class FSMToolProcessor:
         else:
             logger.info("Spreadsheet analysis tool is not available - no credentials configured")
 
+        # add powerapps tool (always available)
+        self.tool_definitions.append({
+            "name": "analyze_powerapps",
+            "description": "Analyze an unpacked Microsoft PowerApp and generate a comprehensive technical specification for building a web application",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "app_dir": {
+                        "type": "string",
+                        "description": "Path to the unpacked PowerApp directory",
+                    }
+                },
+                "required": ["app_dir"],
+            },
+        })
+        logger.info("PowerApps analysis tool is available")
+
         # Map tool names to their implementation methods
         self.tool_mapping: dict[str, Callable[..., Awaitable[CommonToolResult]]] = {
             "start_fsm": self.tool_start_fsm,
@@ -160,8 +178,19 @@ class FSMToolProcessor:
         if self.is_spreadsheet_available(settings):
             self.tool_mapping["analyze_spreadsheet"] = self.tool_analyze_spreadsheet
 
+        # add powerapps tool mapping (always available)
+        self.tool_mapping["analyze_powerapps"] = self.tool_analyze_powerapps
+        self._specification = ""
+
     async def tool_start_fsm(self, app_description: str) -> CommonToolResult:
         """Tool implementation for starting a new FSM session"""
+
+        if self._specification:
+            app_description += f"\nFull specification:\n{self._specification}"
+            logger.info("Added stored specification to app description for FSM start.")
+        else:
+            logger.info("No stored specification to add to app description for FSM start.")
+
         try:
             logger.info(f"Starting new FSM session with description: {app_description}")
 
@@ -295,9 +324,10 @@ class FSMToolProcessor:
 
             # Analyze with LLM
             analysis_result = await analyzer.analyze_with_llm(markdown_data)
+            self._specification = analysis_result  # store for potential later use
 
             logger.info("Spreadsheet analysis completed successfully")
-            return CommonToolResult(content=analysis_result + "\nPlease use this full description when passing the user's request to FSM. Make sure to include both the logic and initial data.")
+            return CommonToolResult(content=analysis_result + "\nIt will be added automatically to the context when the FSM starts.")
 
         except ImportError as e:
             logger.exception(f"Failed to import spreadsheet dependencies: {str(e)}")
@@ -308,6 +338,31 @@ class FSMToolProcessor:
         except Exception as e:
             logger.exception(f"Error analyzing spreadsheet: {str(e)}")
             return CommonToolResult(content=f"Failed to analyze spreadsheet: {str(e)}", is_error=True)
+
+    async def tool_analyze_powerapps(self, app_dir: str) -> CommonToolResult:
+        """Tool implementation for analyzing PowerApps"""
+        try:
+            logger.info(f"Analyzing PowerApp at: {app_dir}")
+
+            # create analyzer instance
+            analyzer = PowerAppsAnalyzer()
+
+            # analyze the PowerApp directory
+            analysis_result = await analyzer.analyze(app_dir)
+            self._specification = analysis_result  # store for potential later use
+
+            logger.info("PowerApp analysis completed successfully")
+            return CommonToolResult(content=analysis_result + "\nIt will be added automatically to the context when the FSM starts.")
+
+        except ImportError as e:
+            logger.exception(f"Failed to import PowerApps dependencies: {str(e)}")
+            return CommonToolResult(
+                content="PowerApps integration dependencies are not installed. Please install claude-agent-sdk and related packages.",
+                is_error=True
+            )
+        except Exception as e:
+            logger.exception(f"Error analyzing PowerApp: {str(e)}")
+            return CommonToolResult(content=f"Failed to analyze PowerApp: {str(e)}", is_error=True)
 
     async def compact_thread(self, messages: list[InternalMessage], llm: AsyncLLM) -> list[InternalMessage]:
         last_message = messages[-1]
@@ -460,6 +515,11 @@ class FSMToolProcessor:
 
 If the user provides a Google Spreadsheet URL or requests to analyze spreadsheet data, use the analyze_spreadsheet tool first to generate a technical specification. This tool will analyze the spreadsheet structure and content to create a detailed specification for building a web application based on that data."""
 
+        # powerapps integration (always available)
+        powerapps_part = """
+
+If the user provides a PowerApp directory path or requests to analyze a PowerApp, use the analyze_powerapps tool first to generate a comprehensive technical specification. This tool will analyze the unpacked PowerApp structure, screens, data model, formulas, and business logic to create a detailed specification for building an equivalent web application. Ensure to include the full specification in your input to the FSM."""
+
         return f"""You are a software engineering expert who can generate application code using a code generation framework. This framework uses a Finite State Machine (FSM) to guide the generation process.
 
 Your task is to control the FSM through the following stages of code generation:
@@ -475,7 +535,7 @@ To successfully complete this task, follow these steps:
 3. Repeat step 2 until all components have been generated and confirmed.
 4. Use the complete_fsm tool to finalize the process and retrieve all artifacts.
 
-Even if the app is ready, you can always continue to refine it by providing feedback according to user's requests. The framework will handle the changes and allow you to confirm or modify the output as needed.{spreadsheet_part}
+Even if the app is ready, you can always continue to refine it by providing feedback according to user's requests. The framework will handle the changes and allow you to confirm or modify the output as needed.{spreadsheet_part}{powerapps_part}
 
 During your review process, consider the following questions:
 - Does the code correctly implement the application requirements?
@@ -488,7 +548,7 @@ FSM is an internal API, you don't need to know how it works under the hood or ex
 FSM guarantees that the generated code will be of high quality and passes tests, so you can focus on the application logic and user requirements.
 Prefer simple solutions, build an app with very basic features only first unless the user explicitly asks for something more complex.
 
-If user's request is not detailed, ask for clarification. Make reasonable assumptions and asked for confirmation and missing details. Typically, you should ask 2-3 clarifying questions before starting the FSM session. Questions should be related to the required application features and visual style. Questions must not be about the technical implementation details, such as which framework to use, how to structure the code, etc - these are internal details that should be handled by the FSM and the code generation framework. If user does not provide enough details in their answer, you can start the FSM session with a simplest possible application that implements the basic features aligned with the initial assumptions.
+If user's request is not detailed, ask for clarification. Make reasonable assumptions and asked for confirmation and missing details. Typically, you should ask 2-3 clarifying questions before starting the FSM session. Questions should be related to the required application features and visual style. Questions must not be about the technical implementation details, such as which framework to use, how to structure the code, etc - these are internal details that should be handled by the FSM, tools and the code generation framework, not the user. If user does not provide enough details in their answer, you can start the FSM session with a simplest possible application that implements the basic features aligned with the initial assumptions.
 
 If user asks for a specific technology stack, make sure it matches the stack the FSM is designed to work with. If the stack is not compatible, try to find a common ground that satisfies both the user and the FSM capabilities.
 The final app is expected to be deployed to the Neon platform or run locally with Docker.
