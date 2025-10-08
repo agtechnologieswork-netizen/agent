@@ -1,0 +1,33 @@
+{
+  "name": "app-build",
+  "private": true,
+  "workspaces": [
+    "client",
+    "server"
+  ],
+  "scripts": {
+    "db:push": "npm run --workspace=app-build-server db:push",
+    "db:push-ci": "npm run --workspace=app-build-server db:push-ci",
+    "dev:server": "npm run --workspace=app-build-server dev",
+    "dev:client": "npm run --workspace=app-build-client dev",
+    "dev:all": "npm run dev:server & npm run dev:client"
+  },
+  "overrides": {
+    "cmdk": {
+      "react": "19.0.0",
+      "react-dom": "19.0.0"
+    },
+    "react-day-picker": {
+      "react": "19.0.0",
+      "react-dom": "19.0.0",
+      "date-fns": "4.1.0"
+    }
+  },
+  "dependencies": {
+    "app-build": "."
+  },
+  "devDependencies": {
+    "@playwright/test": "1.52.0",
+    "@types/node": "22.15.14"
+  }
+}
