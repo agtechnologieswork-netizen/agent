@@ -2,7 +2,7 @@ import anyio
 import jinja2
 import logging
 import os
-from typing import Optional, Callable, Awaitable
+from typing import Optional, Callable, Awaitable, Literal
 from dataclasses import dataclass
 
 from core.base_node import Node
