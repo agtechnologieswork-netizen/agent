@@ -213,3 +213,115 @@ class PlaywrightRunner:
                         f"Playwright validation succeeded. Answer: {answer}, reason: {reason}"
                     )
         return errors
+
+    async def compare_with_reference(
+        self,
+        node: Node[BaseData],
+        reference_screenshots_path: str,
+        user_prompt: str,
+        mode: Literal["client", "full"] = "full",
+    ) -> tuple[int, str | None]:
+        """
+        Compare generated app screenshots with reference Power App screenshots.
+
+        Args:
+            node: Node with workspace containing the app to test
+            reference_screenshots_path: Path to folder containing reference screenshots
+            user_prompt: Original user prompt describing the desired app
+            mode: "client" or "full" - determines which services to run
+
+        Returns:
+            Tuple of (match_score, feedback_text)
+            - match_score: 0-10 rating of how well the design matches
+            - feedback_text: Detailed comparison feedback, or None if score >= 9
+        """
+        logger.info(f"Comparing with reference screenshots from: {reference_screenshots_path}")
+
+        # Validate reference screenshots exist
+        if not os.path.exists(reference_screenshots_path):
+            raise FileNotFoundError(f"Reference screenshots path not found: {reference_screenshots_path}")
+
+        reference_files = [
+            os.path.join(reference_screenshots_path, f)
+            for f in os.listdir(reference_screenshots_path)
+            if f.lower().endswith(('.png', '.jpg', '.jpeg'))
+        ]
+
+        if not reference_files:
+            raise ValueError(f"No image files found in reference path: {reference_screenshots_path}")
+
+        logger.info(f"Found {len(reference_files)} reference screenshots")
+
+        with TemporaryDirectory() as temp_dir:
+            # Run Playwright to capture current app screenshots
+            _, err = await self.run(node, log_dir=temp_dir, mode=mode)
+            if err:
+                logger.error(f"Failed to capture screenshots: {err}")
+                return 0, f"Failed to capture app screenshots: {err}"
+
+            # Collect generated screenshots
+            browsers = ("chromium", "webkit")
+            generated_files = []
+            for browser in browsers:
+                screenshot_file = os.path.join(temp_dir, f"{browser}-screenshot.png")
+                if os.path.exists(screenshot_file):
+                    generated_files.append(screenshot_file)
+                else:
+                    logger.warning(f"Missing screenshot: {screenshot_file}")
+
+            if not generated_files:
+                return 0, "No generated screenshots were captured"
+
+            # Combine reference and generated screenshots for VLM comparison
+            all_files = reference_files + generated_files
+
+            # Build comparison prompt
+            prompt_text = playbooks.DESIGN_COMPARISON_PROMPT + f"\n\nOriginal user prompt: {user_prompt}\n\n"
+            prompt_text += f"Reference screenshots: {len(reference_files)} images (shown first)\n"
+            prompt_text += f"Generated app screenshots: {len(generated_files)} images (shown after reference)\n"
+
+            message = Message(role="user", content=[TextRaw(prompt_text)])
+
+            # Use counter for cache invalidation
+            self.counter[f"design_compare_{user_prompt}"] += 1
+            attach_files = AttachedFiles(
+                files=all_files,
+                _cache_key=node.data.file_cache_key + str(self.counter[f"design_compare_{user_prompt}"]),
+            )
+
+            # Send to VLM for comparison
+            logger.info("Sending screenshots to VLM for comparison")
+            vlm_response = await self.vlm.completion(
+                messages=[message],
+                max_tokens=2048,  # More tokens for detailed comparison
+                attach_files=attach_files,
+            )
+
+            (vlm_feedback,) = merge_text(list(vlm_response.content))
+            vlm_text = vlm_feedback.text  # pyright: ignore
+
+            # Extract match score and feedback
+            match_score_str = extract_tag(vlm_text, "match_score") or "0"
+            try:
+                match_score = int(match_score_str.strip())
+            except ValueError:
+                logger.warning(f"Could not parse match score: {match_score_str}")
+                match_score = 0
+
+            analysis = extract_tag(vlm_text, "analysis") or ""
+            recommendations = extract_tag(vlm_text, "recommendations") or ""
+
+            # If score is 9 or 10, design is good enough
+            if match_score >= 9:
+                logger.info(f"Design match score: {match_score}/10 - Excellent match!")
+                return match_score, None
+
+            # Build feedback text for improvements
+            feedback_text = f"Design Match Score: {match_score}/10\n\n"
+            if analysis:
+                feedback_text += f"Analysis:\n{analysis}\n\n"
+            if recommendations:
+                feedback_text += f"Recommendations:\n{recommendations}"
+
+            logger.info(f"Design match score: {match_score}/10 - Improvements needed")
+            return match_score, feedback_text

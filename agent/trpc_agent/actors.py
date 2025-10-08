@@ -948,3 +948,365 @@ class TrpcActor(FileOperationsActor):
             },
         ]
         return tools
+
+
+class PowerAppDesignActor(FileOperationsActor):
+    """
+    Actor that compares a generated app's design with reference Power App screenshots
+    and iteratively improves the styling to match.
+    """
+
+    def __init__(
+        self,
+        llm: AsyncLLM,
+        vlm: AsyncLLM,
+        workspace: Workspace,
+        beam_width: int = 3,
+        max_depth: int = 10,
+        max_design_iterations: int = 5,
+        target_match_score: int = 9,
+        event_callback: Callable[[str, str], Awaitable[None]] | None = None,
+    ):
+        super().__init__(llm, workspace, beam_width, max_depth)
+        self.vlm = vlm
+        self.event_callback = event_callback
+        self.playwright = PlaywrightRunner(vlm)
+        self.max_design_iterations = max_design_iterations
+        self.target_match_score = target_match_score
+
+        # User prompt for validation
+        self._user_prompt: str = ""
+
+        # File path configuration
+        self.paths = TrpcPaths.default()
+
+    async def execute(
+        self,
+        files: dict[str, str],
+        user_prompt: str,
+        reference_screenshots_path: str,
+        mode: Literal["client", "full"] = "full",
+    ) -> Node[BaseData]:
+        """
+        Execute design comparison and iterative improvement.
+
+        Args:
+            files: Initial application files
+            user_prompt: Description of the desired app
+            reference_screenshots_path: Path to folder with reference screenshots
+            mode: "client" or "full" - which services to run
+
+        Returns:
+            Node with improved design
+        """
+        self._user_prompt = user_prompt
+
+        await notify_stage(
+            self.event_callback,
+            "🎨 Starting Power App design comparison and improvement",
+            "in_progress",
+        )
+
+        # Create workspace with input files and permissions
+        workspace = self._create_workspace_with_permissions(
+            files,
+            allowed=self.paths.files_allowed_draft + self.paths.files_allowed_frontend,
+            protected=self.paths.files_protected_frontend,
+        )
+        await workspace.exec_mut(["bun", "install"])  # sync deps
+        self.workspace = workspace
+
+        # Build context with relevant files
+        context = await self._build_context(workspace, "edit")
+
+        # Create root node
+        message = Message(
+            role="user",
+            content=[TextRaw(f"Improve design to match Power App reference: {user_prompt}")],
+        )
+        root_node = self._create_node_with_files(
+            workspace, message, files, "design_improvement"
+        )
+
+        # Iterative design improvement loop
+        best_node = root_node
+        best_score = 0
+
+        for iteration in range(1, self.max_design_iterations + 1):
+            await notify_if_callback(
+                self.event_callback,
+                f"🔍 Design iteration {iteration}/{self.max_design_iterations}",
+                "design_iteration",
+            )
+
+            # Compare current design with reference
+            match_score, feedback = await self.playwright.compare_with_reference(
+                best_node,
+                reference_screenshots_path,
+                user_prompt,
+                mode=mode,
+            )
+
+            logger.info(
+                f"Iteration {iteration}: Match score {match_score}/10"
+            )
+
+            # Check if we've achieved target match score
+            if match_score >= self.target_match_score:
+                await notify_stage(
+                    self.event_callback,
+                    f"✅ Design successfully matches reference (score: {match_score}/10)!",
+                    "completed",
+                )
+                return best_node
+
+            # Update best if improved
+            if match_score > best_score:
+                best_score = match_score
+
+            # If no improvement possible or at max iterations, return best
+            if feedback is None or iteration >= self.max_design_iterations:
+                await notify_stage(
+                    self.event_callback,
+                    f"⚠️ Reached max iterations. Best match score: {best_score}/10",
+                    "completed",
+                )
+                return best_node
+
+            # Apply design improvements based on feedback
+            await notify_if_callback(
+                self.event_callback,
+                f"🎨 Applying design improvements (current score: {match_score}/10)",
+                "applying_improvements",
+            )
+
+            improved_node = await self._apply_design_improvements(
+                best_node, feedback, context
+            )
+
+            if improved_node:
+                best_node = improved_node
+            else:
+                logger.warning(
+                    f"Failed to generate improvements in iteration {iteration}"
+                )
+
+        await notify_stage(
+            self.event_callback,
+            f"✅ Design improvement completed. Final score: {best_score}/10",
+            "completed",
+        )
+
+        return best_node
+
+    async def _apply_design_improvements(
+        self,
+        node: Node[BaseData],
+        feedback: str,
+        context: str,
+    ) -> Optional[Node[BaseData]]:
+        """Apply design improvements based on VLM feedback."""
+
+        # Prepare improvement prompt
+        user_prompt_rendered = self._render_prompt(
+            "DESIGN_IMPROVEMENT_USER_PROMPT",
+            project_context=context,
+            user_prompt=self._user_prompt,
+            feedback=feedback,
+        )
+
+        # Create new node for improvements
+        message = Message(role="user", content=[TextRaw(user_prompt_rendered)])
+        improvement_node = Node(
+            BaseData(
+                node.data.workspace.clone(),
+                node.data.messages + [message],
+                dict(node.data.files),
+                True,
+                "design_improvement",
+            ),
+            parent=node,
+        )
+
+        # Search for solution
+        solution = await self._search_single_node(
+            improvement_node, playbooks.DESIGN_IMPROVEMENT_SYSTEM_PROMPT
+        )
+
+        return solution
+
+    async def _search_single_node(
+        self, root_node: Node[BaseData], system_prompt: str
+    ) -> Optional[Node[BaseData]]:
+        """Search for solution from a single node."""
+        solution: Optional[Node[BaseData]] = None
+        iteration = 0
+
+        while solution is None and iteration < 3:  # Max 3 LLM attempts per design iteration
+            iteration += 1
+            candidates = self._select_candidates(root_node)
+            if not candidates:
+                logger.info("No candidates to evaluate, search terminated")
+                break
+
+            logger.info(
+                f"Design improvement iteration {iteration}: Running LLM on {len(candidates)} candidates"
+            )
+            nodes = await self.run_llm(
+                candidates,
+                system_prompt=system_prompt,
+                tools=self.tools,
+                max_tokens=8192,
+            )
+            logger.info(f"Received {len(nodes)} nodes from LLM")
+
+            for i, new_node in enumerate(nodes):
+                logger.info(f"Evaluating node {i + 1}/{len(nodes)}")
+                if await self.eval_node(new_node):
+                    logger.info(f"Found solution at depth {new_node.depth}")
+                    solution = new_node
+                    break
+
+        return solution
+
+    def _select_candidates(self, node: Node[BaseData]) -> list[Node[BaseData]]:
+        """Select candidate nodes for evaluation."""
+        if node.is_leaf and node.data.should_branch:
+            logger.info(f"Selecting root node for design improvement")
+            return [node]
+
+        all_children = node.get_all_children()
+        candidates = []
+        for n in all_children:
+            if n.is_leaf and n.depth <= self.max_depth:
+                if n.data.should_branch:
+                    candidates.append(n)
+
+        logger.info(f"Selected {len(candidates)} leaf nodes for evaluation")
+        return candidates
+
+    async def eval_node(self, node: Node[BaseData]) -> bool:
+        """Evaluate node using base class flow."""
+        tool_calls, is_completed = await self.run_tools(node, self._user_prompt)
+        if tool_calls:
+            node.data.messages.append(Message(role="user", content=tool_calls))
+        elif not is_completed:
+            content = [TextRaw(text="Continue or mark completed via tool call")]
+            node.data.messages.append(Message(role="user", content=content))
+        return is_completed
+
+    async def run_checks(self, node: Node[BaseData], user_prompt: str) -> str | None:
+        """
+        Run TypeScript and build checks only - no functional tests.
+        Design improvements should not break existing functionality.
+        """
+        errors = []
+
+        # Only run TypeScript and build checks
+        async with anyio.create_task_group() as tg:
+
+            async def check_frontend_tsc():
+                if error := await self.run_tsc_frontend_check(node):
+                    errors.append(error)
+
+            async def check_build():
+                if error := await self.run_build_check(node):
+                    errors.append(error)
+
+            tg.start_soon(check_frontend_tsc)
+            tg.start_soon(check_build)
+
+        if errors:
+            error_msg = await self.compact_error_message("\n".join(errors))
+            node.data.messages.append(
+                Message(role="user", content=[TextRaw(error_msg)])
+            )
+            return error_msg
+
+        return None
+
+    async def run_tsc_frontend_check(self, node: Node[BaseData]) -> str | None:
+        """Run TypeScript compilation check for frontend."""
+        result = await node.data.workspace.exec(
+            ["bun", "run", "tsc", "-p", "tsconfig.app.json", "--noEmit"], cwd="client"
+        )
+        if result.exit_code != 0:
+            error_output = f"{result.stdout}\n{result.stderr}"
+            return f"TypeScript errors (frontend):\n{error_output}"
+        return None
+
+    async def run_build_check(self, node: Node[BaseData]) -> str | None:
+        """Run frontend build check."""
+        result = await node.data.workspace.exec(["bun", "run", "build"], cwd="client")
+        if result.exit_code != 0:
+            error_output = f"{result.stdout}\n{result.stderr}"
+            return f"Build errors:\n{error_output}"
+        return None
+
+    def _render_prompt(self, template_name: str, **kwargs) -> str:
+        """Render Jinja template with given parameters."""
+        jinja_env = jinja2.Environment()
+        template = jinja_env.from_string(getattr(playbooks, template_name))
+        return template.render(**kwargs)
+
+    def _create_node_with_files(
+        self,
+        workspace: Workspace,
+        message: Message,
+        files: dict[str, str],
+        context: str = "default",
+    ) -> Node[BaseData]:
+        """Create a Node with BaseData and copy files to it."""
+        node = Node(BaseData(workspace, [message], {}, True, context))
+        for file_path, content in files.items():
+            node.data.files[file_path] = content
+        return node
+
+    def _create_workspace_with_permissions(
+        self,
+        files: dict[str, str],
+        allowed: list[str],
+        protected: list[str] | None = None,
+    ) -> Workspace:
+        """Create workspace with files and permissions."""
+        workspace = self.workspace.clone()
+        for file_path, content in files.items():
+            workspace.write_file(file_path, content)
+        return workspace.permissions(allowed=allowed, protected=protected or [])
+
+    async def _build_context(
+        self,
+        workspace: Workspace,
+        context_type: str,
+    ) -> str:
+        """Build context for design improvements."""
+        context = []
+
+        # For design improvements, we need frontend files
+        relevant_files = self.paths.files_relevant_frontend + ["client/src/App.css"]
+        allowed_files = self.paths.files_allowed_frontend
+        protected_files = self.paths.files_protected_frontend
+
+        # Add relevant files to context
+        for path in relevant_files:
+            try:
+                content = await workspace.read_file(path)
+                context.append(f'\n<file path="{path}">\n{content.strip()}\n</file>\n')
+                logger.debug(f"Added {path} to context")
+            except Exception:
+                # File might not exist, skip it
+                pass
+
+        # Add UI components info
+        try:
+            ui_files = await workspace.ls("client/src/components/ui")
+            context.append(f"UI components in client/src/components/ui: {ui_files}")
+        except Exception:
+            pass
+
+        if allowed_files:
+            context.append(f"Allowed paths and directories: {allowed_files}")
+        if protected_files:
+            context.append(f"Protected paths and directories: {protected_files}")
+
+        return "\n".join(context)

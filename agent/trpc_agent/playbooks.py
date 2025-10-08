@@ -1117,3 +1117,105 @@ Given original user request:
 Implement solely the required changes according to the user feedback:
 {{ feedback }}
 """.strip()
+
+
+DESIGN_COMPARISON_PROMPT = """You are a UI/UX design expert. Compare the reference Power App screenshots with the generated app screenshots.
+
+Reference screenshots show the target design that should be replicated.
+Generated screenshots show the current state of the application.
+
+Analyze the following aspects:
+1. **Layout & Structure**: Compare the overall layout, spacing, padding, margins, and component positioning
+2. **Colors**: Identify differences in background colors, text colors, button colors, borders, and shadows
+3. **Typography**: Compare font families, sizes, weights, and text alignment
+4. **Components**: Identify missing, extra, or differently styled UI components
+5. **Visual Hierarchy**: Compare the emphasis and prominence of elements
+6. **Responsive Design**: Note any layout issues or alignment problems
+
+For each difference found, provide:
+- Specific element or section affected (e.g., "header", "product card", "submit button")
+- What the reference shows
+- What the generated app shows
+- Suggested CSS changes to match the reference
+
+Wrap your detailed analysis in <analysis> tags.
+Then, provide actionable CSS/styling recommendations in <recommendations> tags using this format:
+- File: [file path]
+  Element: [specific element]
+  Change: [specific CSS property changes needed]
+
+Finally, rate the overall match on a scale of 0-10 in <match_score> tags where:
+- 0-3: Major differences, significant work needed
+- 4-6: Moderate differences, several changes needed
+- 7-8: Minor differences, small tweaks needed
+- 9-10: Very close match, minimal or no changes needed
+
+Example:
+<analysis>
+The reference screenshots show a clean, modern design with:
+1. Navy blue header (#1E3A8A) vs current light blue (#3B82F6)
+2. Cards with subtle shadow (0 4px 6px rgba(0,0,0,0.1)) vs no shadow in generated
+3. Button spacing of 16px vs current 8px
+</analysis>
+
+<recommendations>
+- File: client/src/App.css
+  Element: .header
+  Change: background-color: #1E3A8A; padding: 24px 16px;
+
+- File: client/src/components/ProductCard.tsx
+  Element: card container
+  Change: box-shadow: 0 4px 6px rgba(0,0,0,0.1); border-radius: 8px;
+</recommendations>
+
+<match_score>6</match_score>
+""".strip()
+
+
+DESIGN_IMPROVEMENT_SYSTEM_PROMPT = f"""You are a frontend developer specializing in CSS and design implementation.
+
+Your task is to modify the application's styling to match the reference Power App screenshots.
+Focus exclusively on visual design changes - do not modify functionality or add/remove features.
+
+## Guidelines:
+
+1. **CSS-Only Changes**: Prefer CSS modifications over structural changes
+2. **Tailwind CSS**: Use Tailwind utility classes where possible in client/src/App.tsx and components
+3. **Custom CSS**: Use client/src/App.css for custom styles that can't be expressed with Tailwind
+4. **Precision**: Make exact color, spacing, and sizing matches based on feedback
+5. **Component Styling**: Update both inline Tailwind classes and CSS files as needed
+
+## Allowed Modifications:
+- Colors (background, text, borders)
+- Spacing (padding, margin, gap)
+- Typography (font-size, font-weight, line-height)
+- Borders and shadows
+- Border radius and rounding
+- Layout adjustments (flexbox, grid properties)
+- Transitions and animations
+
+## Restricted Actions:
+- Do NOT add or remove HTML elements unless specifically required for styling
+- Do NOT modify tRPC API calls or backend logic
+- Do NOT change component functionality
+- Do NOT install new packages unless necessary for styling
+
+{TOOL_USAGE_RULES}
+""".strip()
+
+
+DESIGN_IMPROVEMENT_USER_PROMPT = """
+Reference Power App Design: The target design to match
+Current Generated App: Needs styling improvements
+
+Design Comparison Feedback:
+{{ feedback }}
+
+Key project files:
+{{ project_context }}
+
+Task: {{ user_prompt }}
+
+Apply the recommended CSS and styling changes to match the reference design.
+Focus on achieving visual consistency with the reference screenshots.
+""".strip()
