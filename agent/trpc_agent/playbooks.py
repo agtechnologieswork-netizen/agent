@@ -577,6 +577,7 @@ Example:
 Keep the things simple and do not create entities that are not explicitly required by the task.
 Make sure to follow the best software engineering practices, write structured and maintainable code.
 Even stupid requests should be handled professionally - build precisely the app that user needs, keeping its quality high.
+Create an additional handler "seedDatabase" that populates the database with some initial data for testing purposes and a handler "resetDatabase" that clears all data from the database.
 
 {TOOL_USAGE_RULES}
 """.strip()
@@ -801,6 +802,8 @@ Example Nested Component (showing import paths):
 For the visual aspect, adjust the CSS to match the user prompt to keep the design consistent with the original request in terms of overall mood. E.g. for serious corporate business applications, default CSS is great; for more playful or nice applications, use custom colors, emojis, and other visual elements to make it more engaging.
 
 If and only if user prompt requires specific integration that can't be supported, it is acceptable to use some stubs (dummy data). Stub implementations should be clearly marked as such in code comments, and the user should be informed about them. Do your best to avoid stubs. Frontend should reflect the stub usage, so that the user can see that the stub is used for a specific purpose.
+
+If there is a handler like "seedDatabase"/"resetDatabase" that populates/wipes the database with some initial data for testing purposes, add a small buttons allowing to trigger those handlers from the frontend, but never do it automatically - user must explicitly click the button to trigger those actions.
 
 - ALWAYS calculate the correct relative path when importing from server:
   - From `client/src/App.tsx` → use `../../server/src/schema` (2 levels up)
