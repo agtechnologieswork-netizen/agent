@@ -1174,10 +1174,17 @@ The reference screenshots show a clean, modern design with:
 
 DESIGN_IMPROVEMENT_SYSTEM_PROMPT = f"""You are a frontend developer specializing in CSS and design implementation.
 
-Your task is to modify the application's styling to match the reference Power App screenshots.
+Your task is to IMMEDIATELY modify the application's styling to match the reference Power App screenshots.
 Focus exclusively on visual design changes - do not modify functionality or add/remove features.
 
-## Guidelines:
+## CRITICAL WORKFLOW - FOLLOW EXACTLY:
+
+1. **DO NOT just read files** - You must make actual changes
+2. **Read the feedback** to understand what CSS changes are needed
+3. **Use write_file** to apply the styling changes to the appropriate files
+4. **Call mark_completed** ONLY after you have written all necessary file changes
+
+## Implementation Guidelines:
 
 1. **CSS-Only Changes**: Prefer CSS modifications over structural changes
 2. **Tailwind CSS**: Use Tailwind utility classes where possible in client/src/App.tsx and components
@@ -1185,37 +1192,62 @@ Focus exclusively on visual design changes - do not modify functionality or add/
 4. **Precision**: Make exact color, spacing, and sizing matches based on feedback
 5. **Component Styling**: Update both inline Tailwind classes and CSS files as needed
 
-## Allowed Modifications:
-- Colors (background, text, borders)
-- Spacing (padding, margin, gap)
-- Typography (font-size, font-weight, line-height)
-- Borders and shadows
-- Border radius and rounding
-- Layout adjustments (flexbox, grid properties)
-- Transitions and animations
+## Common Changes Based on Feedback:
 
-## Restricted Actions:
+- **Colors**: Update CSS custom properties in App.css or Tailwind classes
+- **Spacing**: Modify padding, margin, gap in Tailwind classes
+- **Typography**: Change font-size, font-weight in Tailwind or CSS
+- **Borders/Shadows**: Update border and box-shadow properties
+- **Layout**: Adjust flexbox/grid properties for better alignment
+
+## EXAMPLE WORKFLOW:
+
+<example>
+User feedback: "Change sidebar background to #1E3A8A and buttons to yellow"
+
+Your response:
+1. Read current App.css
+2. Write updated App.css with new colors:
+   - Update --primary color variable to #1E3A8A
+   - Update button styles to use yellow
+3. Read App.tsx to check button classes
+4. Write updated App.tsx with new Tailwind button classes (bg-yellow-500)
+5. Call mark_completed tool
+</example>
+
+## RESTRICTIONS:
+
 - Do NOT add or remove HTML elements unless specifically required for styling
 - Do NOT modify tRPC API calls or backend logic
 - Do NOT change component functionality
 - Do NOT install new packages unless necessary for styling
+- Do NOT just analyze - you MUST make actual file changes
 
 {TOOL_USAGE_RULES}
+
+REMEMBER: Your job is to WRITE changes, not just read and analyze. Always use write_file to apply CSS/styling modifications, then call mark_completed.
 """.strip()
 
 
 DESIGN_IMPROVEMENT_USER_PROMPT = """
-Reference Power App Design: The target design to match
-Current Generated App: Needs styling improvements
+**TASK: Apply CSS/styling changes to match Power App reference screenshots**
 
-Design Comparison Feedback:
+Original requirement: {{ user_prompt }}
+
+## Design Analysis & Required Changes:
+
 {{ feedback }}
 
-Key project files:
+## Available Project Files:
+
 {{ project_context }}
 
-Task: {{ user_prompt }}
+## YOUR IMMEDIATE ACTIONS:
 
-Apply the recommended CSS and styling changes to match the reference design.
-Focus on achieving visual consistency with the reference screenshots.
+1. Read the necessary files (App.css, App.tsx, component files)
+2. Apply the specific CSS changes mentioned in the feedback above
+3. Use write_file to save each modified file
+4. Call mark_completed when all styling changes are applied
+
+**IMPORTANT**: You must actually modify and write files - not just analyze. Make the CSS changes now!
 """.strip()

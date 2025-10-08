@@ -1190,9 +1190,22 @@ class PowerAppDesignActor(FileOperationsActor):
         tool_calls, is_completed = await self.run_tools(node, self._user_prompt)
         if tool_calls:
             node.data.messages.append(Message(role="user", content=tool_calls))
+            # If LLM only read files without writing, prompt it to actually make changes
+            if not is_completed and not any(tc.tool_use.name == "write_file" for tc in tool_calls if isinstance(tc, ToolUseResult)):
+                # Check if there were only read operations
+                read_only_tools = [tc for tc in tool_calls if isinstance(tc, ToolUseResult) and tc.tool_use.name == "read_file"]
+                if read_only_tools and len(read_only_tools) == len(tool_calls):
+                    # Add a strong prompt to actually write files
+                    logger.info("LLM only performed read operations - prompting to write files")
+                    node.data.messages.append(Message(
+                        role="user",
+                        content=[TextRaw(text="You only read files. You MUST now use write_file to apply the CSS changes described in the feedback. Do not just analyze - make the actual changes and write the files!")]
+                    ))
+                    node.data.should_branch = True  # Allow another iteration
         elif not is_completed:
-            content = [TextRaw(text="Continue or mark completed via tool call")]
+            content = [TextRaw(text="You must use write_file to apply CSS changes, then call mark_completed")]
             node.data.messages.append(Message(role="user", content=content))
+            node.data.should_branch = True  # Allow another iteration
         return is_completed
 
     async def run_checks(self, node: Node[BaseData], user_prompt: str) -> str | None:
