@@ -109,6 +109,13 @@ def interactive():
     Fire(_run_interactive)
 
 
+def improve_design():
+    from tests.test_e2e import improve_design as _improve_design
+    coloredlogs.install(level="INFO")
+    os.environ["LLM_VCR_CACHE_MODE"] = os.environ.get("LLM_VCR_CACHE_MODE", "lru")
+    Fire(_improve_design)
+
+
 def type_check():
     code = subprocess.run("uv run pyright .".split())
     sys.exit(code.returncode)

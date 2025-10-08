@@ -148,6 +148,103 @@ def find_powerapp_screenshots(source_path: str) -> str | None:
     return None
 
 
+async def apply_powerapp_design_improvements(
+    app_dir: str,
+    screenshot_path: str,
+    user_prompt: str,
+    max_iterations: int = 5,
+    target_score: int = 8,
+) -> bool:
+    """
+    Apply PowerApp design improvements to an existing app.
+
+    Args:
+        app_dir: Directory containing the generated app
+        screenshot_path: Path to reference screenshots
+        user_prompt: Original user prompt for context
+        max_iterations: Maximum design improvement iterations
+        target_score: Target match score (0-10)
+
+    Returns:
+        True if improvements were applied successfully, False otherwise
+    """
+    logger.info("🎨 Applying PowerApp design improvements...")
+    try:
+        import dagger
+        from trpc_agent.actors import PowerAppDesignActor
+        from llm.utils import get_vision_llm_client, get_best_coding_llm_client
+        from core.workspace import Workspace
+
+        # Load generated files
+        files_dict = {}
+        for root, _, filenames in os.walk(app_dir):
+            for filename in filenames:
+                if filename.endswith(('.ts', '.tsx', '.css', '.json')):
+                    file_path = os.path.join(root, filename)
+                    rel_path = os.path.relpath(file_path, app_dir)
+                    try:
+                        with open(file_path, 'r') as f:
+                            files_dict[rel_path] = f.read()
+                    except Exception as e:
+                        logger.warning(f"Failed to read {rel_path}: {e}")
+
+        if not files_dict:
+            logger.warning("No files found to improve")
+            return False
+
+        # Create dagger client and workspace
+        async with dagger.Connection(
+            dagger.Config(log_output=open(os.devnull, "w"))
+        ) as dagger_client:
+            workspace = await Workspace.create(
+                client=dagger_client,
+                base_image="oven/bun:1.2.5-alpine",
+                context=dagger_client.host().directory(app_dir),
+                setup_cmd=[["bun", "install"]],
+            )
+
+            # Initialize LLM clients
+            llm = get_best_coding_llm_client()
+            vlm = get_vision_llm_client()
+
+            # Create actor
+            actor = PowerAppDesignActor(
+                llm=llm,
+                vlm=vlm,
+                workspace=workspace,
+                max_design_iterations=max_iterations,
+                target_match_score=target_score,
+            )
+
+            # Run design improvement
+            result_node = await actor.execute(
+                files=files_dict,
+                user_prompt=user_prompt,
+                reference_screenshots_path=screenshot_path,
+                mode="client",
+            )
+
+            # Write improved files back to app_dir
+            for file_path, content in result_node.data.files.items():
+                if content is not None:  # None means file was deleted
+                    full_path = os.path.join(app_dir, file_path)
+                    os.makedirs(os.path.dirname(full_path), exist_ok=True)
+                    with open(full_path, 'w') as f:
+                        f.write(content)
+                    logger.info(f"✅ Updated: {file_path}")
+
+            logger.info("🎨 Design improvements applied successfully!")
+            return True
+
+    except KeyboardInterrupt:
+        logger.warning("⚠️  Design improvement interrupted by user")
+        raise
+    except Exception as e:
+        logger.error(f"❌ Failed to apply design improvements: {e}", exc_info=True)
+        logger.warning("⚠️  Continuing without design improvements")
+        return False
+
+
 async def run_e2e(
     prompt: str,
     standalone: bool,
@@ -291,72 +388,14 @@ async def run_e2e(
                         screenshot_path = find_powerapp_screenshots(powerapp_source)
 
                     if screenshot_path:
-                        logger.info("🎨 Applying PowerApp design improvements...")
-                        try:
-                            import dagger
-                            from trpc_agent.actors import PowerAppDesignActor
-                            from llm.utils import get_vision_llm_client, get_best_coding_llm_client
-                            from core.workspace import Workspace
-
-                            # Load generated files
-                            files_dict = {}
-                            for root, _, filenames in os.walk(temp_dir):
-                                for filename in filenames:
-                                    if filename.endswith(('.ts', '.tsx', '.css', '.json')):
-                                        file_path = os.path.join(root, filename)
-                                        rel_path = os.path.relpath(file_path, temp_dir)
-                                        try:
-                                            with open(file_path, 'r') as f:
-                                                files_dict[rel_path] = f.read()
-                                        except Exception as e:
-                                            logger.warning(f"Failed to read {rel_path}: {e}")
-
-                            if files_dict:
-                                # Create dagger client and workspace
-                                async with dagger.Connection(
-                                    dagger.Config(log_output=open(os.devnull, "w"))
-                                ) as dagger_client:
-                                    workspace = await Workspace.create(
-                                        client=dagger_client,
-                                        base_image="oven/bun:1.2.5-alpine",
-                                        context=dagger_client.host().directory(temp_dir),
-                                        setup_cmd=[["bun", "install"]],
-                                    )
-
-                                    # Initialize LLM clients
-                                    llm = get_best_coding_llm_client()
-                                    vlm = get_vision_llm_client()
-
-                                    # Create actor
-                                    actor = PowerAppDesignActor(
-                                        llm=llm,
-                                        vlm=vlm,
-                                        workspace=workspace,
-                                        max_design_iterations=5,
-                                        target_match_score=8,
-                                    )
-
-                                    # Run design improvement
-                                    result_node = await actor.execute(
-                                        files=files_dict,
-                                        user_prompt=prompt,
-                                        reference_screenshots_path=screenshot_path,
-                                        mode="client",
-                                    )
-
-                                    # Write improved files back to temp_dir
-                                    for file_path, content in result_node.data.files.items():
-                                        if content is not None:  # None means file was deleted
-                                            full_path = os.path.join(temp_dir, file_path)
-                                            os.makedirs(os.path.dirname(full_path), exist_ok=True)
-                                            with open(full_path, 'w') as f:
-                                                f.write(content)
-                                            logger.info(f"✅ Updated: {file_path}")
-
-                                    logger.info("🎨 Design improvements applied successfully!")
-                        except Exception as e:
-                            logger.error(f"Failed to apply design improvements: {e}", exc_info=True)
-                            # Continue anyway - design improvement is optional
+                        # Apply design improvements - errors are handled inside
+                        await apply_powerapp_design_improvements(
+                            app_dir=temp_dir,
+                            screenshot_path=screenshot_path,
+                            user_prompt=prompt,
+                            max_iterations=5,
+                            target_score=8,
+                        )
                     else:
                         logger.info("No PowerApp screenshots found, skipping design improvement")
 
@@ -457,5 +496,57 @@ def create_app(prompt, output_dir=None):
     anyio.run(run_e2e, prompt, True, True, None, False, output_dir)
 
 
+def improve_design(app_dir, screenshot_path, prompt="Improve design", max_iterations=5, target_score=8):
+    """
+    Run design improvements on an existing generated app.
+
+    Usage:
+        python -m tests.test_e2e improve_design \
+            --app_dir=./output/my-app \
+            --screenshot_path=/path/to/screenshots \
+            --prompt="Match the PowerApp design" \
+            --max_iterations=5 \
+            --target_score=8
+    """
+    import coloredlogs
+
+    coloredlogs.install(level="INFO")
+
+    # Validate paths
+    app_dir = os.path.abspath(app_dir)
+    screenshot_path = os.path.abspath(screenshot_path)
+
+    if not os.path.isdir(app_dir):
+        logger.error(f"App directory not found: {app_dir}")
+        return
+
+    if not os.path.isdir(screenshot_path):
+        logger.error(f"Screenshot directory not found: {screenshot_path}")
+        return
+
+    logger.info(f"📁 App directory: {app_dir}")
+    logger.info(f"🖼️  Screenshot path: {screenshot_path}")
+    logger.info(f"🎯 Target score: {target_score}/10")
+    logger.info(f"🔄 Max iterations: {max_iterations}")
+
+    # Run design improvements
+    success = anyio.run(
+        apply_powerapp_design_improvements,
+        app_dir,
+        screenshot_path,
+        prompt,
+        max_iterations,
+        target_score,
+    )
+
+    if success:
+        logger.info("✅ Design improvements completed successfully")
+    else:
+        logger.error("❌ Design improvements failed or were incomplete")
+
+
 if __name__ == "__main__":
-    Fire(create_app)
+    Fire({
+        "create_app": create_app,
+        "improve_design": improve_design,
+    })

@@ -16,12 +16,43 @@ When you run a PowerApp migration command, the system will:
 
 ## Usage
 
+### Full Generation with Design Improvement
+
 ```bash
 # Migrate a PowerApp with automatic design improvement
 uv run generate "migrate a powerapp from /path/to/powerapp-source"
 
 # Example with the HelpDesk sample
 uv run generate "migrate a powerapp from /tmp/powerapps-samples/samples/HelpDesk-theme source code"
+
+# With persistent output directory
+uv run generate \
+  --output_dir=./output/my-helpdesk-app \
+  "migrate a powerapp from /path/to/powerapp-source"
+
+# With explicit screenshot path
+uv run generate \
+  --output_dir=./output/my-app \
+  "migrate a powerapp from /path/to/source and improve visually from /path/to/screenshots"
+```
+
+### Design Improvement Only (Existing App)
+
+If you already have a generated app and want to run only the design improvement:
+
+```bash
+# Run design improvements on an existing app
+uv run improve_design \
+  --app_dir=./output/my-helpdesk-app \
+  --screenshot_path=/path/to/screenshots \
+  --prompt="Match the PowerApp design" \
+  --max_iterations=5 \
+  --target_score=8
+
+# Alternative: using Python module directly
+python -m tests.test_e2e improve_design \
+  --app_dir=./output/my-app \
+  --screenshot_path=/path/to/screenshots
 ```
 
 ## Requirements
@@ -63,6 +94,9 @@ Default settings in the integration:
 ✅ **Iterative Improvement**: Applies changes in multiple rounds for better matching
 ✅ **Non-Breaking**: Design improvements are optional - generation continues even if they fail
 ✅ **CSS-Only Changes**: Only modifies styling, preserves all functionality
+✅ **Robust Error Handling**: Errors during improvement don't crash the pipeline
+✅ **Standalone Mode**: Run design improvements on existing apps without regeneration
+✅ **Persistent Output**: Keep generated apps with `--output_dir` parameter
 
 ## Troubleshooting
 
@@ -79,6 +113,17 @@ Default settings in the integration:
 - Higher quality screenshots lead to better results
 - Ensure screenshots show the actual rendered UI, not just mockups
 - Some design elements may require manual tuning
+
+### Design improvement errors
+- The pipeline will continue even if design improvements fail
+- Check logs for detailed error messages (look for "❌ Failed to apply design improvements")
+- User can interrupt with Ctrl+C without losing generated app (if using `--output_dir`)
+- Try running `uv run improve_design` separately on the generated app to retry
+
+### App still launches with errors
+- Design improvement is optional - the app will launch even if improvements fail
+- This ensures you always get a working app, even if visual matching has issues
+- You can manually tweak the design or re-run `improve_design` later
 
 ## Example Prompt Patterns
 
