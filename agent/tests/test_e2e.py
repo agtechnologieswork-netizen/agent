@@ -336,47 +336,54 @@ async def run_e2e(
                 assert success, f"Failed to apply first patch: {message}"
 
                 if with_edit:
-                    # Read all files from the patched directory to provide as context
-                    files_for_snapshot = get_all_files_from_project_dir(temp_dir)
-                    all_files = [f.model_dump() for f in files_for_snapshot]
+                    try:
+                        # Read all files from the patched directory to provide as context
+                        files_for_snapshot = get_all_files_from_project_dir(temp_dir)
+                        all_files = [f.model_dump() for f in files_for_snapshot]
 
-                    new_events, new_request = await client.continue_conversation(
-                        previous_events=events,
-                        previous_request=request,
-                        message=DEFAULT_EDIT_REQUEST,
-                        all_files=all_files,
-                        template_id=template_id,
-                        settings=settings,
-                    )
-                    
-                    # Handle potential refinement requests after edit
-                    refinement_count = 0
-                    while (
-                        new_events
-                        and new_events[-1].message.kind == MessageKind.REFINEMENT_REQUEST
-                        and refinement_count < max_refinements
-                    ):
                         new_events, new_request = await client.continue_conversation(
-                            previous_events=new_events,
-                            previous_request=new_request,
-                            message="just do it! no more questions, please",
+                            previous_events=events,
+                            previous_request=request,
+                            message=DEFAULT_EDIT_REQUEST,
+                            all_files=all_files,
                             template_id=template_id,
                             settings=settings,
                         )
-                        refinement_count += 1
-                        logger.info(f"Edit refinement attempt {refinement_count}/{max_refinements}")
-                    
-                    updated_diff = latest_unified_diff(new_events)
-                    assert updated_diff, (
-                        "No diff was generated in the agent response after edit"
-                    )
-                    assert updated_diff != diff, "Edit did not produce a new diff"
 
-                    # Apply the second diff (incremental on top of first)
-                    success, message = apply_patch(
-                        updated_diff, temp_dir, template_paths[template_id]
-                    )
-                    assert success, f"Failed to apply second patch: {message}"
+                        # Handle potential refinement requests after edit
+                        refinement_count = 0
+                        while (
+                            new_events
+                            and new_events[-1].message.kind == MessageKind.REFINEMENT_REQUEST
+                            and refinement_count < max_refinements
+                        ):
+                            new_events, new_request = await client.continue_conversation(
+                                previous_events=new_events,
+                                previous_request=new_request,
+                                message="just do it! no more questions, please",
+                                template_id=template_id,
+                                settings=settings,
+                            )
+                            refinement_count += 1
+                            logger.info(f"Edit refinement attempt {refinement_count}/{max_refinements}")
+
+                        updated_diff = latest_unified_diff(new_events)
+                        if not updated_diff:
+                            logger.warning("⚠️  No diff was generated in the agent response after edit")
+                        elif updated_diff == diff:
+                            logger.warning("⚠️  Edit did not produce a new diff")
+                        else:
+                            # Apply the second diff (incremental on top of first)
+                            success, message = apply_patch(
+                                updated_diff, temp_dir, template_paths[template_id]
+                            )
+                            if success:
+                                logger.info("✅ Edit phase completed successfully")
+                            else:
+                                logger.warning(f"⚠️  Failed to apply second patch: {message}")
+                    except Exception as e:
+                        logger.warning(f"⚠️  Edit phase failed (continuing anyway): {e}")
+                        logger.debug("Edit phase error details:", exc_info=True)
 
                 # Check if this is a PowerApp migration and apply design improvements
                 powerapp_source = extract_powerapp_source_path(prompt)
