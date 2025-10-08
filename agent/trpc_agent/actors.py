@@ -1162,7 +1162,7 @@ class PowerAppDesignActor(FileOperationsActor):
 
             for i, new_node in enumerate(nodes):
                 logger.info(f"Evaluating node {i + 1}/{len(nodes)}")
-                if await self.eval_node(new_node):
+                if await self.eval_node(new_node, self._user_prompt):
                     logger.info(f"Found solution at depth {new_node.depth}")
                     solution = new_node
                     break

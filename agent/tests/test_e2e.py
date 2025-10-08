@@ -4,6 +4,7 @@ import tempfile
 import anyio
 import contextlib
 import re
+from typing import cast
 
 from fire import Fire
 from api.agent_server.agent_client import AgentApiClient, MessageKind
@@ -212,14 +213,17 @@ async def run_e2e(
 
             # Use output_dir if provided, otherwise create temporary directory
             if output_dir:
-                os.makedirs(output_dir, exist_ok=True)
-                temp_dir = output_dir
-                temp_dir_context = contextlib.nullcontext()
+                # Convert to absolute path to avoid issues with directory changes
+                temp_dir = os.path.abspath(output_dir)
+                os.makedirs(temp_dir, exist_ok=True)
+                temp_dir_context: contextlib.AbstractContextManager[str] = cast(
+                    contextlib.AbstractContextManager[str],
+                    contextlib.nullcontext(temp_dir)
+                )
             else:
                 temp_dir_context = tempfile.TemporaryDirectory()
 
-            with temp_dir_context as managed_dir:
-                temp_dir = temp_dir if output_dir else managed_dir
+            with temp_dir_context as temp_dir:
                 # Determine template path based on template_id
                 template_paths = {
                     "nicegui_agent": "nicegui_agent/template",
@@ -449,7 +453,8 @@ def create_app(prompt, output_dir=None):
     import coloredlogs
 
     coloredlogs.install(level="INFO")
-    anyio.run(run_e2e, prompt, True, output_dir=output_dir)
+    # anyio.run requires all arguments to be positional
+    anyio.run(run_e2e, prompt, True, True, None, False, output_dir)
 
 
 if __name__ == "__main__":
