@@ -94,12 +94,12 @@ def generate():
     return Fire(_generate)
 
 
-def _generate(prompt=None, template_id=None, with_edit=True, use_databricks=False):
+def _generate(prompt=None, template_id=None, with_edit=True, use_databricks=False, output_dir=None):
     from tests.test_e2e import run_e2e, DEFAULT_APP_REQUEST
     coloredlogs.install(level="INFO")
     if prompt is None:
         prompt = DEFAULT_APP_REQUEST
-    anyio.run(run_e2e, prompt, True, with_edit, template_id, use_databricks)
+    anyio.run(run_e2e, prompt, True, with_edit, template_id, use_databricks, output_dir)
 
 
 def interactive():

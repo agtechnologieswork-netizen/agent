@@ -153,6 +153,7 @@ async def run_e2e(
     with_edit=True,
     template_id=None,
     use_databricks=False,
+    output_dir=None,
 ):
     context = empty_context() if standalone else spawn_local_server()
     settings = {}
@@ -209,7 +210,16 @@ async def run_e2e(
             logger.info(f"Generated app_name: {app_name}")
             logger.info(f"Generated commit_message: {commit_message}")
 
-            with tempfile.TemporaryDirectory() as temp_dir:
+            # Use output_dir if provided, otherwise create temporary directory
+            if output_dir:
+                os.makedirs(output_dir, exist_ok=True)
+                temp_dir = output_dir
+                temp_dir_context = contextlib.nullcontext()
+            else:
+                temp_dir_context = tempfile.TemporaryDirectory()
+
+            with temp_dir_context as managed_dir:
+                temp_dir = temp_dir if output_dir else managed_dir
                 # Determine template path based on template_id
                 template_paths = {
                     "nicegui_agent": "nicegui_agent/template",
@@ -279,10 +289,10 @@ async def run_e2e(
                     if screenshot_path:
                         logger.info("🎨 Applying PowerApp design improvements...")
                         try:
+                            import dagger
                             from trpc_agent.actors import PowerAppDesignActor
-                            from llm.anthropic import AnthropicProvider
-                            from llm.gemini import GeminiProvider
-                            from trpc_agent.playbooks import PathConfig
+                            from llm.utils import get_vision_llm_client, get_best_coding_llm_client
+                            from core.workspace import Workspace
 
                             # Load generated files
                             files_dict = {}
@@ -298,37 +308,48 @@ async def run_e2e(
                                             logger.warning(f"Failed to read {rel_path}: {e}")
 
                             if files_dict:
-                                # Initialize actor
-                                llm_provider = AnthropicProvider()
-                                vlm_provider = GeminiProvider()
-                                paths = PathConfig()
+                                # Create dagger client and workspace
+                                async with dagger.Connection(
+                                    dagger.Config(log_output=open(os.devnull, "w"))
+                                ) as dagger_client:
+                                    workspace = await Workspace.create(
+                                        client=dagger_client,
+                                        base_image="oven/bun:1.2.5-alpine",
+                                        context=dagger_client.host().directory(temp_dir),
+                                        setup_cmd=[["bun", "install"]],
+                                    )
 
-                                actor = PowerAppDesignActor(
-                                    llm=llm_provider,
-                                    vlm=vlm_provider,
-                                    paths=paths,
-                                    max_design_iterations=5,
-                                    target_match_score=8,
-                                )
+                                    # Initialize LLM clients
+                                    llm = get_best_coding_llm_client()
+                                    vlm = get_vision_llm_client()
 
-                                # Run design improvement
-                                result_node = await actor.execute(
-                                    files=files_dict,
-                                    user_prompt=prompt,
-                                    reference_screenshots_path=screenshot_path,
-                                    mode="client",
-                                )
+                                    # Create actor
+                                    actor = PowerAppDesignActor(
+                                        llm=llm,
+                                        vlm=vlm,
+                                        workspace=workspace,
+                                        max_design_iterations=5,
+                                        target_match_score=8,
+                                    )
 
-                                # Write improved files back to temp_dir
-                                for file_path, content in result_node.data.files.items():
-                                    if content is not None:  # None means file was deleted
-                                        full_path = os.path.join(temp_dir, file_path)
-                                        os.makedirs(os.path.dirname(full_path), exist_ok=True)
-                                        with open(full_path, 'w') as f:
-                                            f.write(content)
-                                        logger.info(f"✅ Updated: {file_path}")
+                                    # Run design improvement
+                                    result_node = await actor.execute(
+                                        files=files_dict,
+                                        user_prompt=prompt,
+                                        reference_screenshots_path=screenshot_path,
+                                        mode="client",
+                                    )
 
-                                logger.info("🎨 Design improvements applied successfully!")
+                                    # Write improved files back to temp_dir
+                                    for file_path, content in result_node.data.files.items():
+                                        if content is not None:  # None means file was deleted
+                                            full_path = os.path.join(temp_dir, file_path)
+                                            os.makedirs(os.path.dirname(full_path), exist_ok=True)
+                                            with open(full_path, 'w') as f:
+                                                f.write(content)
+                                            logger.info(f"✅ Updated: {file_path}")
+
+                                    logger.info("🎨 Design improvements applied successfully!")
                         except Exception as e:
                             logger.error(f"Failed to apply design improvements: {e}", exc_info=True)
                             # Continue anyway - design improvement is optional
@@ -381,9 +402,14 @@ async def run_e2e(
                         )
 
                     if standalone:
-                        input(
-                            f"App is running on http://localhost:80/, app dir is {temp_dir}; Press Enter to continue and tear down..."
-                        )
+                        if output_dir:
+                            input(
+                                f"App is running on http://localhost:80/, app saved to {temp_dir}; Press Enter to tear down containers (app directory will be kept)..."
+                            )
+                        else:
+                            input(
+                                f"App is running on http://localhost:80/, app dir is {temp_dir}; Press Enter to continue and tear down..."
+                            )
                         print("🧹Tearing down containers... ")
 
                 finally:
@@ -419,11 +445,11 @@ async def test_e2e_generation_laravel(template_id):
     await run_e2e(standalone=False, prompt=DEFAULT_APP_REQUEST, template_id=template_id)
 
 
-def create_app(prompt):
+def create_app(prompt, output_dir=None):
     import coloredlogs
 
     coloredlogs.install(level="INFO")
-    anyio.run(run_e2e, prompt, True)
+    anyio.run(run_e2e, prompt, True, output_dir=output_dir)
 
 
 if __name__ == "__main__":
