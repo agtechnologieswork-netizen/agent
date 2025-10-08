@@ -35,3 +35,28 @@ async def write_files_bulk(ctr: dagger.Container, files: dict[str, str], client:
         return await ctr.sync()
 
 
+async def export_application_artifact(
+    files: dict[str, str],
+    export_dir: str,
+    client: dagger.Client,
+    template_path: str = "./trpc_agent/apps_template",
+) -> None:
+    """
+    Export the final application artifact (server with built frontend).
+
+    Args:
+        files: Dictionary of file paths to contents from fsm.context.files
+        export_dir: Directory path where to export the artifact
+        client: Dagger client instance
+        template_path: Path to the template directory (default: "./trpc_agent/apps_template")
+    """
+    container = (
+        client.container()
+        .from_("node:18-alpine")
+        .with_workdir("/app")
+        .with_directory(".", client.host().directory(template_path))
+    )
+
+    client_ctr = await container.with_exec(["sh", "build.sh"]).sync()
+    export = client_ctr.directory("/app/server")
+    await export.export(export_dir)
