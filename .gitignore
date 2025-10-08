@@ -181,3 +181,6 @@ dabgent/dabgent_agent/output/**
 
 # Serena
 .serena
+
+# output
+agent/output/

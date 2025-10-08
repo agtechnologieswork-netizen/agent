@@ -3,6 +3,7 @@ import pytest
 import tempfile
 import anyio
 import contextlib
+import re
 
 from fire import Fire
 from api.agent_server.agent_client import AgentApiClient, MessageKind
@@ -62,6 +63,88 @@ def latest_app_name_and_commit_message(events):
             continue
 
     return app_name, commit_message
+
+
+def extract_powerapp_source_path(prompt: str) -> str | None:
+    """
+    Extract PowerApp source path from prompt.
+    Looks for patterns like "from /path/to/powerapp" or "powerapp from /path"
+    Returns the first valid directory path found.
+    """
+    # Match patterns like "from /path" or "powerapp: /path"
+    patterns = [
+        r'powerapp\s+from\s+([/~][^\s]+)',  # powerapp from /path (most specific)
+        r'from\s+([/~][^\s]+)\s+source',  # from /path source
+        r'migrate.*?from\s+([/~][^\s]+)',  # migrate ... from /path
+    ]
+
+    for pattern in patterns:
+        match = re.search(pattern, prompt, re.IGNORECASE)
+        if match:
+            path = match.group(1)
+            # Expand ~ to home directory
+            if path.startswith('~'):
+                path = os.path.expanduser(path)
+            # Check if path exists
+            if os.path.isdir(path):
+                logger.info(f"Detected PowerApp source path: {path}")
+                return path
+
+    return None
+
+
+def extract_screenshot_path(prompt: str) -> str | None:
+    """
+    Extract explicit screenshot path from prompt.
+    Looks for patterns like "improve visually from /path" or "screenshots from /path"
+    """
+    patterns = [
+        r'(?:improve|enhance)\s+visually\s+from\s+([/~][^\s]+)',  # improve visually from /path
+        r'screenshots?\s+(?:from|in|at)\s+([/~][^\s]+)',  # screenshot(s) from/in/at /path
+        r'visual(?:s|ly)?\s+from\s+([/~][^\s]+)',  # visual(s)/visually from /path
+    ]
+
+    for pattern in patterns:
+        match = re.search(pattern, prompt, re.IGNORECASE)
+        if match:
+            path = match.group(1)
+            # Expand ~ to home directory
+            if path.startswith('~'):
+                path = os.path.expanduser(path)
+            # Check if path exists and has images
+            if os.path.isdir(path):
+                has_images = any(
+                    f.lower().endswith(('.png', '.jpg', '.jpeg'))
+                    for f in os.listdir(path)
+                )
+                if has_images:
+                    logger.info(f"Detected screenshot path from prompt: {path}")
+                    return path
+
+    return None
+
+
+def find_powerapp_screenshots(source_path: str) -> str | None:
+    """
+    Find screenshot directory in PowerApp source.
+    Looks for common screenshot folder names.
+    """
+    screenshot_dirs = ['screenshots', 'screens', 'images', 'assets']
+
+    for dir_name in screenshot_dirs:
+        screenshot_path = os.path.join(source_path, dir_name)
+        if os.path.isdir(screenshot_path):
+            # Check if there are any image files
+            has_images = any(
+                f.lower().endswith(('.png', '.jpg', '.jpeg'))
+                for f in os.listdir(screenshot_path)
+            )
+            if has_images:
+                logger.info(f"Found screenshots in: {screenshot_path}")
+                return screenshot_path
+
+    logger.warning(f"No screenshot directory found in {source_path}")
+    return None
 
 
 async def run_e2e(
@@ -183,6 +266,74 @@ async def run_e2e(
                         updated_diff, temp_dir, template_paths[template_id]
                     )
                     assert success, f"Failed to apply second patch: {message}"
+
+                # Check if this is a PowerApp migration and apply design improvements
+                powerapp_source = extract_powerapp_source_path(prompt)
+                if powerapp_source and (template_id == "trpc_agent" or template_id is None):
+                    # Try explicit screenshot path from prompt first
+                    screenshot_path = extract_screenshot_path(prompt)
+                    # Fall back to searching in PowerApp source
+                    if not screenshot_path:
+                        screenshot_path = find_powerapp_screenshots(powerapp_source)
+
+                    if screenshot_path:
+                        logger.info("🎨 Applying PowerApp design improvements...")
+                        try:
+                            from trpc_agent.actors import PowerAppDesignActor
+                            from llm.anthropic import AnthropicProvider
+                            from llm.gemini import GeminiProvider
+                            from trpc_agent.playbooks import PathConfig
+
+                            # Load generated files
+                            files_dict = {}
+                            for root, _, filenames in os.walk(temp_dir):
+                                for filename in filenames:
+                                    if filename.endswith(('.ts', '.tsx', '.css', '.json')):
+                                        file_path = os.path.join(root, filename)
+                                        rel_path = os.path.relpath(file_path, temp_dir)
+                                        try:
+                                            with open(file_path, 'r') as f:
+                                                files_dict[rel_path] = f.read()
+                                        except Exception as e:
+                                            logger.warning(f"Failed to read {rel_path}: {e}")
+
+                            if files_dict:
+                                # Initialize actor
+                                llm_provider = AnthropicProvider()
+                                vlm_provider = GeminiProvider()
+                                paths = PathConfig()
+
+                                actor = PowerAppDesignActor(
+                                    llm=llm_provider,
+                                    vlm=vlm_provider,
+                                    paths=paths,
+                                    max_design_iterations=5,
+                                    target_match_score=8,
+                                )
+
+                                # Run design improvement
+                                result_node = await actor.execute(
+                                    files=files_dict,
+                                    user_prompt=prompt,
+                                    reference_screenshots_path=screenshot_path,
+                                    mode="client",
+                                )
+
+                                # Write improved files back to temp_dir
+                                for file_path, content in result_node.data.files.items():
+                                    if content is not None:  # None means file was deleted
+                                        full_path = os.path.join(temp_dir, file_path)
+                                        os.makedirs(os.path.dirname(full_path), exist_ok=True)
+                                        with open(full_path, 'w') as f:
+                                            f.write(content)
+                                        logger.info(f"✅ Updated: {file_path}")
+
+                                logger.info("🎨 Design improvements applied successfully!")
+                        except Exception as e:
+                            logger.error(f"Failed to apply design improvements: {e}", exc_info=True)
+                            # Continue anyway - design improvement is optional
+                    else:
+                        logger.info("No PowerApp screenshots found, skipping design improvement")
 
                 original_dir = os.getcwd()
                 container_names = setup_docker_env()

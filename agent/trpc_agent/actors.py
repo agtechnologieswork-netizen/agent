@@ -1185,9 +1185,9 @@ class PowerAppDesignActor(FileOperationsActor):
         logger.info(f"Selected {len(candidates)} leaf nodes for evaluation")
         return candidates
 
-    async def eval_node(self, node: Node[BaseData]) -> bool:
+    async def eval_node(self, node: Node[BaseData], user_prompt: str) -> bool:
         """Evaluate node using base class flow."""
-        tool_calls, is_completed = await self.run_tools(node, self._user_prompt)
+        tool_calls, is_completed = await self.run_tools(node, user_prompt)
         if tool_calls:
             node.data.messages.append(Message(role="user", content=tool_calls))
             # If LLM only read files without writing, prompt it to actually make changes
