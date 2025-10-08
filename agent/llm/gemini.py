@@ -123,12 +123,24 @@ class GeminiLLM(common.AsyncLLM):
         )
 
         # Log telemetry - always call to ensure validation
-        if hasattr(response, "usage_metadata"):
+        if hasattr(response, "usage_metadata") and response.usage_metadata:
             usage = response.usage_metadata
+            # handle case where usage metadata exists but token counts might be None
+            input_tokens = usage.prompt_token_count if hasattr(usage, "prompt_token_count") else None
+            output_tokens = usage.candidates_token_count if hasattr(usage, "candidates_token_count") else None
+
+            # fallback to 0 if None to avoid validation errors
+            if input_tokens is None:
+                logger.warning("Gemini response missing prompt_token_count, using 0 as fallback")
+                input_tokens = 0
+            if output_tokens is None:
+                logger.warning("Gemini response missing candidates_token_count, using 0 as fallback")
+                output_tokens = 0
+
             telemetry.log_completion(
                 model=self.model_name,
-                input_tokens=usage.prompt_token_count if usage else None,
-                output_tokens=usage.candidates_token_count if usage else None,
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
                 temperature=config.temperature
                 if config and config.temperature is not None
                 else None,
@@ -136,11 +148,12 @@ class GeminiLLM(common.AsyncLLM):
                 provider="Gemini",
             )
         else:
-            # always call telemetry even without usage data - this will trigger validation errors
+            # always call telemetry even without usage data - use 0 instead of None
+            logger.warning("Gemini response missing usage_metadata, using 0 for token counts")
             telemetry.log_completion(
                 model=self.model_name,
-                input_tokens=None,
-                output_tokens=None,
+                input_tokens=0,
+                output_tokens=0,
                 temperature=config.temperature
                 if config and config.temperature is not None
                 else None,

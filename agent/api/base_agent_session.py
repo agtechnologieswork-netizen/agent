@@ -9,7 +9,7 @@ import dagger
 from anyio.streams.memory import MemoryObjectSendStream
 
 from llm.common import ContentBlock, InternalMessage, TextRaw
-from llm.utils import get_ultra_fast_llm_client, get_universal_llm_client
+from llm.utils import get_ultra_fast_llm_client, get_best_coding_llm_client
 from api.fsm_tools import FSMToolProcessor, FSMStatus, FSMInterface
 from api.snapshot_utils import snapshot_saver
 from core.statemachine import MachineCheckpoint
@@ -189,7 +189,8 @@ class BaseAgentSession(AgentInterface, ABC):
             logger.info(f"Last user message: {fsm_message_history[-1].content}")
 
             lite_client = get_ultra_fast_llm_client()
-            top_level_agent_llm = get_universal_llm_client()
+            # top_level_agent_llm = get_universal_llm_client()
+            top_level_agent_llm = get_best_coding_llm_client()
 
             while True:
                 logger.info("Looping into next step")
