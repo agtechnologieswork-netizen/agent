@@ -35,10 +35,6 @@ jobs:
             dabgent/target/
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
 
-      - name: Run cargo check
-        working-directory: ./dabgent
-        run: cargo check --workspace
-
       - name: Run cargo check all targets
         working-directory: ./dabgent
         run: cargo check --all-targets --workspace
@@ -72,10 +68,8 @@ jobs:
 
       - name: Run unit tests
         working-directory: ./dabgent
-        run: cargo test --lib --workspace
-        continue-on-error: true
+        run: cargo test --lib --bins --workspace
 
       - name: Run integration tests
         working-directory: ./dabgent
         run: cargo test --workspace --test '*'
-        continue-on-error: true
