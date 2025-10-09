@@ -1085,6 +1085,7 @@ class PowerAppDesignActor(FileOperationsActor):
             )
 
             if improved_node:
+                logger.info(f"✅ Improvements generated, node has {len(improved_node.data.files)} files")
                 best_node = improved_node
             else:
                 logger.warning(
@@ -1132,6 +1133,11 @@ class PowerAppDesignActor(FileOperationsActor):
         solution = await self._search_single_node(
             improvement_node, playbooks.DESIGN_IMPROVEMENT_SYSTEM_PROMPT
         )
+
+        if solution:
+            logger.info(f"🎯 Solution found with {len(solution.data.files)} files")
+        else:
+            logger.warning("⚠️  No solution found in design improvement search")
 
         return solution
 
@@ -1188,10 +1194,25 @@ class PowerAppDesignActor(FileOperationsActor):
     async def eval_node(self, node: Node[BaseData], user_prompt: str) -> bool:
         """Evaluate node using base class flow."""
         tool_calls, is_completed = await self.run_tools(node, user_prompt)
+
+        # Check if any file modification tools were called
+        has_file_changes = False
+        if tool_calls:
+            has_file_changes = any(
+                tc.tool_use.name in ["write_file", "edit_file"]
+                for tc in tool_calls
+                if isinstance(tc, ToolUseResult)
+            )
+
+            # Auto-complete if files were modified (don't require explicit mark_completed)
+            if has_file_changes and not is_completed:
+                logger.info("Files were modified - marking task as completed")
+                is_completed = True
+
         if tool_calls:
             node.data.messages.append(Message(role="user", content=tool_calls))
             # If LLM only read files without writing, prompt it to actually make changes
-            if not is_completed and not any(tc.tool_use.name == "write_file" for tc in tool_calls if isinstance(tc, ToolUseResult)):
+            if not is_completed and not has_file_changes:
                 # Check if there were only read operations
                 read_only_tools = [tc for tc in tool_calls if isinstance(tc, ToolUseResult) and tc.tool_use.name == "read_file"]
                 if read_only_tools and len(read_only_tools) == len(tool_calls):
@@ -1199,11 +1220,11 @@ class PowerAppDesignActor(FileOperationsActor):
                     logger.info("LLM only performed read operations - prompting to write files")
                     node.data.messages.append(Message(
                         role="user",
-                        content=[TextRaw(text="You only read files. You MUST now use write_file to apply the CSS changes described in the feedback. Do not just analyze - make the actual changes and write the files!")]
+                        content=[TextRaw(text="You only read files. You MUST now use write_file or edit_file to apply the design changes described in the feedback. Do not just analyze - make the actual changes and write the files!")]
                     ))
                     node.data.should_branch = True  # Allow another iteration
         elif not is_completed:
-            content = [TextRaw(text="You must use write_file to apply CSS changes, then call mark_completed")]
+            content = [TextRaw(text="You must use write_file or edit_file to apply design changes")]
             node.data.messages.append(Message(role="user", content=content))
             node.data.should_branch = True  # Allow another iteration
         return is_completed

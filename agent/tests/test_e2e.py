@@ -225,6 +225,9 @@ async def apply_powerapp_design_improvements(
             )
 
             # Write improved files back to app_dir
+            logger.info(f"📝 Files in result node: {len(result_node.data.files)} files")
+            logger.debug(f"File list: {list(result_node.data.files.keys())}")
+
             for file_path, content in result_node.data.files.items():
                 if content is not None:  # None means file was deleted
                     full_path = os.path.join(app_dir, file_path)
