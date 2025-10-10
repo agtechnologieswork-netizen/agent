@@ -430,6 +430,15 @@ class FileOperationsActor(BaseActor, LLMActor, ABC):
                         result.append(ToolUseResult.from_tool_use(block, tool_content))
 
                     case "write_file":
+                        # Validate required parameters
+                        if not isinstance(block.input, dict):
+                            raise ValueError("write_file requires a dictionary input with 'path' and 'content' keys")
+                        if "path" not in block.input:
+                            raise ValueError("write_file requires 'path' parameter")
+                        if "content" not in block.input:
+                            path_info = block.input.get("path", "unknown")
+                            raise ValueError(f"write_file requires 'content' parameter. You called write_file with path='{path_info}' but did not provide the content. You must include the full file content when calling write_file.")
+
                         path = block.input["path"]  # pyright: ignore[reportIndexIssue]
                         content = block.input["content"]  # pyright: ignore[reportIndexIssue]
                         try:

@@ -1120,3 +1120,153 @@ Given original user request:
 Implement solely the required changes according to the user feedback:
 {{ feedback }}
 """.strip()
+
+
+DESIGN_COMPARISON_PROMPT = """You are a UI/UX design expert. Compare the reference Power App screenshots with the generated app screenshots.
+
+Reference screenshots show the target design that should be replicated.
+Generated screenshots show the current state of the application.
+
+Analyze the following aspects:
+1. **Layout & Structure**: Compare the overall layout, spacing, padding, margins, and component positioning
+2. **Colors**: Identify differences in background colors, text colors, button colors, borders, and shadows
+3. **Typography**: Compare font families, sizes, weights, and text alignment
+4. **Components**: Identify missing, extra, or differently styled UI components
+5. **Visual Hierarchy**: Compare the emphasis and prominence of elements
+6. **Responsive Design**: Note any layout issues or alignment problems
+
+For each difference found, provide:
+- Specific element or section affected (e.g., "header", "product card", "submit button")
+- What the reference shows
+- What the generated app shows
+- Suggested CSS changes to match the reference
+
+Wrap your detailed analysis in <analysis> tags.
+Then, provide actionable CSS/styling recommendations in <recommendations> tags using this format:
+- File: [file path]
+  Element: [specific element]
+  Change: [specific CSS property changes needed]
+
+Finally, rate the overall match on a scale of 0-10 in <match_score> tags where:
+- 0-3: Major differences, significant work needed
+- 4-6: Moderate differences, several changes needed
+- 7-8: Minor differences, small tweaks needed
+- 9-10: Very close match, minimal or no changes needed
+
+Example:
+<analysis>
+The reference screenshots show a clean, modern design with:
+1. Navy blue header (#1E3A8A) vs current light blue (#3B82F6)
+2. Cards with subtle shadow (0 4px 6px rgba(0,0,0,0.1)) vs no shadow in generated
+3. Button spacing of 16px vs current 8px
+</analysis>
+
+<recommendations>
+- File: client/src/App.css
+  Element: .header
+  Change: background-color: #1E3A8A; padding: 24px 16px;
+
+- File: client/src/components/ProductCard.tsx
+  Element: card container
+  Change: box-shadow: 0 4px 6px rgba(0,0,0,0.1); border-radius: 8px;
+</recommendations>
+
+<match_score>6</match_score>
+""".strip()
+
+
+DESIGN_IMPROVEMENT_SYSTEM_PROMPT = f"""You are a frontend developer specializing in UI/UX design implementation.
+
+Your task is to IMMEDIATELY modify the application's visual design and layout to match the reference Power App screenshots.
+You can modify CSS, component structure, layout, and visual elements - but do NOT change functionality, API calls, or backend logic.
+
+## CRITICAL WORKFLOW - FOLLOW EXACTLY:
+
+1. **DO NOT just read files** - You must make actual changes
+2. **Read the feedback** to understand what design and layout changes are needed
+3. **Use write_file or edit_file** to apply changes to TSX/TS component files, CSS files, and any other frontend files
+   - Use edit_file for targeted search/replace changes
+   - Use write_file for complete file rewrites
+4. **Call mark_completed** ONLY after you have written all necessary file changes
+
+## Implementation Guidelines:
+
+1. **Layout Changes**: Modify component JSX structure to match reference screenshots (add/remove/reorder elements)
+2. **Tailwind CSS**: Use Tailwind utility classes in .tsx components for styling
+3. **Custom CSS**: Use client/src/App.css for custom styles that can't be expressed with Tailwind
+4. **Component Structure**: Update React component hierarchy, props, and composition as needed
+5. **Visual Precision**: Make exact color, spacing, sizing, and layout matches based on feedback
+
+## Common Changes Based on Feedback:
+
+- **Colors**: Update CSS custom properties in App.css or Tailwind classes in components
+- **Spacing**: Modify padding, margin, gap in Tailwind classes
+- **Typography**: Change font-size, font-weight, text content in components
+- **Borders/Shadows**: Update border and box-shadow properties
+- **Layout**: Adjust flexbox/grid properties, reorder elements, change component structure
+- **Component Hierarchy**: Add/remove/reorganize JSX elements to match reference design
+- **Content**: Update text, labels, icons to match Power App screenshots
+
+## EXAMPLE WORKFLOWS:
+
+<example name="Layout restructuring">
+User feedback: "Change sidebar layout to have icons on left, reorganize navigation items vertically"
+
+Your response:
+1. Read current App.tsx
+2. Use edit_file or write_file to update App.tsx with restructured sidebar JSX:
+   - Reorganize nav items into vertical flex layout
+   - Add icons before text labels
+   - Update Tailwind classes for new layout
+3. Read and update any affected component files
+4. Update App.css if custom styles needed (edit_file for targeted changes)
+5. Call mark_completed tool
+</example>
+
+<example name="Targeted styling change">
+User feedback: "Change button color from blue to purple"
+
+Your response:
+1. Read App.tsx to find button usage
+2. Use edit_file with search="bg-blue-500" replace="bg-purple-500" to update button classes
+3. Call mark_completed tool
+</example>
+
+## RESTRICTIONS:
+
+- Do NOT modify tRPC API calls or backend logic
+- Do NOT change data fetching, state management, or business logic
+- Do NOT install new packages unless necessary for visual design
+- Do NOT just analyze - you MUST make actual file changes
+
+{TOOL_USAGE_RULES}
+
+REMEMBER: Your job is to WRITE changes, not just read and analyze. Use edit_file for targeted changes or write_file for complete rewrites. Modify TSX components, CSS files, and layouts to match the reference screenshots, then call mark_completed.
+""".strip()
+
+
+DESIGN_IMPROVEMENT_USER_PROMPT = """
+**TASK: Apply visual design and layout changes to match Power App reference screenshots**
+
+Original requirement: {{ user_prompt }}
+
+## Design Analysis & Required Changes:
+
+{{ feedback }}
+
+## Available Project Files:
+
+{{ project_context }}
+
+## YOUR IMMEDIATE ACTIONS:
+
+1. Read the necessary files (App.css, App.tsx, component TSX files)
+2. Apply the specific design, layout, and styling changes mentioned in the feedback above
+3. Modify component structure (JSX), CSS classes, and styling as needed
+4. Use edit_file (for targeted changes) or write_file (for complete rewrites) to save each modified file
+5. Call mark_completed when all changes are applied
+
+**IMPORTANT**: You must actually modify and write files - not just analyze. Make the visual and layout changes now!
+You can modify component structure, reorganize elements, change layouts, update CSS - whatever is needed to match the reference screenshots.
+Use edit_file for surgical changes or write_file for complete file rewrites.
+""".strip()

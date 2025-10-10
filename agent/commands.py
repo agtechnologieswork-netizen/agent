@@ -94,12 +94,12 @@ def generate():
     return Fire(_generate)
 
 
-def _generate(prompt=None, template_id=None, with_edit=True, use_databricks=False):
+def _generate(prompt=None, template_id=None, with_edit=True, use_databricks=False, output_dir=None):
     from tests.test_e2e import run_e2e, DEFAULT_APP_REQUEST
     coloredlogs.install(level="INFO")
     if prompt is None:
         prompt = DEFAULT_APP_REQUEST
-    anyio.run(run_e2e, prompt, True, with_edit, template_id, use_databricks)
+    anyio.run(run_e2e, prompt, True, with_edit, template_id, use_databricks, output_dir)
 
 
 def interactive():
@@ -107,6 +107,13 @@ def interactive():
     coloredlogs.install(level="INFO")
     os.environ["LLM_VCR_CACHE_MODE"] = os.environ.get("LLM_VCR_CACHE_MODE", "lru")
     Fire(_run_interactive)
+
+
+def improve_design():
+    from tests.test_e2e import improve_design as _improve_design
+    coloredlogs.install(level="INFO")
+    os.environ["LLM_VCR_CACHE_MODE"] = os.environ.get("LLM_VCR_CACHE_MODE", "lru")
+    Fire(_improve_design)
 
 
 def type_check():

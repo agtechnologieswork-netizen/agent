@@ -46,6 +46,7 @@ type_check = "commands:type_check"
 format = "commands:run_format"
 generate = "commands:generate"
 interactive = "commands:interactive"
+improve_design = "commands:improve_design"
 help = "commands:help_command"
 
 [tool.agent.command_docs]
@@ -57,8 +58,9 @@ record = "Updates VCR cache for tests by running pytest in record mode (alias fo
 lint = "Runs ruff to check and fix linting issues. Example: uv run lint"
 type_check = "Runs type checking with pyright. Example: uv run type_check"
 format = "Runs ruff to format code, optionally accepts target. Example: uv run format [file.py]"
-generate = "Generates code based on a prompt. Example: uv run generate --prompt='your app description'"
+generate = "Generates code based on a prompt. Example: uv run generate --prompt='your app description' --output_dir=./output/my-app"
 interactive = "Starts an interactive CLI session with the agent. Examples: uv run interactive (local server), uv run interactive --host=prod-agent-service-alb-999031216.us-west-2.elb.amazonaws.com --port=80 (remote server). Make sure to use BUILDER_TOKEN env fvar for access grant."
+improve_design = "Applies PowerApp design improvements to an existing generated app. Example: uv run improve_design --app_dir=./output/my-app --screenshot_path=/path/to/screenshots --max_iterations=5 --target_score=8"
 help = "Displays this help message. Example: uv run help"
 
 [tool.ruff]
