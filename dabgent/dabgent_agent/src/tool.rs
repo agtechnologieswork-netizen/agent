@@ -4,6 +4,7 @@ use rig::completion::ToolDefinition;
 use rig::message::{ToolResult, ToolResultContent};
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
+use std::future::Future;
 use std::pin::Pin;
 
 type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
