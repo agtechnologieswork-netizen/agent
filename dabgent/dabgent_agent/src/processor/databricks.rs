@@ -71,11 +71,6 @@ pub struct FinishDelegationArgs {
     pub summary: String,
 }
 
-// ============================================================================
-// Helper Functions
-// ============================================================================
-// (None needed - formatting is handled by ToolResultDisplay trait)
-
 pub trait DatabricksTool: Send + Sync {
     type Args: for<'a> Deserialize<'a> + Serialize + Send + Sync;
     type Output: Serialize + Send + Sync;
