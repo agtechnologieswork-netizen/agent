@@ -162,7 +162,7 @@ impl DatabricksTool for DatabricksListCatalogs {
         _args: Self::Args,
         client: &DatabricksRestClient,
     ) -> Result<Result<Self::Output, Self::Error>> {
-        match client.list_catalogs_request().await {
+        match client.list_catalogs().await {
             Ok(result) => Ok(Ok(result.display())),
             Err(e) => Ok(Err(format!("Failed to list catalogs: {}", e))),
         }
@@ -224,7 +224,7 @@ impl DatabricksTool for DatabricksListSchemas {
             limit: args.limit,
             offset: args.offset,
         };
-        match client.list_schemas_request(&request).await {
+        match client.list_schemas(&request).await {
             Ok(result) => {
                 if result.schemas.is_empty() {
                     let message = if args.filter.is_some() {
@@ -295,7 +295,7 @@ impl DatabricksTool for DatabricksListTables {
             schema_name: args.schema_name.clone(),
             exclude_inaccessible: args.exclude_inaccessible,
         };
-        match client.list_tables_request(&request).await {
+        match client.list_tables(&request).await {
             Ok(result) => {
                 if result.tables.is_empty() {
                     Ok(Ok(format!(
@@ -356,7 +356,7 @@ impl DatabricksTool for DatabricksDescribeTable {
             table_full_name: args.table_full_name.clone(),
             sample_size: args.sample_size,
         };
-        match client.describe_table_request(&request).await {
+        match client.describe_table(&request).await {
             Ok(details) => Ok(Ok(details.display())),
             Err(e) => Ok(Err(format!("Failed to describe table: {}", e))),
         }
@@ -404,7 +404,7 @@ impl DatabricksTool for DatabricksExecuteQuery {
         let request = ExecuteSqlRequest {
             query: args.query.clone(),
         };
-        match client.execute_sql_request(&request).await {
+        match client.execute_sql(&request).await {
             Ok(result) => Ok(Ok(result.display())),
             Err(e) => Ok(Err(format!("Failed to execute query: {}", e))),
         }

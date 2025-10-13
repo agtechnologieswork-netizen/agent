@@ -38,7 +38,7 @@ impl DatabricksProvider {
         let request = ExecuteSqlRequest {
             query: args.query,
         };
-        match self.client.execute_sql_request(&request).await {
+        match self.client.execute_sql(&request).await {
             Ok(result) => Ok(CallToolResult::success(vec![Content::text(result.display())])),
             Err(e) => Err(ErrorData::internal_error(e.to_string(), None)),
         }
@@ -49,7 +49,7 @@ impl DatabricksProvider {
         &self,
         Parameters(_args): Parameters<DatabricksListCatalogsArgs>,
     ) -> Result<CallToolResult, ErrorData> {
-        match self.client.list_catalogs_request().await {
+        match self.client.list_catalogs().await {
             Ok(result) => Ok(CallToolResult::success(vec![Content::text(result.display())])),
             Err(e) => Err(ErrorData::internal_error(e.to_string(), None)),
         }
@@ -66,7 +66,7 @@ impl DatabricksProvider {
             limit: args.limit,
             offset: args.offset,
         };
-        match self.client.list_schemas_request(&request).await {
+        match self.client.list_schemas(&request).await {
             Ok(result) => Ok(CallToolResult::success(vec![Content::text(result.display())])),
             Err(e) => Err(ErrorData::internal_error(e.to_string(), None)),
         }
@@ -82,7 +82,7 @@ impl DatabricksProvider {
             schema_name: args.schema_name,
             exclude_inaccessible: args.exclude_inaccessible,
         };
-        match self.client.list_tables_request(&request).await {
+        match self.client.list_tables(&request).await {
             Ok(result) => Ok(CallToolResult::success(vec![Content::text(result.display())])),
             Err(e) => Err(ErrorData::internal_error(e.to_string(), None)),
         }
@@ -99,7 +99,7 @@ impl DatabricksProvider {
             table_full_name: args.table_full_name,
             sample_size: args.sample_size,
         };
-        match self.client.describe_table_request(&request).await {
+        match self.client.describe_table(&request).await {
             Ok(result) => Ok(CallToolResult::success(vec![Content::text(result.display())])),
             Err(e) => Err(ErrorData::internal_error(e.to_string(), None)),
         }

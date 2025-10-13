@@ -546,15 +546,15 @@ impl DatabricksRestClient {
         Ok(running_warehouse.id)
     }
 
-    pub async fn execute_sql_request(
+    pub async fn execute_sql(
         &self,
         request: &ExecuteSqlRequest,
     ) -> Result<ExecuteSqlResult> {
-        let rows = self.execute_sql(&request.query).await?;
+        let rows = self.execute_sql_impl(&request.query).await?;
         Ok(ExecuteSqlResult { rows })
     }
 
-    async fn execute_sql(&self, sql: &str) -> Result<Vec<HashMap<String, Value>>> {
+    async fn execute_sql_impl(&self, sql: &str) -> Result<Vec<HashMap<String, Value>>> {
         let warehouse_id = self.get_available_warehouse().await?;
 
         let request = SqlStatementRequest {
@@ -697,12 +697,12 @@ impl DatabricksRestClient {
         Ok(results)
     }
 
-    pub async fn list_catalogs_request(&self) -> Result<ListCatalogsResult> {
-        let catalogs = self.list_catalogs().await?;
+    pub async fn list_catalogs(&self) -> Result<ListCatalogsResult> {
+        let catalogs = self.list_catalogs_impl().await?;
         Ok(ListCatalogsResult { catalogs })
     }
 
-    async fn list_catalogs(&self) -> Result<Vec<String>> {
+    async fn list_catalogs_impl(&self) -> Result<Vec<String>> {
         let mut all_catalogs = Vec::new();
         let mut next_page_token: Option<String> = None;
 
@@ -739,11 +739,11 @@ impl DatabricksRestClient {
         Ok(all_catalogs)
     }
 
-    pub async fn list_schemas_request(
+    pub async fn list_schemas(
         &self,
         request: &ListSchemasRequest,
     ) -> Result<ListSchemasResult> {
-        let mut schemas = self.list_schemas(&request.catalog_name).await?;
+        let mut schemas = self.list_schemas_impl(&request.catalog_name).await?;
 
         // Apply filter if provided
         if let Some(filter) = &request.filter {
@@ -762,7 +762,7 @@ impl DatabricksRestClient {
         })
     }
 
-    async fn list_schemas(&self, catalog_name: &str) -> Result<Vec<String>> {
+    async fn list_schemas_impl(&self, catalog_name: &str) -> Result<Vec<String>> {
         let mut all_schemas = Vec::new();
         let mut next_page_token: Option<String> = None;
 
@@ -797,8 +797,8 @@ impl DatabricksRestClient {
         Ok(all_schemas)
     }
 
-    pub async fn list_tables_request(&self, request: &ListTablesRequest) -> Result<ListTablesResult> {
-        let tables = self.list_tables_for_catalog_schema(
+    pub async fn list_tables(&self, request: &ListTablesRequest) -> Result<ListTablesResult> {
+        let tables = self.list_tables_impl(
             &request.catalog_name,
             &request.schema_name,
             request.exclude_inaccessible,
@@ -807,7 +807,7 @@ impl DatabricksRestClient {
         Ok(ListTablesResult { tables })
     }
 
-    async fn list_tables_for_catalog_schema(
+    async fn list_tables_impl(
         &self,
         catalog_name: &str,
         schema_name: &str,
@@ -862,15 +862,15 @@ impl DatabricksRestClient {
         Ok(tables)
     }
 
-    pub async fn describe_table_request(
+    pub async fn describe_table(
         &self,
         request: &DescribeTableRequest,
     ) -> Result<TableDetails> {
-        self.get_table_details(&request.table_full_name, request.sample_size)
+        self.get_table_details_impl(&request.table_full_name, request.sample_size)
             .await
     }
 
-    async fn get_table_details(
+    async fn get_table_details_impl(
         &self,
         table_name: &str,
         sample_rows: usize,
@@ -899,14 +899,14 @@ impl DatabricksRestClient {
         // Get sample data and row count
         let sample_data = if sample_rows > 0 {
             let sql = format!("SELECT * FROM {} LIMIT {}", table_name, sample_rows);
-            self.execute_sql(&sql).await.ok()
+            self.execute_sql_impl(&sql).await.ok()
         } else {
             None
         };
 
         let row_count = {
             let sql = format!("SELECT COUNT(*) as count FROM {}", table_name);
-            self.execute_sql(&sql)
+            self.execute_sql_impl(&sql)
                 .await
                 .ok()
                 .and_then(|results| results.first().cloned())
