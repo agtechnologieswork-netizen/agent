@@ -1,17 +1,17 @@
-//! Example MCP client that connects to the dabgent-mcp server
+//! Example MCP client that connects to the dabgent-mcp server in-process
 //!
 //! This demonstrates how to:
-//! - Start the dabgent-mcp server as a child process
-//! - Connect to it using the rmcp client
+//! - Create provider instances directly
+//! - Connect to them in-process using rmcp-in-process-transport
 //! - Call tools exposed by the server
 //!
 //! Run with: cargo run --example client
 
+use dabgent_mcp::providers::{CombinedProvider, DatabricksProvider, GoogleSheetsProvider};
 use eyre::Result;
 use rmcp::model::CallToolRequestParam;
-use rmcp::service::ServiceExt;
-use rmcp::transport::{ConfigureCommandExt, TokioChildProcess};
-use tokio::process::Command;
+use rmcp::ServiceExt;
+use rmcp_in_process_transport::in_process::TokioInProcess;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -20,31 +20,23 @@ async fn main() -> Result<()> {
         tracing_subscriber::fmt::init();
     }
 
-    println!("Starting dabgent-mcp server as child process...");
+    println!("Starting dabgent-mcp server in-process...");
 
-    // start the server via cargo run (development mode)
-    let service = ()
-        .serve(TokioChildProcess::new(Command::new("cargo").configure(
-            |cmd| {
-                cmd.arg("run")
-                    .arg("--package")
-                    .arg("dabgent_mcp")
-                    .arg("--bin")
-                    .arg("dabgent-mcp");
+    // initialize providers
+    let databricks = DatabricksProvider::new().ok();
+    let google_sheets = GoogleSheetsProvider::new().await.ok();
 
-                // pass through environment variables for credentials
-                if let Ok(host) = std::env::var("DATABRICKS_HOST") {
-                    cmd.env("DATABRICKS_HOST", host);
-                }
-                if let Ok(token) = std::env::var("DATABRICKS_TOKEN") {
-                    cmd.env("DATABRICKS_TOKEN", token);
-                }
-                if let Ok(key) = std::env::var("GOOGLE_SERVICE_ACCOUNT_KEY") {
-                    cmd.env("GOOGLE_SERVICE_ACCOUNT_KEY", key);
-                }
-            },
-        ))?)
-        .await?;
+    let provider = CombinedProvider::new(databricks, google_sheets).map_err(|_| {
+        eyre::eyre!(
+            "No integrations available. Configure at least one:\n\
+             - Databricks: Set DATABRICKS_HOST and DATABRICKS_TOKEN\n\
+             - Google Sheets: Place credentials at ~/.config/gspread/credentials.json"
+        )
+    })?;
+
+    // create in-process service
+    let tokio_in_process = TokioInProcess::new(provider).await?;
+    let service = ().serve(tokio_in_process).await?;
 
     println!("Connected to server!\n");
 
