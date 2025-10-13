@@ -30,7 +30,7 @@ impl DatabricksProvider {
         })
     }
 
-    #[tool(description = "Execute SQL query in Databricks")]
+    #[tool(name = "databricks_execute_sql", description = "Execute SQL query in Databricks")]
     pub async fn execute_sql(
         &self,
         Parameters(args): Parameters<DatabricksExecuteQueryArgs>,
@@ -44,7 +44,7 @@ impl DatabricksProvider {
         }
     }
 
-    #[tool(description = "List all available Databricks catalogs")]
+    #[tool(name = "databricks_list_catalogs", description = "List all available Databricks catalogs")]
     pub async fn list_catalogs(
         &self,
         Parameters(_args): Parameters<DatabricksListCatalogsArgs>,
@@ -55,7 +55,7 @@ impl DatabricksProvider {
         }
     }
 
-    #[tool(description = "List all schemas in a Databricks catalog with pagination support")]
+    #[tool(name = "databricks_list_schemas", description = "List all schemas in a Databricks catalog with pagination support")]
     pub async fn list_schemas(
         &self,
         Parameters(args): Parameters<DatabricksListSchemasArgs>,
@@ -72,7 +72,7 @@ impl DatabricksProvider {
         }
     }
 
-    #[tool(description = "List tables in a Databricks catalog and schema")]
+    #[tool(name = "databricks_list_tables", description = "List tables in a Databricks catalog and schema")]
     pub async fn list_tables(
         &self,
         Parameters(args): Parameters<DatabricksListTablesArgs>,
@@ -89,6 +89,7 @@ impl DatabricksProvider {
     }
 
     #[tool(
+        name = "databricks_describe_table",
         description = "Get detailed information about a Databricks table including schema and optional sample data"
     )]
     pub async fn describe_table(

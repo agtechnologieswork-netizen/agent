@@ -74,12 +74,12 @@ async fn main() -> Result<()> {
     if tools_response
         .tools
         .iter()
-        .any(|t| t.name == "list_catalogs")
+        .any(|t| t.name == "databricks_list_catalogs")
     {
         println!("=== Example: Listing Databricks catalogs ===");
         let result = service
             .call_tool(CallToolRequestParam {
-                name: "list_catalogs".into(),
+                name: "databricks_list_catalogs".into(),
                 arguments: None,
             })
             .await?;

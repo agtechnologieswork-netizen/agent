@@ -27,7 +27,7 @@ impl GoogleSheetsProvider {
         })
     }
 
-    #[tool(description = "Get metadata for a Google Sheets spreadsheet")]
+    #[tool(name = "google_sheets_get_metadata", description = "Get metadata for a Google Sheets spreadsheet")]
     pub async fn get_metadata(
         &self,
         Parameters(args): Parameters<GetSpreadsheetMetadataRequest>,
@@ -38,7 +38,7 @@ impl GoogleSheetsProvider {
         }
     }
 
-    #[tool(description = "Read a specific range from a Google Sheets spreadsheet")]
+    #[tool(name = "google_sheets_read_range", description = "Read a specific range from a Google Sheets spreadsheet")]
     pub async fn read_range(
         &self,
         Parameters(args): Parameters<ReadRangeRequest>,
@@ -49,7 +49,7 @@ impl GoogleSheetsProvider {
         }
     }
 
-    #[tool(description = "Fetch all data from a Google Sheets spreadsheet")]
+    #[tool(name = "google_sheets_fetch_full", description = "Fetch all data from a Google Sheets spreadsheet")]
     pub async fn fetch_full(
         &self,
         Parameters(args): Parameters<FetchSpreadsheetDataRequest>,
