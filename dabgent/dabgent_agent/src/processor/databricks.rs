@@ -17,7 +17,8 @@ use std::sync::Arc;
 // Argument Structs
 // ============================================================================
 
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, Default)]
+#[serde(default)]
 pub struct DatabricksListCatalogsArgs {
     // No parameters needed - lists all available catalogs
 }
