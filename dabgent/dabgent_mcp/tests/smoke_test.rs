@@ -12,6 +12,17 @@ use rmcp_in_process_transport::in_process::TokioInProcess;
 
 #[tokio::test]
 async fn smoke_test_mcp_server() -> Result<()> {
+    // set dummy credentials for Databricks if not already set
+    let host_was_set = std::env::var("DATABRICKS_HOST").is_ok();
+    let token_was_set = std::env::var("DATABRICKS_TOKEN").is_ok();
+
+    if !host_was_set {
+        std::env::set_var("DATABRICKS_HOST", "https://dummy.databricks.com");
+    }
+    if !token_was_set {
+        std::env::set_var("DATABRICKS_TOKEN", "dummy_token_for_smoke_test");
+    }
+
     // initialize providers
     let databricks = DatabricksProvider::new().ok();
     let google_sheets = GoogleSheetsProvider::new().await.ok();
@@ -38,6 +49,14 @@ async fn smoke_test_mcp_server() -> Result<()> {
 
     // cleanup
     service.cancel().await?;
+
+    // remove dummy env vars if we set them
+    if !host_was_set {
+        std::env::remove_var("DATABRICKS_HOST");
+    }
+    if !token_was_set {
+        std::env::remove_var("DATABRICKS_TOKEN");
+    }
 
     Ok(())
 }
