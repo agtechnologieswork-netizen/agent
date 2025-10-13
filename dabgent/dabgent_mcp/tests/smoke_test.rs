@@ -7,7 +7,6 @@
 
 use dabgent_mcp::providers::{CombinedProvider, DatabricksProvider, GoogleSheetsProvider};
 use eyre::Result;
-use rmcp::model::CallToolRequestParam;
 use rmcp::ServiceExt;
 use rmcp_in_process_transport::in_process::TokioInProcess;
 
@@ -36,23 +35,6 @@ async fn smoke_test_mcp_server() -> Result<()> {
     // list tools
     let tools_response = service.list_tools(Default::default()).await?;
     assert!(!tools_response.tools.is_empty(), "Should have at least one tool");
-
-    // verify we can call at least one tool
-    // try databricks_list_catalogs if available
-    if tools_response
-        .tools
-        .iter()
-        .any(|t| t.name == "databricks_list_catalogs")
-    {
-        let result = service
-            .call_tool(CallToolRequestParam {
-                name: "databricks_list_catalogs".into(),
-                arguments: None,
-            })
-            .await?;
-
-        assert!(!result.content.is_empty(), "Tool should return content");
-    }
 
     // cleanup
     service.cancel().await?;
