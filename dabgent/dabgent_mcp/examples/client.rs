@@ -84,12 +84,10 @@ async fn main() -> Result<()> {
             })
             .await?;
 
-        // extract text content and parse it
+        // extract and display text content
         if let Some(content) = result.content.first() {
             if let Some(text) = content.as_text() {
-                // parse and pretty-print the JSON
-                let parsed: serde_json::Value = serde_json::from_str(text.text.as_str())?;
-                println!("{}", serde_json::to_string_pretty(&parsed)?);
+                println!("{}", text.text);
             }
         }
         println!();
