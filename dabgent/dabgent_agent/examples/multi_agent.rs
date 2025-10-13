@@ -22,7 +22,7 @@ use std::sync::Arc;
 
 // Configuration constants
 const ANTHROPIC_MODEL: &str = "claude-sonnet-4-5-20250929";
-const OPENROUTER_MODEL: &str = "deepseek/deepseek-v3.2-exp";
+const OPENROUTER_MODEL: &str = "z-ai/glm-4.6";
 
 // Prompts
 const PLANNER_PROMPT: &str = "
