@@ -137,15 +137,15 @@ impl ToolHandler {
         Ok(results)
     }
 
-    fn match_tool<'a>(
-        &'a self,
-        call: &'a ToolCall,
-    ) -> Option<(&'a ToolCall, &'a Box<dyn ToolDyn>)> {
+    fn match_tool<'a>(&'a self, call: &'a ToolCall) -> Option<(&'a ToolCall, &'a dyn ToolDyn)> {
         self.get_tool(&call.function.name).map(|tool| (call, tool))
     }
 
-    fn get_tool(&self, name: &str) -> Option<&Box<dyn ToolDyn>> {
-        self.tools.iter().find(|t| t.name() == name)
+    fn get_tool(&self, name: &str) -> Option<&dyn ToolDyn> {
+        self.tools
+            .iter()
+            .find(|t| t.name() == name)
+            .map(AsRef::as_ref)
     }
 }
 
@@ -156,7 +156,7 @@ impl<A: Agent, ES: EventStore> EventHandler<AgentState<A>, ES> for ToolHandler {
         event: &Envelope<AgentState<A>>,
     ) -> Result<()> {
         if let Event::ToolCalls { calls } = &event.data {
-            let results = self.run_tools(&event.aggregate_id, &calls).await?;
+            let results = self.run_tools(&event.aggregate_id, calls).await?;
             if !results.is_empty() {
                 handler
                     .execute_with_metadata(

@@ -647,12 +647,11 @@ impl DatabricksRestClient {
             .ok_or_else(|| anyhow!("No schema in response"))?;
 
         // Try to get inline data
-        if let Some(result) = &response.result {
-            if let Some(data_array) = &result.data_array {
+        if let Some(result) = &response.result
+            && let Some(data_array) = &result.data_array {
                 debug!("Found {} rows of inline data", data_array.len());
                 return self.process_data_array(schema, data_array);
             }
-        }
 
         debug!(
             "Response structure: manifest={:?}, result={:?}",

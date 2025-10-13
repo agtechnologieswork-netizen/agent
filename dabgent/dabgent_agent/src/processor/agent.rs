@@ -97,7 +97,7 @@ impl<A: Agent> AgentState<A> {
 
     pub fn check_ready(&self, incoming: &[ToolResult]) -> bool {
         for (id, result) in self.calls.iter() {
-            if result.is_none() && incoming.iter().find(|r| r.id == *id).is_none() {
+            if result.is_none() && !incoming.iter().any(|r| r.id == *id) {
                 return false;
             }
         }

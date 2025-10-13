@@ -91,7 +91,7 @@ pub fn wrap_events<A: Aggregate>(
     events
         .into_iter()
         .map(|data| {
-            sequence = sequence + 1;
+            sequence += 1;
             Envelope {
                 aggregate_id: aggregate_id.to_owned(),
                 metadata: metadata.clone(),

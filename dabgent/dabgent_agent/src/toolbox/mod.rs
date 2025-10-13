@@ -1,10 +1,9 @@
 pub mod basic;
-use dabgent_sandbox::DaggerSandbox;
+use dabgent_sandbox::{DaggerSandbox, FutureBoxed};
 use eyre::Result;
 use serde::{Deserialize, Serialize};
 use std::future::Future;
 use std::marker::PhantomData;
-use std::pin::Pin;
 
 pub trait Tool: Send + Sync {
     type Args: for<'a> Deserialize<'a> + Serialize + Send + Sync;
@@ -32,7 +31,7 @@ pub trait ToolDyn: Send + Sync {
         &'a self,
         args: serde_json::Value,
         sandbox: &'a mut DaggerSandbox,
-    ) -> Pin<Box<dyn Future<Output = ToolDynResult> + Send + 'a>>;
+    ) -> FutureBoxed<'a, ToolDynResult>;
 }
 
 impl<T: Tool> ToolDyn for T {
@@ -52,7 +51,7 @@ impl<T: Tool> ToolDyn for T {
         &'a self,
         args: serde_json::Value,
         sandbox: &'a mut DaggerSandbox,
-    ) -> Pin<Box<dyn Future<Output = ToolDynResult> + Send + 'a>> {
+    ) -> FutureBoxed<'a, ToolDynResult> {
         Box::pin(async move {
             match serde_json::from_value::<<Self as Tool>::Args>(args) {
                 Ok(args) => {
@@ -87,14 +86,14 @@ pub trait ValidatorDyn: Send + Sync {
     fn run<'a>(
         &'a self,
         sandbox: &'a mut DaggerSandbox,
-    ) -> Pin<Box<dyn Future<Output = Result<Result<(), String>>> + Send + 'a>>;
+    ) -> FutureBoxed<'a, Result<Result<(), String>>>;
 }
 
 impl<T: Validator + Send + Sync + 'static> ValidatorDyn for T {
     fn run<'a>(
         &'a self,
         sandbox: &'a mut DaggerSandbox,
-    ) -> Pin<Box<dyn Future<Output = Result<Result<(), String>>> + Send + 'a>> {
+    ) -> FutureBoxed<'a, Result<Result<(), String>>> {
         Box::pin(self.run(sandbox))
     }
 }
