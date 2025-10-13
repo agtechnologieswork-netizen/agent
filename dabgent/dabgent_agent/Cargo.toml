@@ -30,10 +30,4 @@ sqlx = { version = "0.8", features = ["postgres", "sqlite", "runtime-tokio", "tl
 dotenvy = "0.15"
 
 [[example]]
-name = "basic"
-
-[[example]]
-name = "databricks_worker"
-
-[[example]]
-name = "planner_worker"
+name = "multi_agent"
