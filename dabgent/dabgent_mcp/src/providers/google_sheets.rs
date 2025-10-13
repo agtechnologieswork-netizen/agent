@@ -1,8 +1,10 @@
 use dabgent_integrations::GoogleSheetsClient;
 use eyre::Result;
 use rmcp::handler::server::router::tool::ToolRouter;
+use rmcp::handler::server::wrapper::Parameters;
 use rmcp::model::{CallToolResult, Content, Implementation, ProtocolVersion, ServerCapabilities, ServerInfo};
 use rmcp::{tool, tool_handler, tool_router, ErrorData, ServerHandler};
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
@@ -21,6 +23,49 @@ impl GoogleSheetsProvider {
             client: Arc::new(client),
             tool_router: Self::tool_router(),
         })
+    }
+
+    // Tool implementation methods
+    #[tool(description = "Get metadata for a Google Sheets spreadsheet")]
+    pub async fn get_metadata(&self, Parameters(args): Parameters<GetMetadataArgs>) -> Result<CallToolResult, ErrorData> {
+        let metadata = self
+            .client
+            .get_spreadsheet_metadata(&args.url_or_id)
+            .await
+            .map_err(|e| ErrorData::internal_error(e.to_string(), None))?;
+
+        Ok(CallToolResult::success(vec![Content::text(
+            serde_json::to_string_pretty(&metadata)
+                .map_err(|e| ErrorData::internal_error(e.to_string(), None))?
+        )]))
+    }
+
+    #[tool(description = "Read a specific range from a Google Sheets spreadsheet")]
+    pub async fn read_range(&self, Parameters(args): Parameters<ReadRangeArgs>) -> Result<CallToolResult, ErrorData> {
+        let values = self
+            .client
+            .read_range(&args.url_or_id, &args.range)
+            .await
+            .map_err(|e| ErrorData::internal_error(e.to_string(), None))?;
+
+        Ok(CallToolResult::success(vec![Content::text(
+            serde_json::to_string_pretty(&ReadRangeResult { values })
+                .map_err(|e| ErrorData::internal_error(e.to_string(), None))?
+        )]))
+    }
+
+    #[tool(description = "Fetch all data from a Google Sheets spreadsheet")]
+    pub async fn fetch_full(&self, Parameters(args): Parameters<FetchFullArgs>) -> Result<CallToolResult, ErrorData> {
+        let data = self
+            .client
+            .fetch_spreadsheet_data(&args.url_or_id)
+            .await
+            .map_err(|e| ErrorData::internal_error(e.to_string(), None))?;
+
+        Ok(CallToolResult::success(vec![Content::text(
+            serde_json::to_string_pretty(&data)
+                .map_err(|e| ErrorData::internal_error(e.to_string(), None))?
+        )]))
     }
 }
 
@@ -46,12 +91,12 @@ impl ServerHandler for GoogleSheetsProvider {
 
 // Tool argument and result types
 
-#[derive(Deserialize, Serialize)]
+#[derive(Deserialize, Serialize, JsonSchema)]
 pub struct GetMetadataArgs {
     pub url_or_id: String,
 }
 
-#[derive(Deserialize, Serialize)]
+#[derive(Deserialize, Serialize, JsonSchema)]
 pub struct ReadRangeArgs {
     pub url_or_id: String,
     pub range: String,
@@ -62,53 +107,7 @@ pub struct ReadRangeResult {
     pub values: Vec<Vec<String>>,
 }
 
-#[derive(Deserialize, Serialize)]
+#[derive(Deserialize, Serialize, JsonSchema)]
 pub struct FetchFullArgs {
     pub url_or_id: String,
-}
-
-
-// Tool implementation methods
-impl GoogleSheetsProvider {
-    #[tool(description = "Get metadata for a Google Sheets spreadsheet")]
-    pub async fn get_metadata(&self, args: GetMetadataArgs) -> Result<CallToolResult, ErrorData> {
-        let metadata = self
-            .client
-            .get_spreadsheet_metadata(&args.url_or_id)
-            .await
-            .map_err(|e| ErrorData::internal_error(e.to_string(), None))?;
-
-        Ok(CallToolResult::success(vec![Content::text(
-            serde_json::to_string_pretty(&metadata)
-                .map_err(|e| ErrorData::internal_error(e.to_string(), None))?
-        )]))
-    }
-
-    #[tool(description = "Read a specific range from a Google Sheets spreadsheet")]
-    pub async fn read_range(&self, args: ReadRangeArgs) -> Result<CallToolResult, ErrorData> {
-        let values = self
-            .client
-            .read_range(&args.url_or_id, &args.range)
-            .await
-            .map_err(|e| ErrorData::internal_error(e.to_string(), None))?;
-
-        Ok(CallToolResult::success(vec![Content::text(
-            serde_json::to_string_pretty(&ReadRangeResult { values })
-                .map_err(|e| ErrorData::internal_error(e.to_string(), None))?
-        )]))
-    }
-
-    #[tool(description = "Fetch all data from a Google Sheets spreadsheet")]
-    pub async fn fetch_full(&self, args: FetchFullArgs) -> Result<CallToolResult, ErrorData> {
-        let data = self
-            .client
-            .fetch_spreadsheet_data(&args.url_or_id)
-            .await
-            .map_err(|e| ErrorData::internal_error(e.to_string(), None))?;
-
-        Ok(CallToolResult::success(vec![Content::text(
-            serde_json::to_string_pretty(&data)
-                .map_err(|e| ErrorData::internal_error(e.to_string(), None))?
-        )]))
-    }
 }

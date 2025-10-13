@@ -7,6 +7,7 @@ use dabgent_integrations::{
 use dabgent_mq::{Envelope, EventHandler, EventStore, Handler};
 use eyre::Result;
 use rig::message::{ToolCall, ToolResult};
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::future::Future;
@@ -17,12 +18,12 @@ use std::sync::Arc;
 // Argument Structs
 // ============================================================================
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct DatabricksListCatalogsArgs {
     // No parameters needed - lists all available catalogs
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct DatabricksListSchemasArgs {
     pub catalog_name: String,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -37,7 +38,7 @@ fn default_limit() -> usize {
     1000
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct DatabricksListTablesArgs {
     pub catalog_name: String,
     pub schema_name: String,
@@ -49,7 +50,7 @@ fn default_exclude_inaccessible() -> bool {
     true
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct DatabricksDescribeTableArgs {
     pub table_full_name: String,
     #[serde(default = "default_sample_size")]
@@ -60,7 +61,7 @@ fn default_sample_size() -> usize {
     10
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct DatabricksExecuteQueryArgs {
     pub query: String,
 }

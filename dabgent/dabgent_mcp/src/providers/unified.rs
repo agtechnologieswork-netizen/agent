@@ -5,6 +5,7 @@ use dabgent_agent::processor::databricks::{
 };
 use eyre::Result;
 use rmcp::handler::server::router::tool::ToolRouter;
+use rmcp::handler::server::wrapper::Parameters;
 use rmcp::model::{CallToolResult, Implementation, ProtocolVersion, ServerCapabilities, ServerInfo};
 use rmcp::{tool, tool_handler, tool_router, ErrorData, ServerHandler};
 use std::sync::Arc;
@@ -61,14 +62,12 @@ impl UnifiedProvider {
             tool_router: Self::tool_router(),
         })
     }
-}
 
-// forward all databricks tools
-impl UnifiedProvider {
+    // databricks tools
     #[tool(description = "Execute SQL query in Databricks")]
     async fn execute_sql(
         &self,
-        args: DatabricksExecuteQueryArgs,
+        args: Parameters<DatabricksExecuteQueryArgs>,
     ) -> Result<CallToolResult, ErrorData> {
         match &self.databricks {
             Some(db) => db.execute_sql(args).await,
@@ -82,7 +81,7 @@ impl UnifiedProvider {
     #[tool(description = "List all available Databricks catalogs")]
     async fn list_catalogs(
         &self,
-        args: DatabricksListCatalogsArgs,
+        args: Parameters<DatabricksListCatalogsArgs>,
     ) -> Result<CallToolResult, ErrorData> {
         match &self.databricks {
             Some(db) => db.list_catalogs(args).await,
@@ -96,7 +95,7 @@ impl UnifiedProvider {
     #[tool(description = "List all schemas in a Databricks catalog with pagination support")]
     async fn list_schemas(
         &self,
-        args: DatabricksListSchemasArgs,
+        args: Parameters<DatabricksListSchemasArgs>,
     ) -> Result<CallToolResult, ErrorData> {
         match &self.databricks {
             Some(db) => db.list_schemas(args).await,
@@ -110,7 +109,7 @@ impl UnifiedProvider {
     #[tool(description = "List tables in a Databricks catalog and schema")]
     async fn list_tables(
         &self,
-        args: DatabricksListTablesArgs,
+        args: Parameters<DatabricksListTablesArgs>,
     ) -> Result<CallToolResult, ErrorData> {
         match &self.databricks {
             Some(db) => db.list_tables(args).await,
@@ -126,7 +125,7 @@ impl UnifiedProvider {
     )]
     async fn describe_table(
         &self,
-        args: DatabricksDescribeTableArgs,
+        args: Parameters<DatabricksDescribeTableArgs>,
     ) -> Result<CallToolResult, ErrorData> {
         match &self.databricks {
             Some(db) => db.describe_table(args).await,
@@ -140,7 +139,7 @@ impl UnifiedProvider {
     #[tool(description = "Get metadata for a Google Sheets spreadsheet")]
     async fn get_metadata(
         &self,
-        args: google_sheets::GetMetadataArgs,
+        args: Parameters<google_sheets::GetMetadataArgs>,
     ) -> Result<CallToolResult, ErrorData> {
         match &self.google_sheets {
             Some(sheets) => sheets.get_metadata(args).await,
@@ -154,7 +153,7 @@ impl UnifiedProvider {
     #[tool(description = "Read a specific range from a Google Sheets spreadsheet")]
     async fn read_range(
         &self,
-        args: google_sheets::ReadRangeArgs,
+        args: Parameters<google_sheets::ReadRangeArgs>,
     ) -> Result<CallToolResult, ErrorData> {
         match &self.google_sheets {
             Some(sheets) => sheets.read_range(args).await,
@@ -168,7 +167,7 @@ impl UnifiedProvider {
     #[tool(description = "Fetch all data from a Google Sheets spreadsheet")]
     async fn fetch_full(
         &self,
-        args: google_sheets::FetchFullArgs,
+        args: Parameters<google_sheets::FetchFullArgs>,
     ) -> Result<CallToolResult, ErrorData> {
         match &self.google_sheets {
             Some(sheets) => sheets.fetch_full(args).await,

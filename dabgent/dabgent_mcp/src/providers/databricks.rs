@@ -8,6 +8,7 @@ use dabgent_integrations::{
 };
 use eyre::Result;
 use rmcp::handler::server::router::tool::ToolRouter;
+use rmcp::handler::server::wrapper::Parameters;
 use rmcp::model::{CallToolResult, Content, Implementation, ProtocolVersion, ServerCapabilities, ServerInfo};
 use rmcp::{tool, tool_handler, tool_router, ErrorData, ServerHandler};
 use serde::Serialize;
@@ -28,6 +29,122 @@ impl DatabricksProvider {
             client: Arc::new(client),
             tool_router: Self::tool_router(),
         })
+    }
+
+    // Tool implementation methods
+    #[tool(description = "Execute SQL query in Databricks")]
+    pub async fn execute_sql(
+        &self,
+        Parameters(args): Parameters<DatabricksExecuteQueryArgs>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let request = ExecuteSqlRequest {
+            query: args.query,
+        };
+        let result = self
+            .client
+            .execute_sql_request(&request)
+            .await
+            .map_err(|e| ErrorData::internal_error(e.to_string(), None))?;
+
+        let rows: Vec<serde_json::Value> = result
+            .into_iter()
+            .map(|row| serde_json::to_value(row).unwrap())
+            .collect();
+
+        Ok(CallToolResult::success(vec![Content::text(
+            serde_json::to_string_pretty(&ExecuteSqlResult { rows })
+                .map_err(|e| ErrorData::internal_error(e.to_string(), None))?
+        )]))
+    }
+
+    #[tool(description = "List all available Databricks catalogs")]
+    pub async fn list_catalogs(
+        &self,
+        Parameters(_args): Parameters<DatabricksListCatalogsArgs>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let catalogs = self
+            .client
+            .list_catalogs()
+            .await
+            .map_err(|e| ErrorData::internal_error(e.to_string(), None))?;
+
+        Ok(CallToolResult::success(vec![Content::text(
+            serde_json::to_string_pretty(&ListCatalogsResult { catalogs })
+                .map_err(|e| ErrorData::internal_error(e.to_string(), None))?
+        )]))
+    }
+
+    #[tool(description = "List all schemas in a Databricks catalog with pagination support")]
+    pub async fn list_schemas(
+        &self,
+        Parameters(args): Parameters<DatabricksListSchemasArgs>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let request = ListSchemasRequest {
+            catalog_name: args.catalog_name,
+        };
+        let mut schemas = self
+            .client
+            .list_schemas_request(&request)
+            .await
+            .map_err(|e| ErrorData::internal_error(e.to_string(), None))?;
+
+        // Apply filter if provided
+        if let Some(filter) = &args.filter {
+            let filter_lower = filter.to_lowercase();
+            schemas.retain(|s| s.to_lowercase().contains(&filter_lower));
+        }
+
+        let (schemas, pagination) = apply_pagination(schemas, args.limit, args.offset);
+
+        Ok(CallToolResult::success(vec![Content::text(
+            serde_json::to_string_pretty(&ListSchemasResult { schemas, pagination })
+                .map_err(|e| ErrorData::internal_error(e.to_string(), None))?
+        )]))
+    }
+
+    #[tool(description = "List tables in a Databricks catalog and schema")]
+    pub async fn list_tables(
+        &self,
+        Parameters(args): Parameters<DatabricksListTablesArgs>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let request = ListTablesRequest {
+            catalog_name: args.catalog_name,
+            schema_name: args.schema_name,
+            exclude_inaccessible: args.exclude_inaccessible,
+        };
+        let tables = self
+            .client
+            .list_tables_request(&request)
+            .await
+            .map_err(|e| ErrorData::internal_error(e.to_string(), None))?;
+
+        Ok(CallToolResult::success(vec![Content::text(
+            serde_json::to_string_pretty(&ListTablesResult { tables })
+                .map_err(|e| ErrorData::internal_error(e.to_string(), None))?
+        )]))
+    }
+
+    #[tool(
+        description = "Get detailed information about a Databricks table including schema and optional sample data"
+    )]
+    pub async fn describe_table(
+        &self,
+        Parameters(args): Parameters<DatabricksDescribeTableArgs>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let request = DescribeTableRequest {
+            table_full_name: args.table_full_name,
+            sample_size: args.sample_size,
+        };
+        let details = self
+            .client
+            .describe_table_request(&request)
+            .await
+            .map_err(|e| ErrorData::internal_error(e.to_string(), None))?;
+
+        Ok(CallToolResult::success(vec![Content::text(
+            serde_json::to_string_pretty(&details)
+                .map_err(|e| ErrorData::internal_error(e.to_string(), None))?
+        )]))
     }
 }
 
@@ -93,122 +210,4 @@ pub struct ListSchemasResult {
 #[derive(Serialize)]
 pub struct ListTablesResult {
     pub tables: Vec<TableInfo>,
-}
-
-// Tool implementation methods
-impl DatabricksProvider {
-    #[tool(description = "Execute SQL query in Databricks")]
-    pub async fn execute_sql(
-        &self,
-        args: DatabricksExecuteQueryArgs,
-    ) -> Result<CallToolResult, ErrorData> {
-        let request = ExecuteSqlRequest {
-            query: args.query,
-        };
-        let result = self
-            .client
-            .execute_sql_request(&request)
-            .await
-            .map_err(|e| ErrorData::internal_error(e.to_string(), None))?;
-
-        let rows: Vec<serde_json::Value> = result
-            .into_iter()
-            .map(|row| serde_json::to_value(row).unwrap())
-            .collect();
-
-        Ok(CallToolResult::success(vec![Content::text(
-            serde_json::to_string_pretty(&ExecuteSqlResult { rows })
-                .map_err(|e| ErrorData::internal_error(e.to_string(), None))?
-        )]))
-    }
-
-    #[tool(description = "List all available Databricks catalogs")]
-    pub async fn list_catalogs(
-        &self,
-        _args: DatabricksListCatalogsArgs,
-    ) -> Result<CallToolResult, ErrorData> {
-        let catalogs = self
-            .client
-            .list_catalogs()
-            .await
-            .map_err(|e| ErrorData::internal_error(e.to_string(), None))?;
-
-        Ok(CallToolResult::success(vec![Content::text(
-            serde_json::to_string_pretty(&ListCatalogsResult { catalogs })
-                .map_err(|e| ErrorData::internal_error(e.to_string(), None))?
-        )]))
-    }
-
-    #[tool(description = "List all schemas in a Databricks catalog with pagination support")]
-    pub async fn list_schemas(
-        &self,
-        args: DatabricksListSchemasArgs,
-    ) -> Result<CallToolResult, ErrorData> {
-        let request = ListSchemasRequest {
-            catalog_name: args.catalog_name,
-        };
-        let mut schemas = self
-            .client
-            .list_schemas_request(&request)
-            .await
-            .map_err(|e| ErrorData::internal_error(e.to_string(), None))?;
-
-        // Apply filter if provided
-        if let Some(filter) = &args.filter {
-            let filter_lower = filter.to_lowercase();
-            schemas.retain(|s| s.to_lowercase().contains(&filter_lower));
-        }
-
-        let (schemas, pagination) = apply_pagination(schemas, args.limit, args.offset);
-
-        Ok(CallToolResult::success(vec![Content::text(
-            serde_json::to_string_pretty(&ListSchemasResult { schemas, pagination })
-                .map_err(|e| ErrorData::internal_error(e.to_string(), None))?
-        )]))
-    }
-
-    #[tool(description = "List tables in a Databricks catalog and schema")]
-    pub async fn list_tables(
-        &self,
-        args: DatabricksListTablesArgs,
-    ) -> Result<CallToolResult, ErrorData> {
-        let request = ListTablesRequest {
-            catalog_name: args.catalog_name,
-            schema_name: args.schema_name,
-            exclude_inaccessible: args.exclude_inaccessible,
-        };
-        let tables = self
-            .client
-            .list_tables_request(&request)
-            .await
-            .map_err(|e| ErrorData::internal_error(e.to_string(), None))?;
-
-        Ok(CallToolResult::success(vec![Content::text(
-            serde_json::to_string_pretty(&ListTablesResult { tables })
-                .map_err(|e| ErrorData::internal_error(e.to_string(), None))?
-        )]))
-    }
-
-    #[tool(
-        description = "Get detailed information about a Databricks table including schema and optional sample data"
-    )]
-    pub async fn describe_table(
-        &self,
-        args: DatabricksDescribeTableArgs,
-    ) -> Result<CallToolResult, ErrorData> {
-        let request = DescribeTableRequest {
-            table_full_name: args.table_full_name,
-            sample_size: args.sample_size,
-        };
-        let details = self
-            .client
-            .describe_table_request(&request)
-            .await
-            .map_err(|e| ErrorData::internal_error(e.to_string(), None))?;
-
-        Ok(CallToolResult::success(vec![Content::text(
-            serde_json::to_string_pretty(&details)
-                .map_err(|e| ErrorData::internal_error(e.to_string(), None))?
-        )]))
-    }
 }

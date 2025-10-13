@@ -50,7 +50,16 @@ async fn main() -> Result<()> {
 
     // get server info
     let server_info = service.peer_info();
-    println!("Server info: {:?}\n", server_info);
+    if let Some(info) = server_info {
+        println!("Server: {} v{}",
+            info.server_info.name,
+            info.server_info.version
+        );
+        if let Some(instructions) = &info.instructions {
+            println!("Description: {}", instructions);
+        }
+        println!();
+    }
 
     // list available tools
     println!("=== Listing available tools ===");
@@ -75,7 +84,14 @@ async fn main() -> Result<()> {
             })
             .await?;
 
-        println!("Result: {}", serde_json::to_string_pretty(&result.content)?);
+        // extract text content and parse it
+        if let Some(content) = result.content.first() {
+            if let Some(text) = content.as_text() {
+                // parse and pretty-print the JSON
+                let parsed: serde_json::Value = serde_json::from_str(text.text.as_str())?;
+                println!("{}", serde_json::to_string_pretty(&parsed)?);
+            }
+        }
         println!();
     }
 
