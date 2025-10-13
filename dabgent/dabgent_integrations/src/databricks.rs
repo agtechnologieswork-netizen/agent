@@ -70,7 +70,48 @@ struct SchemaSummary {
     name: String,
 }
 
-#[derive(Debug)]
+// ============================================================================
+// Request Types
+// ============================================================================
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ExecuteSqlRequest {
+    pub query: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ListSchemasRequest {
+    pub catalog_name: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ListTablesRequest {
+    pub catalog_name: String,
+    pub schema_name: String,
+    #[serde(default = "default_exclude_inaccessible")]
+    pub exclude_inaccessible: bool,
+}
+
+fn default_exclude_inaccessible() -> bool {
+    true
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DescribeTableRequest {
+    pub table_full_name: String,
+    #[serde(default = "default_sample_size")]
+    pub sample_size: usize,
+}
+
+fn default_sample_size() -> usize {
+    5
+}
+
+// ============================================================================
+// Response Types
+// ============================================================================
+
+#[derive(Debug, Serialize, Deserialize)]
 pub struct TableDetails {
     pub full_name: String,
     pub table_type: String,
@@ -83,14 +124,14 @@ pub struct TableDetails {
     pub row_count: Option<i64>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct ColumnMetadata {
     pub name: String,
     pub data_type: String,
     pub comment: Option<String>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct TableInfo {
     pub name: String,
     pub catalog_name: String,
@@ -281,6 +322,13 @@ impl DatabricksRestClient {
         Ok(running_warehouse.id)
     }
 
+    pub async fn execute_sql_request(
+        &self,
+        request: &ExecuteSqlRequest,
+    ) -> Result<Vec<HashMap<String, Value>>> {
+        self.execute_sql(&request.query).await
+    }
+
     pub async fn execute_sql(&self, sql: &str) -> Result<Vec<HashMap<String, Value>>> {
         let warehouse_id = self.get_available_warehouse().await?;
 
@@ -461,6 +509,13 @@ impl DatabricksRestClient {
         Ok(all_catalogs)
     }
 
+    pub async fn list_schemas_request(
+        &self,
+        request: &ListSchemasRequest,
+    ) -> Result<Vec<String>> {
+        self.list_schemas(&request.catalog_name).await
+    }
+
     pub async fn list_schemas(&self, catalog_name: &str) -> Result<Vec<String>> {
         let mut all_schemas = Vec::new();
         let mut next_page_token: Option<String> = None;
@@ -536,6 +591,15 @@ impl DatabricksRestClient {
         Ok(all_tables)
     }
 
+    pub async fn list_tables_request(&self, request: &ListTablesRequest) -> Result<Vec<TableInfo>> {
+        self.list_tables_for_catalog_schema(
+            &request.catalog_name,
+            &request.schema_name,
+            request.exclude_inaccessible,
+        )
+        .await
+    }
+
     pub async fn list_tables_for_catalog_schema(
         &self,
         catalog_name: &str,
@@ -589,6 +653,14 @@ impl DatabricksRestClient {
         }
 
         Ok(tables)
+    }
+
+    pub async fn describe_table_request(
+        &self,
+        request: &DescribeTableRequest,
+    ) -> Result<TableDetails> {
+        self.get_table_details(&request.table_full_name, request.sample_size)
+            .await
     }
 
     pub async fn get_table_details(

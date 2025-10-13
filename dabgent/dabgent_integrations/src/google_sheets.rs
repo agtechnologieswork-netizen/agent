@@ -5,14 +5,14 @@ use regex::Regex;
 use std::path::PathBuf;
 use yup_oauth2::{ServiceAccountAuthenticator, ServiceAccountKey};
 
-#[derive(Debug)]
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
 pub struct SpreadsheetData {
     pub title: String,
     pub spreadsheet_id: String,
     pub sheets: Vec<SheetData>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
 pub struct SheetData {
     pub id: i32,
     pub title: String,
@@ -22,7 +22,7 @@ pub struct SheetData {
     pub column_count: i32,
 }
 
-#[derive(Debug)]
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
 pub struct SpreadsheetMetadata {
     pub title: String,
     pub spreadsheet_id: String,
@@ -30,7 +30,7 @@ pub struct SpreadsheetMetadata {
     pub sheets: Vec<SheetMetadata>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
 pub struct SheetMetadata {
     pub id: i32,
     pub title: String,

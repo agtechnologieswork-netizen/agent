@@ -1,6 +1,9 @@
 use super::agent::{Agent, AgentState, Command, Event};
 use crate::toolbox::ToolCallExt;
-use dabgent_integrations::databricks::DatabricksRestClient;
+use dabgent_integrations::{
+    DatabricksRestClient, DescribeTableRequest, ExecuteSqlRequest, ListSchemasRequest,
+    ListTablesRequest,
+};
 use dabgent_mq::{Envelope, EventHandler, EventStore, Handler};
 use eyre::Result;
 use rig::message::{ToolCall, ToolResult};
@@ -262,7 +265,10 @@ impl DatabricksTool for DatabricksListSchemas {
         args: Self::Args,
         client: &DatabricksRestClient,
     ) -> Result<Result<Self::Output, Self::Error>> {
-        match client.list_schemas(&args.catalog_name).await {
+        let request = ListSchemasRequest {
+            catalog_name: args.catalog_name.clone(),
+        };
+        match client.list_schemas_request(&request).await {
             Ok(mut schemas) => {
                 // Apply filter if provided
                 if let Some(filter) = &args.filter {
@@ -341,14 +347,12 @@ impl DatabricksTool for DatabricksListTables {
         args: Self::Args,
         client: &DatabricksRestClient,
     ) -> Result<Result<Self::Output, Self::Error>> {
-        match client
-            .list_tables_for_catalog_schema(
-                &args.catalog_name,
-                &args.schema_name,
-                args.exclude_inaccessible,
-            )
-            .await
-        {
+        let request = ListTablesRequest {
+            catalog_name: args.catalog_name.clone(),
+            schema_name: args.schema_name.clone(),
+            exclude_inaccessible: args.exclude_inaccessible,
+        };
+        match client.list_tables_request(&request).await {
             Ok(tables) => {
                 if tables.is_empty() {
                     Ok(Ok(format!(
@@ -425,10 +429,11 @@ impl DatabricksTool for DatabricksDescribeTable {
         args: Self::Args,
         client: &DatabricksRestClient,
     ) -> Result<Result<Self::Output, Self::Error>> {
-        match client
-            .get_table_details(&args.table_full_name, args.sample_size)
-            .await
-        {
+        let request = DescribeTableRequest {
+            table_full_name: args.table_full_name.clone(),
+            sample_size: args.sample_size,
+        };
+        match client.describe_table_request(&request).await {
             Ok(details) => {
                 let mut lines = vec![
                     format!("Table: {}", details.full_name),
@@ -523,7 +528,10 @@ impl DatabricksTool for DatabricksExecuteQuery {
             return Ok(Err("Only SELECT queries are allowed".to_string()));
         }
 
-        match client.execute_sql(&args.query).await {
+        let request = ExecuteSqlRequest {
+            query: args.query.clone(),
+        };
+        match client.execute_sql_request(&request).await {
             Ok(results) => {
                 if results.is_empty() {
                     Ok(Ok(
