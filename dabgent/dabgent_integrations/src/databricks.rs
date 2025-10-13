@@ -74,31 +74,11 @@ struct SchemaSummary {
 // Helper Functions
 // ============================================================================
 
-pub fn apply_pagination<T>(items: Vec<T>, limit: usize, offset: usize) -> (Vec<T>, String) {
+fn apply_pagination<T>(items: Vec<T>, limit: usize, offset: usize) -> (Vec<T>, usize, usize) {
     let total = items.len();
     let paginated: Vec<T> = items.into_iter().skip(offset).take(limit).collect();
     let shown = paginated.len();
-
-    let pagination_info = if total > limit + offset {
-        format!(
-            "Showing {} items (offset {}, limit {}). Total: {}",
-            shown, offset, limit, total
-        )
-    } else if offset > 0 {
-        format!(
-            "Showing {} items (offset {}). Total: {}",
-            shown, offset, total
-        )
-    } else if total > limit {
-        format!(
-            "Showing {} items (limit {}). Total: {}",
-            shown, limit, total
-        )
-    } else {
-        format!("Showing all {} items", total)
-    };
-
-    (paginated, pagination_info)
+    (paginated, total, shown)
 }
 
 // ============================================================================
@@ -184,9 +164,206 @@ pub struct TableInfo {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
+pub struct ListCatalogsResult {
+    pub catalogs: Vec<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
 pub struct ListSchemasResult {
     pub schemas: Vec<String>,
-    pub pagination: String,
+    pub total_count: usize,
+    pub shown_count: usize,
+    pub offset: usize,
+    pub limit: usize,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ListTablesResult {
+    pub tables: Vec<TableInfo>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ExecuteSqlResult {
+    pub rows: Vec<HashMap<String, Value>>,
+}
+
+// ============================================================================
+// Display Trait for Tool Results
+// ============================================================================
+
+pub trait ToolResultDisplay {
+    fn display(&self) -> String;
+}
+
+impl ToolResultDisplay for ListCatalogsResult {
+    fn display(&self) -> String {
+        if self.catalogs.is_empty() {
+            "No catalogs found.".to_string()
+        } else {
+            let mut lines = vec![format!("Found {} catalogs:", self.catalogs.len()), String::new()];
+            for catalog in &self.catalogs {
+                lines.push(format!("• {}", catalog));
+            }
+            lines.join("\n")
+        }
+    }
+}
+
+impl ToolResultDisplay for ListSchemasResult {
+    fn display(&self) -> String {
+        let pagination_info = if self.total_count > self.limit + self.offset {
+            format!(
+                "Showing {} items (offset {}, limit {}). Total: {}",
+                self.shown_count, self.offset, self.limit, self.total_count
+            )
+        } else if self.offset > 0 {
+            format!(
+                "Showing {} items (offset {}). Total: {}",
+                self.shown_count, self.offset, self.total_count
+            )
+        } else if self.total_count > self.limit {
+            format!(
+                "Showing {} items (limit {}). Total: {}",
+                self.shown_count, self.limit, self.total_count
+            )
+        } else {
+            format!("Showing all {} items", self.total_count)
+        };
+
+        if self.schemas.is_empty() {
+            pagination_info
+        } else {
+            let mut lines = vec![pagination_info, String::new()];
+            for schema in &self.schemas {
+                lines.push(format!("• {}", schema));
+            }
+            lines.join("\n")
+        }
+    }
+}
+
+impl ToolResultDisplay for ListTablesResult {
+    fn display(&self) -> String {
+        if self.tables.is_empty() {
+            "No tables found.".to_string()
+        } else {
+            let mut lines = vec![format!("Found {} tables:", self.tables.len()), String::new()];
+
+            for table in &self.tables {
+                let mut info = format!("• {} ({})", table.full_name, table.table_type);
+                if let Some(owner) = &table.owner {
+                    info.push_str(&format!(" - Owner: {}", owner));
+                }
+                if let Some(comment) = &table.comment {
+                    info.push_str(&format!(" - {}", comment));
+                }
+                lines.push(info);
+            }
+            lines.join("\n")
+        }
+    }
+}
+
+impl ToolResultDisplay for TableDetails {
+    fn display(&self) -> String {
+        let mut lines = vec![
+            format!("Table: {}", self.full_name),
+            format!("Table Type: {}", self.table_type),
+        ];
+
+        if let Some(owner) = &self.owner {
+            lines.push(format!("Owner: {}", owner));
+        }
+        if let Some(comment) = &self.comment {
+            lines.push(format!("Comment: {}", comment));
+        }
+        if let Some(row_count) = self.row_count {
+            lines.push(format!("Row Count: {}", row_count));
+        }
+        if let Some(storage) = &self.storage_location {
+            lines.push(format!("Storage Location: {}", storage));
+        }
+        if let Some(format) = &self.data_source_format {
+            lines.push(format!("Data Source Format: {}", format));
+        }
+
+        if !self.columns.is_empty() {
+            lines.push(format!("\nColumns ({}):", self.columns.len()));
+            for col in &self.columns {
+                let mut col_info = format!("  - {}: {}", col.name, col.data_type);
+                if let Some(comment) = &col.comment {
+                    col_info.push_str(&format!(" ({})", comment));
+                }
+                lines.push(col_info);
+            }
+        }
+
+        if let Some(sample) = &self.sample_data {
+            if !sample.is_empty() {
+                lines.push(format!("\nSample Data ({} rows):", sample.len()));
+                for (i, row) in sample.iter().enumerate().take(5) {
+                    let row_str: Vec<String> = row
+                        .iter()
+                        .map(|(k, v)| format!("{}: {}", k, format_value(v)))
+                        .collect();
+                    lines.push(format!("  Row {}: {}", i + 1, row_str.join(", ")));
+                }
+                if sample.len() > 5 {
+                    lines.push("...".to_string());
+                }
+            }
+        }
+
+        lines.join("\n")
+    }
+}
+
+impl ToolResultDisplay for ExecuteSqlResult {
+    fn display(&self) -> String {
+        if self.rows.is_empty() {
+            "Query executed successfully but returned no results.".to_string()
+        } else {
+            let mut lines = vec![
+                format!("Query returned {} rows:", self.rows.len()),
+                String::new(),
+            ];
+
+            if let Some(first) = self.rows.first() {
+                let columns: Vec<String> = first.keys().cloned().collect();
+                lines.push(format!("Columns: {}", columns.join(", ")));
+                lines.push(String::new());
+                lines.push("Results:".to_string());
+            }
+
+            let limit = std::cmp::min(self.rows.len(), 100);
+            for (i, row) in self.rows.iter().take(limit).enumerate() {
+                let row_str: Vec<String> = row
+                    .iter()
+                    .map(|(k, v)| format!("{}: {}", k, format_value(v)))
+                    .collect();
+                lines.push(format!("  Row {}: {}", i + 1, row_str.join(", ")));
+            }
+
+            if self.rows.len() > 100 {
+                lines.push(format!(
+                    "\n... showing first 100 of {} total rows",
+                    self.rows.len()
+                ));
+            }
+
+            lines.join("\n")
+        }
+    }
+}
+
+fn format_value(value: &Value) -> String {
+    match value {
+        Value::String(s) => s.clone(),
+        Value::Number(n) => n.to_string(),
+        Value::Bool(b) => b.to_string(),
+        Value::Null => "null".to_string(),
+        _ => format!("{:?}", value),
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -372,11 +549,12 @@ impl DatabricksRestClient {
     pub async fn execute_sql_request(
         &self,
         request: &ExecuteSqlRequest,
-    ) -> Result<Vec<HashMap<String, Value>>> {
-        self.execute_sql(&request.query).await
+    ) -> Result<ExecuteSqlResult> {
+        let rows = self.execute_sql(&request.query).await?;
+        Ok(ExecuteSqlResult { rows })
     }
 
-    pub async fn execute_sql(&self, sql: &str) -> Result<Vec<HashMap<String, Value>>> {
+    async fn execute_sql(&self, sql: &str) -> Result<Vec<HashMap<String, Value>>> {
         let warehouse_id = self.get_available_warehouse().await?;
 
         let request = SqlStatementRequest {
@@ -519,7 +697,12 @@ impl DatabricksRestClient {
         Ok(results)
     }
 
-    pub async fn list_catalogs(&self) -> Result<Vec<String>> {
+    pub async fn list_catalogs_request(&self) -> Result<ListCatalogsResult> {
+        let catalogs = self.list_catalogs().await?;
+        Ok(ListCatalogsResult { catalogs })
+    }
+
+    async fn list_catalogs(&self) -> Result<Vec<String>> {
         let mut all_catalogs = Vec::new();
         let mut next_page_token: Option<String> = None;
 
@@ -568,12 +751,18 @@ impl DatabricksRestClient {
             schemas.retain(|s| s.to_lowercase().contains(&filter_lower));
         }
 
-        let (schemas, pagination) = apply_pagination(schemas, request.limit, request.offset);
+        let (schemas, total_count, shown_count) = apply_pagination(schemas, request.limit, request.offset);
 
-        Ok(ListSchemasResult { schemas, pagination })
+        Ok(ListSchemasResult {
+            schemas,
+            total_count,
+            shown_count,
+            offset: request.offset,
+            limit: request.limit,
+        })
     }
 
-    pub async fn list_schemas(&self, catalog_name: &str) -> Result<Vec<String>> {
+    async fn list_schemas(&self, catalog_name: &str) -> Result<Vec<String>> {
         let mut all_schemas = Vec::new();
         let mut next_page_token: Option<String> = None;
 
@@ -608,7 +797,8 @@ impl DatabricksRestClient {
         Ok(all_schemas)
     }
 
-    pub async fn list_tables(
+    #[allow(dead_code)]
+    async fn list_tables(
         &self,
         catalog: &str,
         schema: &str,
@@ -648,16 +838,17 @@ impl DatabricksRestClient {
         Ok(all_tables)
     }
 
-    pub async fn list_tables_request(&self, request: &ListTablesRequest) -> Result<Vec<TableInfo>> {
-        self.list_tables_for_catalog_schema(
+    pub async fn list_tables_request(&self, request: &ListTablesRequest) -> Result<ListTablesResult> {
+        let tables = self.list_tables_for_catalog_schema(
             &request.catalog_name,
             &request.schema_name,
             request.exclude_inaccessible,
         )
-        .await
+        .await?;
+        Ok(ListTablesResult { tables })
     }
 
-    pub async fn list_tables_for_catalog_schema(
+    async fn list_tables_for_catalog_schema(
         &self,
         catalog_name: &str,
         schema_name: &str,
@@ -720,7 +911,7 @@ impl DatabricksRestClient {
             .await
     }
 
-    pub async fn get_table_details(
+    async fn get_table_details(
         &self,
         table_name: &str,
         sample_rows: usize,
@@ -781,15 +972,5 @@ impl DatabricksRestClient {
             sample_data,
             row_count,
         })
-    }
-
-    pub fn format_value(value: &Value) -> String {
-        match value {
-            Value::String(s) => s.clone(),
-            Value::Number(n) => n.to_string(),
-            Value::Bool(b) => b.to_string(),
-            Value::Null => "null".to_string(),
-            _ => format!("{:?}", value),
-        }
     }
 }

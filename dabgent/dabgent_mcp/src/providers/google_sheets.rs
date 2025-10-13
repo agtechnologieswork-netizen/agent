@@ -1,9 +1,11 @@
-use crate::helpers::wrap_result;
-use dabgent_integrations::{FetchFullArgs, GetMetadataArgs, GoogleSheetsClient, ReadRangeArgs};
+use dabgent_integrations::{
+    FetchFullArgs, GetMetadataArgs, GoogleSheetsClient, GoogleSheetsToolResultDisplay,
+    ReadRangeArgs,
+};
 use eyre::Result;
 use rmcp::handler::server::router::tool::ToolRouter;
 use rmcp::handler::server::wrapper::Parameters;
-use rmcp::model::{CallToolResult, Implementation, ProtocolVersion, ServerCapabilities, ServerInfo};
+use rmcp::model::{CallToolResult, Content, Implementation, ProtocolVersion, ServerCapabilities, ServerInfo};
 use rmcp::{tool, tool_handler, tool_router, ErrorData, ServerHandler};
 use std::sync::Arc;
 
@@ -30,7 +32,10 @@ impl GoogleSheetsProvider {
         &self,
         Parameters(args): Parameters<GetMetadataArgs>,
     ) -> Result<CallToolResult, ErrorData> {
-        wrap_result(self.client.get_spreadsheet_metadata(&args.url_or_id).await)
+        match self.client.get_spreadsheet_metadata_request(&args.url_or_id).await {
+            Ok(result) => Ok(CallToolResult::success(vec![Content::text(result.display())])),
+            Err(e) => Err(ErrorData::internal_error(e.to_string(), None)),
+        }
     }
 
     #[tool(description = "Read a specific range from a Google Sheets spreadsheet")]
@@ -38,7 +43,10 @@ impl GoogleSheetsProvider {
         &self,
         Parameters(args): Parameters<ReadRangeArgs>,
     ) -> Result<CallToolResult, ErrorData> {
-        wrap_result(self.client.read_range(&args.url_or_id, &args.range).await)
+        match self.client.read_range_request(&args.url_or_id, &args.range).await {
+            Ok(result) => Ok(CallToolResult::success(vec![Content::text(result.display())])),
+            Err(e) => Err(ErrorData::internal_error(e.to_string(), None)),
+        }
     }
 
     #[tool(description = "Fetch all data from a Google Sheets spreadsheet")]
@@ -46,11 +54,10 @@ impl GoogleSheetsProvider {
         &self,
         Parameters(args): Parameters<FetchFullArgs>,
     ) -> Result<CallToolResult, ErrorData> {
-        wrap_result(
-            self.client
-                .fetch_spreadsheet_data(&args.url_or_id)
-                .await,
-        )
+        match self.client.fetch_spreadsheet_data_request(&args.url_or_id).await {
+            Ok(result) => Ok(CallToolResult::success(vec![Content::text(result.display())])),
+            Err(e) => Err(ErrorData::internal_error(e.to_string(), None)),
+        }
     }
 }
 

@@ -64,6 +64,100 @@ pub struct SheetMetadata {
     pub column_count: i32,
 }
 
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ReadRangeResult {
+    pub values: Vec<Vec<String>>,
+}
+
+// ============================================================================
+// Display Trait for Tool Results
+// ============================================================================
+
+pub trait ToolResultDisplay {
+    fn display(&self) -> String;
+}
+
+impl ToolResultDisplay for SpreadsheetMetadata {
+    fn display(&self) -> String {
+        let mut lines = vec![
+            format!("Spreadsheet: {}", self.title),
+            format!("ID: {}", self.spreadsheet_id),
+            format!("Sheets: {}", self.sheet_count),
+            String::new(),
+        ];
+
+        for sheet in &self.sheets {
+            lines.push(format!(
+                "• {} ({}x{} cells)",
+                sheet.title, sheet.row_count, sheet.column_count
+            ));
+        }
+
+        lines.join("\n")
+    }
+}
+
+impl ToolResultDisplay for ReadRangeResult {
+    fn display(&self) -> String {
+        if self.values.is_empty() {
+            "No data found in range.".to_string()
+        } else {
+            let mut lines = vec![
+                format!("Found {} rows:", self.values.len()),
+                String::new(),
+            ];
+
+            for (i, row) in self.values.iter().enumerate().take(100) {
+                lines.push(format!("  Row {}: {}", i + 1, row.join(", ")));
+            }
+
+            if self.values.len() > 100 {
+                lines.push(format!(
+                    "\n... showing first 100 of {} total rows",
+                    self.values.len()
+                ));
+            }
+
+            lines.join("\n")
+        }
+    }
+}
+
+impl ToolResultDisplay for SpreadsheetData {
+    fn display(&self) -> String {
+        let mut lines = vec![
+            format!("Spreadsheet: {}", self.title),
+            format!("ID: {}", self.spreadsheet_id),
+            format!("Sheets: {}", self.sheets.len()),
+            String::new(),
+        ];
+
+        for sheet in &self.sheets {
+            lines.push(format!(
+                "Sheet: {} ({}x{})",
+                sheet.title, sheet.row_count, sheet.column_count
+            ));
+
+            if !sheet.values.is_empty() {
+                lines.push(format!("  Rows: {}", sheet.values.len()));
+
+                // Show first few rows as sample
+                for (i, row) in sheet.values.iter().enumerate().take(5) {
+                    if !row.is_empty() {
+                        lines.push(format!("    Row {}: {}", i + 1, row.join(", ")));
+                    }
+                }
+                if sheet.values.len() > 5 {
+                    lines.push("    ...".to_string());
+                }
+            }
+            lines.push(String::new());
+        }
+
+        lines.join("\n")
+    }
+}
+
 pub struct GoogleSheetsClient {
     hub: Sheets<hyper_rustls::HttpsConnector<hyper_util::client::legacy::connect::HttpConnector>>,
 }
@@ -196,7 +290,7 @@ impl GoogleSheetsClient {
         ))
     }
 
-    pub async fn get_spreadsheet_metadata(&self, url_or_id: &str) -> Result<SpreadsheetMetadata> {
+    pub async fn get_spreadsheet_metadata_request(&self, url_or_id: &str) -> Result<SpreadsheetMetadata> {
         let spreadsheet_id = Self::extract_spreadsheet_id(url_or_id)?;
         debug!("Getting metadata for spreadsheet: {}", spreadsheet_id);
 
@@ -240,8 +334,13 @@ impl GoogleSheetsClient {
         })
     }
 
-    pub async fn read_range(&self, url_or_id: &str, range: &str) -> Result<Vec<Vec<String>>> {
+    pub async fn read_range_request(&self, url_or_id: &str, range: &str) -> Result<ReadRangeResult> {
         let spreadsheet_id = Self::extract_spreadsheet_id(url_or_id)?;
+        let values = self.read_range(&spreadsheet_id, range).await?;
+        Ok(ReadRangeResult { values })
+    }
+
+    async fn read_range(&self, spreadsheet_id: &str, range: &str) -> Result<Vec<Vec<String>>> {
         debug!(
             "Reading range '{}' from spreadsheet: {}",
             range, spreadsheet_id
@@ -250,7 +349,7 @@ impl GoogleSheetsClient {
         let result = self
             .hub
             .spreadsheets()
-            .values_get(&spreadsheet_id, range)
+            .values_get(spreadsheet_id, range)
             .doit()
             .await
             .map_err(|e| anyhow!("Failed to read range: {}", e))?;
@@ -267,7 +366,7 @@ impl GoogleSheetsClient {
         Ok(values)
     }
 
-    pub async fn fetch_spreadsheet_data(&self, url_or_id: &str) -> Result<SpreadsheetData> {
+    pub async fn fetch_spreadsheet_data_request(&self, url_or_id: &str) -> Result<SpreadsheetData> {
         let spreadsheet_id = Self::extract_spreadsheet_id(url_or_id)?;
         info!("Fetching full data for spreadsheet: {}", spreadsheet_id);
 

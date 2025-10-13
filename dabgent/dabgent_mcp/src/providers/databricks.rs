@@ -1,16 +1,15 @@
-use crate::helpers::wrap_result;
 use dabgent_agent::processor::databricks::{
     DatabricksDescribeTableArgs, DatabricksExecuteQueryArgs, DatabricksListCatalogsArgs,
     DatabricksListSchemasArgs, DatabricksListTablesArgs,
 };
 use dabgent_integrations::{
     DatabricksRestClient, DescribeTableRequest, ExecuteSqlRequest, ListSchemasRequest,
-    ListTablesRequest,
+    ListTablesRequest, ToolResultDisplay,
 };
 use eyre::Result;
 use rmcp::handler::server::router::tool::ToolRouter;
 use rmcp::handler::server::wrapper::Parameters;
-use rmcp::model::{CallToolResult, Implementation, ProtocolVersion, ServerCapabilities, ServerInfo};
+use rmcp::model::{CallToolResult, Content, Implementation, ProtocolVersion, ServerCapabilities, ServerInfo};
 use rmcp::{tool, tool_handler, tool_router, ErrorData, ServerHandler};
 use std::sync::Arc;
 
@@ -39,7 +38,10 @@ impl DatabricksProvider {
         let request = ExecuteSqlRequest {
             query: args.query,
         };
-        wrap_result(self.client.execute_sql_request(&request).await)
+        match self.client.execute_sql_request(&request).await {
+            Ok(result) => Ok(CallToolResult::success(vec![Content::text(result.display())])),
+            Err(e) => Err(ErrorData::internal_error(e.to_string(), None)),
+        }
     }
 
     #[tool(description = "List all available Databricks catalogs")]
@@ -47,7 +49,10 @@ impl DatabricksProvider {
         &self,
         Parameters(_args): Parameters<DatabricksListCatalogsArgs>,
     ) -> Result<CallToolResult, ErrorData> {
-        wrap_result(self.client.list_catalogs().await)
+        match self.client.list_catalogs_request().await {
+            Ok(result) => Ok(CallToolResult::success(vec![Content::text(result.display())])),
+            Err(e) => Err(ErrorData::internal_error(e.to_string(), None)),
+        }
     }
 
     #[tool(description = "List all schemas in a Databricks catalog with pagination support")]
@@ -61,7 +66,10 @@ impl DatabricksProvider {
             limit: args.limit,
             offset: args.offset,
         };
-        wrap_result(self.client.list_schemas_request(&request).await)
+        match self.client.list_schemas_request(&request).await {
+            Ok(result) => Ok(CallToolResult::success(vec![Content::text(result.display())])),
+            Err(e) => Err(ErrorData::internal_error(e.to_string(), None)),
+        }
     }
 
     #[tool(description = "List tables in a Databricks catalog and schema")]
@@ -74,7 +82,10 @@ impl DatabricksProvider {
             schema_name: args.schema_name,
             exclude_inaccessible: args.exclude_inaccessible,
         };
-        wrap_result(self.client.list_tables_request(&request).await)
+        match self.client.list_tables_request(&request).await {
+            Ok(result) => Ok(CallToolResult::success(vec![Content::text(result.display())])),
+            Err(e) => Err(ErrorData::internal_error(e.to_string(), None)),
+        }
     }
 
     #[tool(
@@ -88,7 +99,10 @@ impl DatabricksProvider {
             table_full_name: args.table_full_name,
             sample_size: args.sample_size,
         };
-        wrap_result(self.client.describe_table_request(&request).await)
+        match self.client.describe_table_request(&request).await {
+            Ok(result) => Ok(CallToolResult::success(vec![Content::text(result.display())])),
+            Err(e) => Err(ErrorData::internal_error(e.to_string(), None)),
+        }
     }
 }
 

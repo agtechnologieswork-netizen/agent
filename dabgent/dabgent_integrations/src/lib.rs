@@ -3,9 +3,11 @@ pub mod google_sheets;
 
 pub use databricks::{
     ColumnMetadata, DatabricksRestClient, DescribeTableRequest, ExecuteSqlRequest,
-    ListSchemasRequest, ListSchemasResult, ListTablesRequest, TableDetails, TableInfo,
+    ExecuteSqlResult, ListCatalogsResult, ListSchemasRequest, ListSchemasResult,
+    ListTablesRequest, ListTablesResult, TableDetails, TableInfo, ToolResultDisplay,
 };
 pub use google_sheets::{
-    FetchFullArgs, GetMetadataArgs, GoogleSheetsClient, ReadRangeArgs, SheetData, SheetMetadata,
-    SpreadsheetData, SpreadsheetMetadata,
+    FetchFullArgs, GetMetadataArgs, GoogleSheetsClient, ReadRangeArgs, ReadRangeResult, SheetData,
+    SheetMetadata, SpreadsheetData, SpreadsheetMetadata,
+    ToolResultDisplay as GoogleSheetsToolResultDisplay,
 };

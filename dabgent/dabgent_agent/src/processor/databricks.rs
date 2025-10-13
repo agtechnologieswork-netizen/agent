@@ -2,14 +2,13 @@ use super::agent::{Agent, AgentState, Command, Event};
 use crate::toolbox::ToolCallExt;
 use dabgent_integrations::{
     DatabricksRestClient, DescribeTableRequest, ExecuteSqlRequest, ListSchemasRequest,
-    ListTablesRequest,
+    ListTablesRequest, ToolResultDisplay,
 };
 use dabgent_mq::{Envelope, EventHandler, EventStore, Handler};
 use eyre::Result;
 use rig::message::{ToolCall, ToolResult};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
@@ -74,16 +73,7 @@ pub struct FinishDelegationArgs {
 // ============================================================================
 // Helper Functions
 // ============================================================================
-
-fn format_value(value: &Value) -> String {
-    match value {
-        Value::String(s) => s.clone(),
-        Value::Number(n) => n.to_string(),
-        Value::Bool(b) => b.to_string(),
-        Value::Null => "null".to_string(),
-        _ => format!("{:?}", value),
-    }
-}
+// (None needed - formatting is handled by ToolResultDisplay trait)
 
 pub trait DatabricksTool: Send + Sync {
     type Args: for<'a> Deserialize<'a> + Serialize + Send + Sync;
@@ -172,19 +162,8 @@ impl DatabricksTool for DatabricksListCatalogs {
         _args: Self::Args,
         client: &DatabricksRestClient,
     ) -> Result<Result<Self::Output, Self::Error>> {
-        match client.list_catalogs().await {
-            Ok(catalogs) => {
-                if catalogs.is_empty() {
-                    Ok(Ok("No catalogs found.".to_string()))
-                } else {
-                    let mut lines =
-                        vec![format!("Found {} catalogs:", catalogs.len()), String::new()];
-                    for catalog in &catalogs {
-                        lines.push(format!("• {}", catalog));
-                    }
-                    Ok(Ok(lines.join("\n")))
-                }
-            }
+        match client.list_catalogs_request().await {
+            Ok(result) => Ok(Ok(result.display())),
             Err(e) => Ok(Err(format!("Failed to list catalogs: {}", e))),
         }
     }
@@ -258,11 +237,7 @@ impl DatabricksTool for DatabricksListSchemas {
                     };
                     Ok(Ok(message))
                 } else {
-                    let mut lines = vec![result.pagination, String::new()];
-                    for schema in &result.schemas {
-                        lines.push(format!("• {}", schema));
-                    }
-                    Ok(Ok(lines.join("\n")))
+                    Ok(Ok(result.display()))
                 }
             }
             Err(e) => Ok(Err(format!(
@@ -321,34 +296,14 @@ impl DatabricksTool for DatabricksListTables {
             exclude_inaccessible: args.exclude_inaccessible,
         };
         match client.list_tables_request(&request).await {
-            Ok(tables) => {
-                if tables.is_empty() {
+            Ok(result) => {
+                if result.tables.is_empty() {
                     Ok(Ok(format!(
                         "No tables found in '{}.{}'.",
                         args.catalog_name, args.schema_name
                     )))
                 } else {
-                    let mut lines = vec![
-                        format!(
-                            "Found {} tables in '{}.{}':",
-                            tables.len(),
-                            args.catalog_name,
-                            args.schema_name
-                        ),
-                        String::new(),
-                    ];
-
-                    for table in &tables {
-                        let mut info = format!("• {} ({})", table.full_name, table.table_type);
-                        if let Some(owner) = &table.owner {
-                            info.push_str(&format!(" - Owner: {}", owner));
-                        }
-                        if let Some(comment) = &table.comment {
-                            info.push_str(&format!(" - {}", comment));
-                        }
-                        lines.push(info);
-                    }
-                    Ok(Ok(lines.join("\n")))
+                    Ok(Ok(result.display()))
                 }
             }
             Err(e) => Ok(Err(format!(
@@ -402,57 +357,7 @@ impl DatabricksTool for DatabricksDescribeTable {
             sample_size: args.sample_size,
         };
         match client.describe_table_request(&request).await {
-            Ok(details) => {
-                let mut lines = vec![
-                    format!("Table: {}", details.full_name),
-                    format!("Table Type: {}", details.table_type),
-                ];
-
-                if let Some(owner) = &details.owner {
-                    lines.push(format!("Owner: {}", owner));
-                }
-                if let Some(comment) = &details.comment {
-                    lines.push(format!("Comment: {}", comment));
-                }
-                if let Some(row_count) = details.row_count {
-                    lines.push(format!("Row Count: {}", row_count));
-                }
-                if let Some(storage) = &details.storage_location {
-                    lines.push(format!("Storage Location: {}", storage));
-                }
-                if let Some(format) = &details.data_source_format {
-                    lines.push(format!("Data Source Format: {}", format));
-                }
-
-                if !details.columns.is_empty() {
-                    lines.push(format!("\nColumns ({}):", details.columns.len()));
-                    for col in &details.columns {
-                        let mut col_info = format!("  - {}: {}", col.name, col.data_type);
-                        if let Some(comment) = &col.comment {
-                            col_info.push_str(&format!(" ({})", comment));
-                        }
-                        lines.push(col_info);
-                    }
-                }
-
-                if let Some(sample) = &details.sample_data {
-                    if !sample.is_empty() {
-                        lines.push(format!("\nSample Data ({} rows):", sample.len()));
-                        for (i, row) in sample.iter().enumerate().take(5) {
-                            let row_str: Vec<String> = row
-                                .iter()
-                                .map(|(k, v)| format!("{}: {}", k, format_value(v)))
-                                .collect();
-                            lines.push(format!("  Row {}: {}", i + 1, row_str.join(", ")));
-                        }
-                        if sample.len() > 5 {
-                            lines.push("...".to_string());
-                        }
-                    }
-                }
-
-                Ok(Ok(lines.join("\n")))
-            }
+            Ok(details) => Ok(Ok(details.display())),
             Err(e) => Ok(Err(format!("Failed to describe table: {}", e))),
         }
     }
@@ -500,43 +405,7 @@ impl DatabricksTool for DatabricksExecuteQuery {
             query: args.query.clone(),
         };
         match client.execute_sql_request(&request).await {
-            Ok(results) => {
-                if results.is_empty() {
-                    Ok(Ok(
-                        "Query executed successfully but returned no results.".to_string()
-                    ))
-                } else {
-                    let mut lines = vec![
-                        format!("Query returned {} rows:", results.len()),
-                        String::new(),
-                    ];
-
-                    if let Some(first) = results.first() {
-                        let columns: Vec<String> = first.keys().cloned().collect();
-                        lines.push(format!("Columns: {}", columns.join(", ")));
-                        lines.push(String::new());
-                        lines.push("Results:".to_string());
-                    }
-
-                    let limit = std::cmp::min(results.len(), 100);
-                    for (i, row) in results.iter().take(limit).enumerate() {
-                        let row_str: Vec<String> = row
-                            .iter()
-                            .map(|(k, v)| format!("{}: {}", k, format_value(v)))
-                            .collect();
-                        lines.push(format!("  Row {}: {}", i + 1, row_str.join(", ")));
-                    }
-
-                    if results.len() > 100 {
-                        lines.push(format!(
-                            "\n... showing first 100 of {} total rows",
-                            results.len()
-                        ));
-                    }
-
-                    Ok(Ok(lines.join("\n")))
-                }
-            }
+            Ok(result) => Ok(Ok(result.display())),
             Err(e) => Ok(Err(format!("Failed to execute query: {}", e))),
         }
     }
