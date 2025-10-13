@@ -797,47 +797,6 @@ impl DatabricksRestClient {
         Ok(all_schemas)
     }
 
-    #[allow(dead_code)]
-    async fn list_tables(
-        &self,
-        catalog: &str,
-        schema: &str,
-        exclude_inaccessible: bool,
-    ) -> Result<Vec<TableInfo>> {
-        let mut all_tables = Vec::new();
-
-        // Get catalog names - expand wildcard if needed
-        let catalog_names = if catalog == "*" {
-            self.list_catalogs().await?
-        } else {
-            vec![catalog.to_string()]
-        };
-
-        // For each catalog, get schemas and then tables
-        for catalog_name in catalog_names {
-            let schema_names = if schema == "*" {
-                self.list_schemas(&catalog_name).await?
-            } else {
-                vec![schema.to_string()]
-            };
-
-            // For each schema, get tables
-            for schema_name in schema_names {
-                match self.list_tables_for_catalog_schema(&catalog_name, &schema_name, exclude_inaccessible).await {
-                    Ok(mut tables) => {
-                        all_tables.append(&mut tables);
-                    }
-                    Err(e) => {
-                        // Log error but continue with other schemas
-                        debug!("Failed to list tables for {}.{}: {}", catalog_name, schema_name, e);
-                    }
-                }
-            }
-        }
-
-        Ok(all_tables)
-    }
-
     pub async fn list_tables_request(&self, request: &ListTablesRequest) -> Result<ListTablesResult> {
         let tables = self.list_tables_for_catalog_schema(
             &request.catalog_name,
