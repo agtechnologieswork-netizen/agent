@@ -12,18 +12,18 @@ use yup_oauth2::{ServiceAccountAuthenticator, ServiceAccountKey};
 // ============================================================================
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-pub struct GetMetadataArgs {
+pub struct GetSpreadsheetMetadataRequest {
     pub url_or_id: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-pub struct ReadRangeArgs {
+pub struct ReadRangeRequest {
     pub url_or_id: String,
     pub range: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-pub struct FetchFullArgs {
+pub struct FetchSpreadsheetDataRequest {
     pub url_or_id: String,
 }
 
@@ -73,9 +73,7 @@ pub struct ReadRangeResult {
 // Display Trait for Tool Results
 // ============================================================================
 
-pub trait ToolResultDisplay {
-    fn display(&self) -> String;
-}
+use crate::ToolResultDisplay;
 
 impl ToolResultDisplay for SpreadsheetMetadata {
     fn display(&self) -> String {
@@ -289,7 +287,14 @@ impl GoogleSheetsClient {
         ))
     }
 
-    pub async fn get_spreadsheet_metadata_request(&self, url_or_id: &str) -> Result<SpreadsheetMetadata> {
+    pub async fn get_spreadsheet_metadata(
+        &self,
+        request: &GetSpreadsheetMetadataRequest,
+    ) -> Result<SpreadsheetMetadata> {
+        self.get_spreadsheet_metadata_impl(&request.url_or_id).await
+    }
+
+    async fn get_spreadsheet_metadata_impl(&self, url_or_id: &str) -> Result<SpreadsheetMetadata> {
         let spreadsheet_id = Self::extract_spreadsheet_id(url_or_id)?;
         debug!("Getting metadata for spreadsheet: {}", spreadsheet_id);
 
@@ -333,13 +338,17 @@ impl GoogleSheetsClient {
         })
     }
 
-    pub async fn read_range_request(&self, url_or_id: &str, range: &str) -> Result<ReadRangeResult> {
+    pub async fn read_range(&self, request: &ReadRangeRequest) -> Result<ReadRangeResult> {
+        self.read_range_impl(&request.url_or_id, &request.range).await
+    }
+
+    async fn read_range_impl(&self, url_or_id: &str, range: &str) -> Result<ReadRangeResult> {
         let spreadsheet_id = Self::extract_spreadsheet_id(url_or_id)?;
-        let values = self.read_range(&spreadsheet_id, range).await?;
+        let values = self.read_range_internal(&spreadsheet_id, range).await?;
         Ok(ReadRangeResult { values })
     }
 
-    async fn read_range(&self, spreadsheet_id: &str, range: &str) -> Result<Vec<Vec<String>>> {
+    async fn read_range_internal(&self, spreadsheet_id: &str, range: &str) -> Result<Vec<Vec<String>>> {
         debug!(
             "Reading range '{}' from spreadsheet: {}",
             range, spreadsheet_id
@@ -365,7 +374,14 @@ impl GoogleSheetsClient {
         Ok(values)
     }
 
-    pub async fn fetch_spreadsheet_data_request(&self, url_or_id: &str) -> Result<SpreadsheetData> {
+    pub async fn fetch_spreadsheet_data(
+        &self,
+        request: &FetchSpreadsheetDataRequest,
+    ) -> Result<SpreadsheetData> {
+        self.fetch_spreadsheet_data_impl(&request.url_or_id).await
+    }
+
+    async fn fetch_spreadsheet_data_impl(&self, url_or_id: &str) -> Result<SpreadsheetData> {
         let spreadsheet_id = Self::extract_spreadsheet_id(url_or_id)?;
         info!("Fetching full data for spreadsheet: {}", spreadsheet_id);
 
@@ -412,7 +428,7 @@ impl GoogleSheetsClient {
                 let range = format!("{}!A1:{}{}", sheet_title, col_letter, max_rows);
 
                 debug!("Fetching range: {}", range);
-                match self.read_range(&spreadsheet_id, &range).await {
+                match self.read_range_internal(&spreadsheet_id, &range).await {
                     Ok(sheet_values) => {
                         debug!(
                             "Successfully fetched {} rows from sheet '{}'",

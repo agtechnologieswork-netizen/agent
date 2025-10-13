@@ -1,6 +1,6 @@
 use dabgent_integrations::{
-    FetchFullArgs, GetMetadataArgs, GoogleSheetsClient, GoogleSheetsToolResultDisplay,
-    ReadRangeArgs,
+    FetchSpreadsheetDataRequest, GetSpreadsheetMetadataRequest, GoogleSheetsClient,
+    ReadRangeRequest, ToolResultDisplay,
 };
 use eyre::Result;
 use rmcp::handler::server::router::tool::ToolRouter;
@@ -30,9 +30,9 @@ impl GoogleSheetsProvider {
     #[tool(description = "Get metadata for a Google Sheets spreadsheet")]
     pub async fn get_metadata(
         &self,
-        Parameters(args): Parameters<GetMetadataArgs>,
+        Parameters(args): Parameters<GetSpreadsheetMetadataRequest>,
     ) -> Result<CallToolResult, ErrorData> {
-        match self.client.get_spreadsheet_metadata_request(&args.url_or_id).await {
+        match self.client.get_spreadsheet_metadata(&args).await {
             Ok(result) => Ok(CallToolResult::success(vec![Content::text(result.display())])),
             Err(e) => Err(ErrorData::internal_error(e.to_string(), None)),
         }
@@ -41,9 +41,9 @@ impl GoogleSheetsProvider {
     #[tool(description = "Read a specific range from a Google Sheets spreadsheet")]
     pub async fn read_range(
         &self,
-        Parameters(args): Parameters<ReadRangeArgs>,
+        Parameters(args): Parameters<ReadRangeRequest>,
     ) -> Result<CallToolResult, ErrorData> {
-        match self.client.read_range_request(&args.url_or_id, &args.range).await {
+        match self.client.read_range(&args).await {
             Ok(result) => Ok(CallToolResult::success(vec![Content::text(result.display())])),
             Err(e) => Err(ErrorData::internal_error(e.to_string(), None)),
         }
@@ -52,9 +52,9 @@ impl GoogleSheetsProvider {
     #[tool(description = "Fetch all data from a Google Sheets spreadsheet")]
     pub async fn fetch_full(
         &self,
-        Parameters(args): Parameters<FetchFullArgs>,
+        Parameters(args): Parameters<FetchSpreadsheetDataRequest>,
     ) -> Result<CallToolResult, ErrorData> {
-        match self.client.fetch_spreadsheet_data_request(&args.url_or_id).await {
+        match self.client.fetch_spreadsheet_data(&args).await {
             Ok(result) => Ok(CallToolResult::success(vec![Content::text(result.display())])),
             Err(e) => Err(ErrorData::internal_error(e.to_string(), None)),
         }

@@ -191,9 +191,7 @@ pub struct ExecuteSqlResult {
 // Display Trait for Tool Results
 // ============================================================================
 
-pub trait ToolResultDisplay {
-    fn display(&self) -> String;
-}
+use crate::ToolResultDisplay;
 
 impl ToolResultDisplay for ListCatalogsResult {
     fn display(&self) -> String {

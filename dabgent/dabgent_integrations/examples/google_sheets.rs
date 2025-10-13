@@ -1,6 +1,9 @@
 use anyhow::Result;
 use clap::Parser;
-use dabgent_integrations::GoogleSheetsClient;
+use dabgent_integrations::{
+    FetchSpreadsheetDataRequest, GetSpreadsheetMetadataRequest, GoogleSheetsClient,
+    ReadRangeRequest, ToolResultDisplay,
+};
 
 #[derive(Parser)]
 #[command(name = "google-sheets-example")]
@@ -39,18 +42,12 @@ async fn main() -> Result<()> {
 
     // Get spreadsheet metadata
     println!("\n=== Spreadsheet Metadata ===");
-    match client.get_spreadsheet_metadata(&args.url).await {
+    let request = GetSpreadsheetMetadataRequest {
+        url_or_id: args.url.clone(),
+    };
+    match client.get_spreadsheet_metadata(&request).await {
         Ok(metadata) => {
-            println!("Title: {}", metadata.title);
-            println!("Number of sheets: {}", metadata.sheet_count);
-
-            println!("\nSheets:");
-            for sheet in &metadata.sheets {
-                println!(
-                    "  - {} (ID: {}, {}x{} cells)",
-                    sheet.title, sheet.id, sheet.row_count, sheet.column_count
-                );
-            }
+            println!("{}", metadata.display());
         }
         Err(e) => println!("Error fetching metadata: {}", e),
     }
@@ -64,20 +61,16 @@ async fn main() -> Result<()> {
     // Handle specific range request
     if let Some(range) = &args.range {
         println!("\n=== Reading Specific Range: {} ===", range);
-        match client.read_range(&args.url, range).await {
-            Ok(values) => {
-                println!("Range '{}' contains {} rows", range, values.len());
-
+        let request = ReadRangeRequest {
+            url_or_id: args.url.clone(),
+            range: range.clone(),
+        };
+        match client.read_range(&request).await {
+            Ok(result) => {
                 if args.format == "markdown" {
-                    println!("\n| Row | Values |");
-                    println!("|-----|--------|");
-                    for (i, row) in values.iter().enumerate() {
-                        println!("| {} | {:?} |", i + 1, row);
-                    }
+                    println!("\n{}", result.display());
                 } else {
-                    for (i, row) in values.iter().enumerate() {
-                        println!("  Row {}: {:?}", i + 1, row);
-                    }
+                    println!("{}", result.display());
                 }
             }
             Err(e) => println!("Error reading range '{}': {}", range, e),
@@ -85,31 +78,15 @@ async fn main() -> Result<()> {
     } else {
         // Fetch full spreadsheet data
         println!("\n=== Full Spreadsheet Data ===");
-        match client.fetch_spreadsheet_data(&args.url).await {
+        let request = FetchSpreadsheetDataRequest {
+            url_or_id: args.url.clone(),
+        };
+        match client.fetch_spreadsheet_data(&request).await {
             Ok(data) => {
-                println!("Spreadsheet: {}", data.title);
-                println!("Number of sheets: {}", data.sheets.len());
-
                 if args.format == "markdown" {
                     println!("\n{}", client.to_markdown(&data));
                 } else {
-                    for sheet in &data.sheets {
-                        println!("\nSheet: {} (ID: {})", sheet.title, sheet.id);
-                        println!(
-                            "Values rows: {}, Formulas rows: {}",
-                            sheet.values.len(),
-                            sheet.formulas.len()
-                        );
-
-                        // Show first few rows as sample
-                        for (i, row) in sheet.values.iter().take(5).enumerate() {
-                            println!("  Row {}: {:?}", i + 1, row);
-                        }
-
-                        if sheet.values.len() > 5 {
-                            println!("  ... and {} more rows", sheet.values.len() - 5);
-                        }
-                    }
+                    println!("{}", data.display());
                 }
             }
             Err(e) => println!("Error fetching spreadsheet data: {}", e),
