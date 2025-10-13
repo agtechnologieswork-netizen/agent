@@ -1,17 +1,17 @@
+use crate::helpers::wrap_result;
 use dabgent_agent::processor::databricks::{
     DatabricksDescribeTableArgs, DatabricksExecuteQueryArgs, DatabricksListCatalogsArgs,
     DatabricksListSchemasArgs, DatabricksListTablesArgs,
 };
 use dabgent_integrations::{
     DatabricksRestClient, DescribeTableRequest, ExecuteSqlRequest, ListSchemasRequest,
-    ListTablesRequest, TableInfo,
+    ListTablesRequest,
 };
 use eyre::Result;
 use rmcp::handler::server::router::tool::ToolRouter;
 use rmcp::handler::server::wrapper::Parameters;
-use rmcp::model::{CallToolResult, Content, Implementation, ProtocolVersion, ServerCapabilities, ServerInfo};
+use rmcp::model::{CallToolResult, Implementation, ProtocolVersion, ServerCapabilities, ServerInfo};
 use rmcp::{tool, tool_handler, tool_router, ErrorData, ServerHandler};
-use serde::Serialize;
 use std::sync::Arc;
 
 #[derive(Clone)]
@@ -31,7 +31,6 @@ impl DatabricksProvider {
         })
     }
 
-    // Tool implementation methods
     #[tool(description = "Execute SQL query in Databricks")]
     pub async fn execute_sql(
         &self,
@@ -40,21 +39,7 @@ impl DatabricksProvider {
         let request = ExecuteSqlRequest {
             query: args.query,
         };
-        let result = self
-            .client
-            .execute_sql_request(&request)
-            .await
-            .map_err(|e| ErrorData::internal_error(e.to_string(), None))?;
-
-        let rows: Vec<serde_json::Value> = result
-            .into_iter()
-            .map(|row| serde_json::to_value(row).unwrap())
-            .collect();
-
-        Ok(CallToolResult::success(vec![Content::text(
-            serde_json::to_string_pretty(&ExecuteSqlResult { rows })
-                .map_err(|e| ErrorData::internal_error(e.to_string(), None))?
-        )]))
+        wrap_result(self.client.execute_sql_request(&request).await)
     }
 
     #[tool(description = "List all available Databricks catalogs")]
@@ -62,16 +47,7 @@ impl DatabricksProvider {
         &self,
         Parameters(_args): Parameters<DatabricksListCatalogsArgs>,
     ) -> Result<CallToolResult, ErrorData> {
-        let catalogs = self
-            .client
-            .list_catalogs()
-            .await
-            .map_err(|e| ErrorData::internal_error(e.to_string(), None))?;
-
-        Ok(CallToolResult::success(vec![Content::text(
-            serde_json::to_string_pretty(&ListCatalogsResult { catalogs })
-                .map_err(|e| ErrorData::internal_error(e.to_string(), None))?
-        )]))
+        wrap_result(self.client.list_catalogs().await)
     }
 
     #[tool(description = "List all schemas in a Databricks catalog with pagination support")]
@@ -81,25 +57,11 @@ impl DatabricksProvider {
     ) -> Result<CallToolResult, ErrorData> {
         let request = ListSchemasRequest {
             catalog_name: args.catalog_name,
+            filter: args.filter,
+            limit: args.limit,
+            offset: args.offset,
         };
-        let mut schemas = self
-            .client
-            .list_schemas_request(&request)
-            .await
-            .map_err(|e| ErrorData::internal_error(e.to_string(), None))?;
-
-        // Apply filter if provided
-        if let Some(filter) = &args.filter {
-            let filter_lower = filter.to_lowercase();
-            schemas.retain(|s| s.to_lowercase().contains(&filter_lower));
-        }
-
-        let (schemas, pagination) = apply_pagination(schemas, args.limit, args.offset);
-
-        Ok(CallToolResult::success(vec![Content::text(
-            serde_json::to_string_pretty(&ListSchemasResult { schemas, pagination })
-                .map_err(|e| ErrorData::internal_error(e.to_string(), None))?
-        )]))
+        wrap_result(self.client.list_schemas_request(&request).await)
     }
 
     #[tool(description = "List tables in a Databricks catalog and schema")]
@@ -112,16 +74,7 @@ impl DatabricksProvider {
             schema_name: args.schema_name,
             exclude_inaccessible: args.exclude_inaccessible,
         };
-        let tables = self
-            .client
-            .list_tables_request(&request)
-            .await
-            .map_err(|e| ErrorData::internal_error(e.to_string(), None))?;
-
-        Ok(CallToolResult::success(vec![Content::text(
-            serde_json::to_string_pretty(&ListTablesResult { tables })
-                .map_err(|e| ErrorData::internal_error(e.to_string(), None))?
-        )]))
+        wrap_result(self.client.list_tables_request(&request).await)
     }
 
     #[tool(
@@ -135,16 +88,7 @@ impl DatabricksProvider {
             table_full_name: args.table_full_name,
             sample_size: args.sample_size,
         };
-        let details = self
-            .client
-            .describe_table_request(&request)
-            .await
-            .map_err(|e| ErrorData::internal_error(e.to_string(), None))?;
-
-        Ok(CallToolResult::success(vec![Content::text(
-            serde_json::to_string_pretty(&details)
-                .map_err(|e| ErrorData::internal_error(e.to_string(), None))?
-        )]))
+        wrap_result(self.client.describe_table_request(&request).await)
     }
 }
 
@@ -166,48 +110,4 @@ impl ServerHandler for DatabricksProvider {
             ),
         }
     }
-}
-
-// Helper for pagination
-fn apply_pagination<T>(items: Vec<T>, limit: usize, offset: usize) -> (Vec<T>, String) {
-    let total = items.len();
-    let paginated: Vec<T> = items.into_iter().skip(offset).take(limit).collect();
-    let shown = paginated.len();
-
-    let pagination_info = if total > limit + offset {
-        format!(
-            "Showing {} items (offset {}, limit {}). Total: {}",
-            shown, offset, limit, total
-        )
-    } else if offset > 0 {
-        format!("Showing {} items (offset {}). Total: {}", shown, offset, total)
-    } else if total > limit {
-        format!("Showing {} items (limit {}). Total: {}", shown, limit, total)
-    } else {
-        format!("Showing all {} items", total)
-    };
-
-    (paginated, pagination_info)
-}
-
-// Response types
-#[derive(Serialize)]
-pub struct ExecuteSqlResult {
-    pub rows: Vec<serde_json::Value>,
-}
-
-#[derive(Serialize)]
-pub struct ListCatalogsResult {
-    pub catalogs: Vec<String>,
-}
-
-#[derive(Serialize)]
-pub struct ListSchemasResult {
-    pub schemas: Vec<String>,
-    pub pagination: String,
-}
-
-#[derive(Serialize)]
-pub struct ListTablesResult {
-    pub tables: Vec<TableInfo>,
 }

@@ -71,6 +71,37 @@ struct SchemaSummary {
 }
 
 // ============================================================================
+// Helper Functions
+// ============================================================================
+
+pub fn apply_pagination<T>(items: Vec<T>, limit: usize, offset: usize) -> (Vec<T>, String) {
+    let total = items.len();
+    let paginated: Vec<T> = items.into_iter().skip(offset).take(limit).collect();
+    let shown = paginated.len();
+
+    let pagination_info = if total > limit + offset {
+        format!(
+            "Showing {} items (offset {}, limit {}). Total: {}",
+            shown, offset, limit, total
+        )
+    } else if offset > 0 {
+        format!(
+            "Showing {} items (offset {}). Total: {}",
+            shown, offset, total
+        )
+    } else if total > limit {
+        format!(
+            "Showing {} items (limit {}). Total: {}",
+            shown, limit, total
+        )
+    } else {
+        format!("Showing all {} items", total)
+    };
+
+    (paginated, pagination_info)
+}
+
+// ============================================================================
 // Request Types
 // ============================================================================
 
@@ -82,6 +113,16 @@ pub struct ExecuteSqlRequest {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ListSchemasRequest {
     pub catalog_name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub filter: Option<String>,
+    #[serde(default = "default_limit")]
+    pub limit: usize,
+    #[serde(default)]
+    pub offset: usize,
+}
+
+fn default_limit() -> usize {
+    1000
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -140,6 +181,12 @@ pub struct TableInfo {
     pub table_type: String,
     pub owner: Option<String>,
     pub comment: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ListSchemasResult {
+    pub schemas: Vec<String>,
+    pub pagination: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -512,8 +559,18 @@ impl DatabricksRestClient {
     pub async fn list_schemas_request(
         &self,
         request: &ListSchemasRequest,
-    ) -> Result<Vec<String>> {
-        self.list_schemas(&request.catalog_name).await
+    ) -> Result<ListSchemasResult> {
+        let mut schemas = self.list_schemas(&request.catalog_name).await?;
+
+        // Apply filter if provided
+        if let Some(filter) = &request.filter {
+            let filter_lower = filter.to_lowercase();
+            schemas.retain(|s| s.to_lowercase().contains(&filter_lower));
+        }
+
+        let (schemas, pagination) = apply_pagination(schemas, request.limit, request.offset);
+
+        Ok(ListSchemasResult { schemas, pagination })
     }
 
     pub async fn list_schemas(&self, catalog_name: &str) -> Result<Vec<String>> {

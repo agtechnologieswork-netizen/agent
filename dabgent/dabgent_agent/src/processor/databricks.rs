@@ -75,33 +75,6 @@ pub struct FinishDelegationArgs {
 // Helper Functions
 // ============================================================================
 
-fn apply_pagination<T>(items: Vec<T>, limit: usize, offset: usize) -> (Vec<T>, String) {
-    let total = items.len();
-    let paginated: Vec<T> = items.into_iter().skip(offset).take(limit).collect();
-    let shown = paginated.len();
-
-    let pagination_info = if total > limit + offset {
-        format!(
-            "Showing {} items (offset {}, limit {}). Total: {}",
-            shown, offset, limit, total
-        )
-    } else if offset > 0 {
-        format!(
-            "Showing {} items (offset {}). Total: {}",
-            shown, offset, total
-        )
-    } else if total > limit {
-        format!(
-            "Showing {} items (limit {}). Total: {}",
-            shown, limit, total
-        )
-    } else {
-        format!("Showing all {} items", total)
-    };
-
-    (paginated, pagination_info)
-}
-
 fn format_value(value: &Value) -> String {
     match value {
         Value::String(s) => s.clone(),
@@ -268,16 +241,13 @@ impl DatabricksTool for DatabricksListSchemas {
     ) -> Result<Result<Self::Output, Self::Error>> {
         let request = ListSchemasRequest {
             catalog_name: args.catalog_name.clone(),
+            filter: args.filter.clone(),
+            limit: args.limit,
+            offset: args.offset,
         };
         match client.list_schemas_request(&request).await {
-            Ok(mut schemas) => {
-                // Apply filter if provided
-                if let Some(filter) = &args.filter {
-                    let filter_lower = filter.to_lowercase();
-                    schemas.retain(|s| s.to_lowercase().contains(&filter_lower));
-                }
-
-                if schemas.is_empty() {
+            Ok(result) => {
+                if result.schemas.is_empty() {
                     let message = if args.filter.is_some() {
                         format!(
                             "No schemas found in catalog '{}' matching filter.",
@@ -288,11 +258,8 @@ impl DatabricksTool for DatabricksListSchemas {
                     };
                     Ok(Ok(message))
                 } else {
-                    let (paginated_schemas, pagination_info) =
-                        apply_pagination(schemas, args.limit, args.offset);
-
-                    let mut lines = vec![pagination_info, String::new()];
-                    for schema in &paginated_schemas {
+                    let mut lines = vec![result.pagination, String::new()];
+                    for schema in &result.schemas {
                         lines.push(format!("• {}", schema));
                     }
                     Ok(Ok(lines.join("\n")))

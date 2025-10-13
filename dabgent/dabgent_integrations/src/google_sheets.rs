@@ -2,17 +2,43 @@ use anyhow::{Result, anyhow};
 use google_sheets4::{Sheets, hyper_rustls, hyper_util};
 use log::{debug, info, warn};
 use regex::Regex;
+use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use yup_oauth2::{ServiceAccountAuthenticator, ServiceAccountKey};
 
-#[derive(Debug, serde::Serialize, serde::Deserialize)]
+// ============================================================================
+// Request Types
+// ============================================================================
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct GetMetadataArgs {
+    pub url_or_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct ReadRangeArgs {
+    pub url_or_id: String,
+    pub range: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct FetchFullArgs {
+    pub url_or_id: String,
+}
+
+// ============================================================================
+// Response Types
+// ============================================================================
+
+#[derive(Debug, Serialize, Deserialize)]
 pub struct SpreadsheetData {
     pub title: String,
     pub spreadsheet_id: String,
     pub sheets: Vec<SheetData>,
 }
 
-#[derive(Debug, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct SheetData {
     pub id: i32,
     pub title: String,
@@ -22,7 +48,7 @@ pub struct SheetData {
     pub column_count: i32,
 }
 
-#[derive(Debug, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct SpreadsheetMetadata {
     pub title: String,
     pub spreadsheet_id: String,
@@ -30,7 +56,7 @@ pub struct SpreadsheetMetadata {
     pub sheets: Vec<SheetMetadata>,
 }
 
-#[derive(Debug, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct SheetMetadata {
     pub id: i32,
     pub title: String,

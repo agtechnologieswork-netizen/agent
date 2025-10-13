@@ -3,8 +3,9 @@ pub mod google_sheets;
 
 pub use databricks::{
     ColumnMetadata, DatabricksRestClient, DescribeTableRequest, ExecuteSqlRequest,
-    ListSchemasRequest, ListTablesRequest, TableDetails, TableInfo,
+    ListSchemasRequest, ListSchemasResult, ListTablesRequest, TableDetails, TableInfo,
 };
 pub use google_sheets::{
-    GoogleSheetsClient, SheetData, SheetMetadata, SpreadsheetData, SpreadsheetMetadata,
+    FetchFullArgs, GetMetadataArgs, GoogleSheetsClient, ReadRangeArgs, SheetData, SheetMetadata,
+    SpreadsheetData, SpreadsheetMetadata,
 };

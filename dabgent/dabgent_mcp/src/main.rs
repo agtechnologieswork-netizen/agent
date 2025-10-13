@@ -1,4 +1,4 @@
-use dabgent_mcp::providers::UnifiedProvider;
+use dabgent_mcp::providers::{DatabricksProvider, GoogleSheetsProvider};
 use eyre::Result;
 use rmcp::transport::stdio;
 use rmcp::ServiceExt;
@@ -20,12 +20,23 @@ async fn main() -> Result<()> {
             .init();
     }
 
-    // always try to initialize all integrations
-    // gracefully skip if credentials are missing
-    let provider = UnifiedProvider::new().await?;
+    // Try to initialize providers based on available credentials
+    // Prioritize Databricks, fall back to Google Sheets
+    if let Ok(provider) = DatabricksProvider::new() {
+        let service = provider.serve(stdio()).await?;
+        service.waiting().await?;
+        return Ok(());
+    }
 
-    let service = provider.serve(stdio()).await?;
-    service.waiting().await?;
+    if let Ok(provider) = GoogleSheetsProvider::new().await {
+        let service = provider.serve(stdio()).await?;
+        service.waiting().await?;
+        return Ok(());
+    }
 
-    Ok(())
+    Err(eyre::eyre!(
+        "No integrations available. Configure at least one:\n\
+         - Databricks: Set DATABRICKS_HOST and DATABRICKS_TOKEN\n\
+         - Google Sheets: Place credentials at ~/.config/gspread/credentials.json"
+    ))
 }
