@@ -81,8 +81,7 @@ impl<ES: EventStore> Callback<TestAggregate> for TestCallback<ES> {
                     .execute(&event.aggregate_id, TestCommand::Decrement(1))
                     .await;
                 let _ = self.tx.send(());
-                result.map_err(Into::into)
-            }
+                result}
             _ => Ok(()),
         }
     }

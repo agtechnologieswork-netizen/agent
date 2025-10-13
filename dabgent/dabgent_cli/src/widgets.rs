@@ -42,7 +42,7 @@ impl<T> Widget for EventList<'_, T> {
 
 pub fn event_as_text<T>(event: &Event<T>) -> Option<Text<'_>> {
     match event {
-        Event::UserCompletion { content } => Some(render_user_message(&content)),
+        Event::UserCompletion { content } => Some(render_user_message(content)),
         Event::AgentCompletion { response } => Some(render_agent_message(response)),
         _ => None,
     }

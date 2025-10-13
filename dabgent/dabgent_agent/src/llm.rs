@@ -1,6 +1,6 @@
+use dabgent_sandbox::FutureBoxed;
 use rig::{client::CompletionClient, completion::CompletionModel};
 use serde::{Deserialize, Serialize};
-use std::pin::Pin;
 use std::time::Duration;
 use tokio::time::sleep;
 
@@ -155,14 +155,14 @@ pub trait LLMClientDyn: Send + Sync {
     fn completion(
         &self,
         completion: Completion,
-    ) -> Pin<Box<dyn Future<Output = eyre::Result<CompletionResponse>> + Send + '_>>;
+    ) -> FutureBoxed<'_, eyre::Result<CompletionResponse>>;
 }
 
 impl<T: LLMClient> LLMClientDyn for T {
     fn completion(
         &self,
         completion: Completion,
-    ) -> Pin<Box<dyn Future<Output = eyre::Result<CompletionResponse>> + Send + '_>> {
+    ) -> FutureBoxed<'_, eyre::Result<CompletionResponse>> {
         Box::pin(self.completion(completion))
     }
 }

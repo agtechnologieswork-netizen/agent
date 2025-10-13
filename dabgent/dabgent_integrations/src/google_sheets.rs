@@ -158,11 +158,10 @@ impl GoogleSheetsClient {
         let re = Regex::new(r"/spreadsheets/d/([a-zA-Z0-9-_]+)")
             .map_err(|e| anyhow!("Failed to compile regex: {}", e))?;
 
-        if let Some(captures) = re.captures(url_or_id) {
-            if let Some(id) = captures.get(1) {
+        if let Some(captures) = re.captures(url_or_id)
+            && let Some(id) = captures.get(1) {
                 return Ok(id.as_str().to_string());
             }
-        }
 
         Err(anyhow!(
             "Could not extract spreadsheet ID from: {}",

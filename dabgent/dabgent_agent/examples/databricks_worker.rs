@@ -264,7 +264,7 @@ impl<ES: EventStore> Link<ES> for DatabricksLink {
     ) -> Option<(String, Command<DatabricksCommand>)> {
         match &envelope.data {
             Event::ToolCalls { calls } => {
-                if let Some(call) = self.trigger_call_opt(&calls) {
+                if let Some(call) = self.trigger_call_opt(calls) {
                     let worker_id = format!("databricks_{}", call.id);
                     return Some((
                         worker_id,

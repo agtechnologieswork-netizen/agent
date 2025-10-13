@@ -8,6 +8,9 @@ use tokio::sync::{Mutex, broadcast, mpsc};
 
 const WAKE_CHANNEL_SIZE: usize = 100;
 
+// TODO: consider extracting to a common place
+type FutureBoxed<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
+
 pub trait Callback<A: Aggregate>: Send {
     fn process(&mut self, event: &Envelope<A>) -> impl Future<Output = Result<()>> + Send;
     fn boxed(self) -> Box<dyn CallbackDyn<A>>
@@ -27,17 +30,11 @@ pub trait EventHandler<A: Aggregate, ES: EventStore>: Send {
 }
 
 pub trait CallbackDyn<A: Aggregate>: Send {
-    fn process<'a>(
-        &'a mut self,
-        event: &'a Envelope<A>,
-    ) -> Pin<Box<dyn Future<Output = Result<()>> + Send + 'a>>;
+    fn process<'a>(&'a mut self, event: &'a Envelope<A>) -> FutureBoxed<'a, Result<()>>;
 }
 
 impl<A: Aggregate, T: Callback<A>> CallbackDyn<A> for T {
-    fn process<'a>(
-        &'a mut self,
-        event: &'a Envelope<A>,
-    ) -> Pin<Box<dyn Future<Output = Result<()>> + Send + 'a>> {
+    fn process<'a>(&'a mut self, event: &'a Envelope<A>) -> FutureBoxed<'a, Result<()>> {
         Box::pin(self.process(event))
     }
 }
@@ -168,7 +165,7 @@ impl<A: Aggregate + 'static, ES: EventStore> Listener<A, ES> {
             while let Some((aggregate_id, from, to)) = task_rx.recv().await {
                 let envelopes = store.load_latest_events(&aggregate_id, from).await?;
                 for envelope in envelopes.iter().filter(|e| e.sequence <= to) {
-                    Self::run_callbacks(&envelope, &callbacks).await?;
+                    Self::run_callbacks(envelope, &callbacks).await?;
                 }
             }
             Ok::<_, eyre::Error>(())
@@ -192,8 +189,8 @@ impl<A: Aggregate + 'static, ES: EventStore> Listener<A, ES> {
                 _ = interval.tick() => {
                     let candidates = self.store.load_sequence_nums::<A>().await?;
                     for (aggregate_id, to) in candidates.iter() {
-                        if let Some(from) = self.process_from(&aggregate_id, *to) {
-                            self.send_task(&task_tx, &aggregate_id, from, *to)?;
+                        if let Some(from) = self.process_from(aggregate_id, *to) {
+                            self.send_task(&task_tx, aggregate_id, from, *to)?;
                         }
                     }
                 },
@@ -206,6 +203,7 @@ impl<A: Aggregate + 'static, ES: EventStore> Listener<A, ES> {
 
     pub async fn run_callbacks(event: &Envelope<A>, callbacks: &[ArcCallback<A>]) -> Result<()> {
         let mut set = tokio::task::JoinSet::new();
+        #[allow(clippy::unnecessary_to_owned)]
         for c in callbacks.iter().cloned() {
             let event = event.clone();
             set.spawn(async move { c.lock().await.process(&event).await });

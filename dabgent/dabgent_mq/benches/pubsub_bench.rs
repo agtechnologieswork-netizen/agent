@@ -142,7 +142,7 @@ async fn benchmark_scenario(
             for event_id in 0..num_events {
                 let ctx = AggregateContext {
                     aggregate_id: format!("aggregate-{}", aggregate_id),
-                    aggregate: BenchAggregate::default(),
+                    aggregate: BenchAggregate,
                     current_sequence: event_id as i64,
                 };
                 store

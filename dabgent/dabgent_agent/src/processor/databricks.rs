@@ -2,12 +2,12 @@ use super::agent::{Agent, AgentState, Command, Event};
 use crate::toolbox::ToolCallExt;
 use dabgent_integrations::databricks::DatabricksRestClient;
 use dabgent_mq::{Envelope, EventHandler, EventStore, Handler};
+use dabgent_sandbox::FutureBoxed;
 use eyre::Result;
 use rig::message::{ToolCall, ToolResult};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::future::Future;
-use std::pin::Pin;
 use std::sync::Arc;
 
 // ============================================================================
@@ -130,7 +130,7 @@ pub trait DatabricksToolDyn: Send + Sync {
         &'a self,
         args: serde_json::Value,
         client: &'a DatabricksRestClient,
-    ) -> Pin<Box<dyn Future<Output = DatabricksToolDynResult> + Send + 'a>>;
+    ) -> FutureBoxed<'a, DatabricksToolDynResult>;
 }
 
 impl<T: DatabricksTool> DatabricksToolDyn for T {
@@ -146,7 +146,7 @@ impl<T: DatabricksTool> DatabricksToolDyn for T {
         &'a self,
         args: serde_json::Value,
         client: &'a DatabricksRestClient,
-    ) -> Pin<Box<dyn Future<Output = DatabricksToolDynResult> + Send + 'a>> {
+    ) -> FutureBoxed<'a, DatabricksToolDynResult> {
         Box::pin(async move {
             match serde_json::from_value::<<Self as DatabricksTool>::Args>(args) {
                 Ok(args) => {
@@ -462,19 +462,19 @@ impl DatabricksTool for DatabricksDescribeTable {
                     }
                 }
 
-                if let Some(sample) = &details.sample_data {
-                    if !sample.is_empty() {
-                        lines.push(format!("\nSample Data ({} rows):", sample.len()));
-                        for (i, row) in sample.iter().enumerate().take(5) {
-                            let row_str: Vec<String> = row
-                                .iter()
-                                .map(|(k, v)| format!("{}: {}", k, format_value(v)))
-                                .collect();
-                            lines.push(format!("  Row {}: {}", i + 1, row_str.join(", ")));
-                        }
-                        if sample.len() > 5 {
-                            lines.push("...".to_string());
-                        }
+                if let Some(sample) = &details.sample_data
+                    && !sample.is_empty()
+                {
+                    lines.push(format!("\nSample Data ({} rows):", sample.len()));
+                    for (i, row) in sample.iter().enumerate().take(5) {
+                        let row_str: Vec<String> = row
+                            .iter()
+                            .map(|(k, v)| format!("{}: {}", k, format_value(v)))
+                            .collect();
+                        lines.push(format!("  Row {}: {}", i + 1, row_str.join(", ")));
+                    }
+                    if sample.len() > 5 {
+                        lines.push("...".to_string());
                     }
                 }
 
@@ -632,12 +632,15 @@ impl DatabricksToolHandler {
     fn match_tool<'a>(
         &'a self,
         call: &'a ToolCall,
-    ) -> Option<(&'a ToolCall, &'a Box<dyn DatabricksToolDyn>)> {
+    ) -> Option<(&'a ToolCall, &'a dyn DatabricksToolDyn)> {
         self.get_tool(&call.function.name).map(|tool| (call, tool))
     }
 
-    fn get_tool(&self, name: &str) -> Option<&Box<dyn DatabricksToolDyn>> {
-        self.tools.iter().find(|t| t.name() == name)
+    fn get_tool(&self, name: &str) -> Option<&dyn DatabricksToolDyn> {
+        self.tools
+            .iter()
+            .find(|t| t.name() == name)
+            .map(AsRef::as_ref)
     }
 
     pub fn definitions(&self) -> Vec<rig::completion::ToolDefinition> {
