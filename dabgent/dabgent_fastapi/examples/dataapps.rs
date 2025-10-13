@@ -154,11 +154,11 @@ impl DataAppsAgent {
     }
 
     fn is_done(&self, results: &[ToolResult]) -> bool {
-        self.done_call_id.as_ref().map_or(false, |id| {
+        self.done_call_id.as_ref().is_some_and(|id| {
             results
                 .iter()
                 .find(|r| &r.id == id)
-                .map_or(false, |r| self.is_success(r))
+                .is_some_and(|r| self.is_success(r))
         })
     }
 }
@@ -206,16 +206,13 @@ impl Agent for DataAppsAgent {
     }
 
     fn apply(state: &mut AgentState<Self>, event: Event<Self::AgentEvent>) {
-        match &event {
-            Event::ToolCalls { calls } => {
-                for call in calls {
-                    if call.function.name == "done" {
-                        state.agent.done_call_id = Some(call.id.clone());
-                        break;
-                    }
+        if let Event::ToolCalls { calls } = &event {
+            for call in calls {
+                if call.function.name == "done" {
+                    state.agent.done_call_id = Some(call.id.clone());
+                    break;
                 }
             }
-            _ => {}
         }
         state.apply_shared(event);
     }

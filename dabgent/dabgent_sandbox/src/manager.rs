@@ -9,6 +9,7 @@ struct SandboxManager {
     registry: HashMap<String, DaggerSandbox>,
 }
 
+#[allow(clippy::large_enum_variant)]
 enum ManagerMessage {
     CreateFromDirectory {
         id: String,
@@ -47,7 +48,9 @@ impl SandboxManager {
                 restricted_files,
                 respond_to,
             } => {
-                let result = self.create_sandbox(&id, &host_dir, &dockerfile, restricted_files).await;
+                let result = self
+                    .create_sandbox(&id, &host_dir, &dockerfile, restricted_files)
+                    .await;
                 let _ = respond_to.send(result);
                 true
             }

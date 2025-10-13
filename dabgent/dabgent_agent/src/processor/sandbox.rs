@@ -1,8 +1,8 @@
 use crate::tool::{CtxProvider, Tool};
-use dabgent_sandbox::{DaggerSandbox, Sandbox, SandboxHandle};
+use dabgent_sandbox::{DaggerSandbox, FutureBoxed, Sandbox, SandboxHandle};
 use eyre::Result;
 use serde::{Deserialize, Serialize};
-use std::pin::Pin;
+use std::future::Future;
 
 #[derive(Clone)]
 pub struct TemplateConfig {
@@ -218,7 +218,7 @@ impl Tool for WriteFile {
         args: &Self::Args,
     ) -> Result<Self::Output, Self::Error> {
         let WriteFileArgs { path, contents } = args;
-        match ctx.sandbox.write_file(&path, &contents).await {
+        match ctx.sandbox.write_file(path, contents).await {
             Ok(_) => Ok("success".to_string()),
             Err(e) => Err(format!("Failed to write file '{}': {}", path, e)),
         }
@@ -421,14 +421,14 @@ impl Tool for EditFile {
             find,
             replace,
         } = args;
-        let contents = match ctx.sandbox.read_file(&path).await {
+        let contents = match ctx.sandbox.read_file(path).await {
             Ok(content) => content,
             Err(e) => return Err(format!("Failed to read file '{}': {}", path, e)),
         };
         match contents.matches(find).count() {
             1 => {
-                let contents = contents.replace(find, &replace);
-                match ctx.sandbox.write_file(&path, &contents).await {
+                let contents = contents.replace(find, replace);
+                match ctx.sandbox.write_file(path, &contents).await {
                     Ok(_) => Ok("success".to_string()),
                     Err(e) => Err(format!("Failed to write file '{}': {}", path, e)),
                 }
@@ -504,14 +504,14 @@ pub trait ValidatorDyn: Send + Sync {
     fn run<'a>(
         &'a self,
         sandbox: &'a mut DaggerSandbox,
-    ) -> Pin<Box<dyn Future<Output = Result<Result<(), String>>> + Send + 'a>>;
+    ) -> FutureBoxed<'a, Result<Result<(), String>>>;
 }
 
 impl<T: Validator + Send + Sync + 'static> ValidatorDyn for T {
     fn run<'a>(
         &'a self,
         sandbox: &'a mut DaggerSandbox,
-    ) -> Pin<Box<dyn Future<Output = Result<Result<(), String>>> + Send + 'a>> {
+    ) -> FutureBoxed<'a, Result<Result<(), String>>> {
         Box::pin(self.run(sandbox))
     }
 }

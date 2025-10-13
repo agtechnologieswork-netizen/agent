@@ -42,10 +42,7 @@ where
             terminal.draw(|frame| frame.render_widget(&mut self, frame.area()))?;
             match self.events.next().await? {
                 CliEvent::Tick => self.tick(),
-                CliEvent::Crossterm(event) => match event {
-                    crossterm::event::Event::Key(key_event) => self.handle_key_events(key_event)?,
-                    _ => {}
-                },
+                CliEvent::Crossterm(event) => if let crossterm::event::Event::Key(key_event) = event { self.handle_key_events(key_event)? },
                 CliEvent::Agent(event) => {
                     self.history.push(event);
                     if self.auto_scroll && !self.history.is_empty() {

@@ -53,11 +53,11 @@ impl BasicAgent {
     }
 
     fn is_done(&self, results: &[ToolResult]) -> bool {
-        self.done_call_id.as_ref().map_or(false, |id| {
+        self.done_call_id.as_ref().is_some_and(|id| {
             results
                 .iter()
                 .find(|r| &r.id == id)
-                .map_or(false, |r| self.is_success(r))
+                .is_some_and(|r| self.is_success(r))
         })
     }
 }

@@ -38,7 +38,7 @@ where
         handler: &Handler<L::AggregateA, ES>,
         envelope: &Envelope<L::AggregateA>,
     ) -> Result<()> {
-        if let Some((aggregate_id, command)) = self.link.forward(&envelope, handler).await {
+        if let Some((aggregate_id, command)) = self.link.forward(envelope, handler).await {
             self.handler_b
                 .execute_with_metadata(&aggregate_id, command, envelope.metadata.clone())
                 .await?;
@@ -66,7 +66,7 @@ where
         handler: &Handler<L::AggregateB, ES>,
         envelope: &Envelope<L::AggregateB>,
     ) -> Result<()> {
-        if let Some((aggregate_id, command)) = self.link.backward(&envelope, &handler).await {
+        if let Some((aggregate_id, command)) = self.link.backward(envelope, handler).await {
             self.handler_a
                 .execute_with_metadata(&aggregate_id, command, envelope.metadata.clone())
                 .await?;

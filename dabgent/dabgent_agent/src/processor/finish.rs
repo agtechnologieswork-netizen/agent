@@ -75,11 +75,10 @@ impl FinishHandler {
         events: &[Event<T>],
     ) -> Result<()> {
         for event in events {
-            if let Event::AgentCompletion { response } = event {
-                if response.finish_reason == FinishReason::ToolUse {
+            if let Event::AgentCompletion { response } = event
+                && response.finish_reason == FinishReason::ToolUse {
                     self.replay_tool_calls(sandbox, response).await?;
                 }
-            }
         }
         Ok(())
     }
@@ -94,13 +93,11 @@ impl FinishHandler {
                 let tool_name = &call.function.name;
                 let args = call.function.arguments.clone();
 
-                if let Some(tool) = self.tools.iter().find(|t| t.name() == *tool_name) {
-                    if tool.needs_replay() {
-                        if let Err(e) = tool.call(args, sandbox).await {
+                if let Some(tool) = self.tools.iter().find(|t| t.name() == *tool_name)
+                    && tool.needs_replay()
+                        && let Err(e) = tool.call(args, sandbox).await {
                             tracing::warn!("Failed tool call during replay {}: {:?}", tool_name, e);
                         }
-                    }
-                }
             }
         }
         Ok(())
