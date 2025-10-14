@@ -9,6 +9,7 @@ on:
 env:
   ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
   GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+  CARGO_REGISTRIES_CRATES_IO_PROTOCOL: sparse
 
 jobs:
   rust-checks:
@@ -25,15 +26,9 @@ jobs:
           components: clippy
 
       - name: Cache cargo dependencies
-        uses: actions/cache@v3
+        uses: Swatinem/rust-cache@v2
         with:
-          path: |
-            ~/.cargo/bin/
-            ~/.cargo/registry/index/
-            ~/.cargo/registry/cache/
-            ~/.cargo/git/db/
-            dabgent/target/
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          workspaces: dabgent
 
       - name: Run cargo check all targets
         working-directory: ./dabgent
@@ -55,21 +50,18 @@ jobs:
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
 
+      - name: Install cargo-nextest
+        uses: taiki-e/install-action@nextest
+
       - name: Cache cargo dependencies
-        uses: actions/cache@v3
+        uses: Swatinem/rust-cache@v2
         with:
-          path: |
-            ~/.cargo/bin/
-            ~/.cargo/registry/index/
-            ~/.cargo/registry/cache/
-            ~/.cargo/git/db/
-            dabgent/target/
-          key: ${{ runner.os }}-cargo-test-${{ hashFiles('**/Cargo.lock') }}
+          workspaces: dabgent
 
       - name: Run unit tests
         working-directory: ./dabgent
-        run: cargo test --lib --bins --workspace
+        run: cargo nextest run --lib --bins --workspace
 
       - name: Run integration tests
         working-directory: ./dabgent
-        run: cargo test --workspace --test '*'
+        run: cargo nextest run --tests --workspace
