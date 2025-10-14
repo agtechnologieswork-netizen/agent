@@ -29,3 +29,4 @@ dabgent_agent = { path = "../dabgent_agent" }
 
 [dev-dependencies]
 rmcp-in-process-transport = "0.2.0"
+tempfile = "3"

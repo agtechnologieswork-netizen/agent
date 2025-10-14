@@ -7,7 +7,9 @@
 //!
 //! Run with: cargo run --example client
 
-use dabgent_mcp::providers::{CombinedProvider, DatabricksProvider, GoogleSheetsProvider};
+use dabgent_mcp::providers::{
+    CombinedProvider, DatabricksProvider, FilesystemProvider, GoogleSheetsProvider,
+};
 use eyre::Result;
 use rmcp::model::CallToolRequestParam;
 use rmcp::ServiceExt;
@@ -25,12 +27,14 @@ async fn main() -> Result<()> {
     // initialize providers
     let databricks = DatabricksProvider::new().ok();
     let google_sheets = GoogleSheetsProvider::new().await.ok();
+    let filesystem = FilesystemProvider::new().ok();
 
-    let provider = CombinedProvider::new(databricks, google_sheets).map_err(|_| {
+    let provider = CombinedProvider::new(databricks, google_sheets, filesystem).map_err(|_| {
         eyre::eyre!(
             "No integrations available. Configure at least one:\n\
              - Databricks: Set DATABRICKS_HOST and DATABRICKS_TOKEN\n\
-             - Google Sheets: Place credentials at ~/.config/gspread/credentials.json"
+             - Google Sheets: Place credentials at ~/.config/gspread/credentials.json\n\
+             - Filesystem: Always available"
         )
     })?;
 
