@@ -1,7 +1,9 @@
 pub mod databricks;
+pub mod filesystem;
 pub mod google_sheets;
 
 pub use databricks::DatabricksProvider;
+pub use filesystem::FilesystemProvider;
 pub use google_sheets::GoogleSheetsProvider;
 
 use eyre::Result;
@@ -17,19 +19,22 @@ use std::sync::Arc;
 pub struct CombinedProvider {
     databricks: Option<Arc<DatabricksProvider>>,
     google_sheets: Option<Arc<GoogleSheetsProvider>>,
+    filesystem: Option<Arc<FilesystemProvider>>,
 }
 
 impl CombinedProvider {
     pub fn new(
         databricks: Option<DatabricksProvider>,
         google_sheets: Option<GoogleSheetsProvider>,
+        filesystem: Option<FilesystemProvider>,
     ) -> Result<Self> {
-        if databricks.is_none() && google_sheets.is_none() {
+        if databricks.is_none() && google_sheets.is_none() && filesystem.is_none() {
             return Err(eyre::eyre!("at least one provider must be available"));
         }
         Ok(Self {
             databricks: databricks.map(Arc::new),
             google_sheets: google_sheets.map(Arc::new),
+            filesystem: filesystem.map(Arc::new),
         })
     }
 }
@@ -42,6 +47,9 @@ impl ServerHandler for CombinedProvider {
         }
         if self.google_sheets.is_some() {
             providers.push("Google Sheets");
+        }
+        if self.filesystem.is_some() {
+            providers.push("Filesystem");
         }
 
         ServerInfo {
@@ -85,6 +93,15 @@ impl ServerHandler for CombinedProvider {
             }
         }
 
+        if let Some(ref filesystem) = self.filesystem {
+            if let Ok(result) = filesystem
+                .call_tool(params.clone(), context.clone())
+                .await
+            {
+                return Ok(result);
+            }
+        }
+
         Err(ErrorData::invalid_params(
             format!("unknown tool: {}", params.name),
             None,
@@ -106,6 +123,12 @@ impl ServerHandler for CombinedProvider {
 
         if let Some(ref google_sheets) = self.google_sheets {
             if let Ok(result) = google_sheets.list_tools(params.clone(), context.clone()).await {
+                tools.extend(result.tools);
+            }
+        }
+
+        if let Some(ref filesystem) = self.filesystem {
+            if let Ok(result) = filesystem.list_tools(params.clone(), context.clone()).await {
                 tools.extend(result.tools);
             }
         }

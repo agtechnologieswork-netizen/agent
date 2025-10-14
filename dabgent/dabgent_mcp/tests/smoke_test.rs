@@ -5,54 +5,18 @@
 //! - Basic MCP protocol operations work (list_tools, call_tool)
 //! - At least one provider is available
 
-use dabgent_mcp::providers::{CombinedProvider, DatabricksProvider, GoogleSheetsProvider};
+use dabgent_mcp::providers::{CombinedProvider, FilesystemProvider};
 use eyre::Result;
 use rmcp::ServiceExt;
 use rmcp_in_process_transport::in_process::TokioInProcess;
 
 #[tokio::test]
 async fn smoke_test_mcp_server() -> Result<()> {
-    // set dummy credentials for Databricks if not already set
-    let host_was_set = std::env::var("DATABRICKS_HOST").is_ok();
-    let token_was_set = std::env::var("DATABRICKS_TOKEN").is_ok();
+    // use FilesystemProvider as it requires no credentials
+    let filesystem = FilesystemProvider::new()?;
 
-    if !host_was_set {
-        unsafe {
-            std::env::set_var("DATABRICKS_HOST", "https://dummy.databricks.com");
-        }
-    }
-    if !token_was_set {
-        unsafe {
-            std::env::set_var("DATABRICKS_TOKEN", "dummy_token_for_smoke_test");
-        }
-    }
-
-    // initialize providers
-    let databricks = match DatabricksProvider::new() {
-        Ok(provider) => {
-            eprintln!("Databricks provider initialized successfully");
-            Some(provider)
-        }
-        Err(e) => {
-            eprintln!("Failed to initialize Databricks provider: {}", e);
-            None
-        }
-    };
-
-    let google_sheets = match GoogleSheetsProvider::new().await {
-        Ok(provider) => {
-            eprintln!("Google Sheets provider initialized successfully");
-            Some(provider)
-        }
-        Err(e) => {
-            eprintln!("Failed to initialize Google Sheets provider: {}", e);
-            None
-        }
-    };
-
-    // at least one provider must be available
-    let provider = CombinedProvider::new(databricks, google_sheets)
-        .expect("At least one integration must be configured for smoke test");
+    // create provider (no need to try other providers for smoke test)
+    let provider = CombinedProvider::new(None, None, Some(filesystem))?;
 
     // create in-process service
     let tokio_in_process = TokioInProcess::new(provider).await?;
@@ -72,18 +36,6 @@ async fn smoke_test_mcp_server() -> Result<()> {
 
     // cleanup
     service.cancel().await?;
-
-    // remove dummy env vars if we set them
-    if !host_was_set {
-        unsafe {
-            std::env::remove_var("DATABRICKS_HOST");
-        }
-    }
-    if !token_was_set {
-        unsafe {
-            std::env::remove_var("DATABRICKS_TOKEN");
-        }
-    }
 
     Ok(())
 }
