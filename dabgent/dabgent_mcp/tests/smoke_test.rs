@@ -17,15 +17,38 @@ async fn smoke_test_mcp_server() -> Result<()> {
     let token_was_set = std::env::var("DATABRICKS_TOKEN").is_ok();
 
     if !host_was_set {
-        std::env::set_var("DATABRICKS_HOST", "https://dummy.databricks.com");
+        unsafe {
+            std::env::set_var("DATABRICKS_HOST", "https://dummy.databricks.com");
+        }
     }
     if !token_was_set {
-        std::env::set_var("DATABRICKS_TOKEN", "dummy_token_for_smoke_test");
+        unsafe {
+            std::env::set_var("DATABRICKS_TOKEN", "dummy_token_for_smoke_test");
+        }
     }
 
     // initialize providers
-    let databricks = DatabricksProvider::new().ok();
-    let google_sheets = GoogleSheetsProvider::new().await.ok();
+    let databricks = match DatabricksProvider::new() {
+        Ok(provider) => {
+            eprintln!("Databricks provider initialized successfully");
+            Some(provider)
+        }
+        Err(e) => {
+            eprintln!("Failed to initialize Databricks provider: {}", e);
+            None
+        }
+    };
+
+    let google_sheets = match GoogleSheetsProvider::new().await {
+        Ok(provider) => {
+            eprintln!("Google Sheets provider initialized successfully");
+            Some(provider)
+        }
+        Err(e) => {
+            eprintln!("Failed to initialize Google Sheets provider: {}", e);
+            None
+        }
+    };
 
     // at least one provider must be available
     let provider = CombinedProvider::new(databricks, google_sheets)
@@ -52,10 +75,14 @@ async fn smoke_test_mcp_server() -> Result<()> {
 
     // remove dummy env vars if we set them
     if !host_was_set {
-        std::env::remove_var("DATABRICKS_HOST");
+        unsafe {
+            std::env::remove_var("DATABRICKS_HOST");
+        }
     }
     if !token_was_set {
-        std::env::remove_var("DATABRICKS_TOKEN");
+        unsafe {
+            std::env::remove_var("DATABRICKS_TOKEN");
+        }
     }
 
     Ok(())
