@@ -1,8 +1,8 @@
 use crate::tool::{CtxProvider, Tool};
-use dabgent_sandbox::{DaggerSandbox, FutureBoxed, Sandbox, SandboxHandle};
+use dabgent_sandbox::{DaggerSandbox, Sandbox, SandboxHandle};
 use eyre::Result;
+use futures::future::BoxFuture;
 use serde::{Deserialize, Serialize};
-use std::future::Future;
 
 #[derive(Clone)]
 pub struct TemplateConfig {
@@ -504,14 +504,14 @@ pub trait ValidatorDyn: Send + Sync {
     fn run<'a>(
         &'a self,
         sandbox: &'a mut DaggerSandbox,
-    ) -> FutureBoxed<'a, Result<Result<(), String>>>;
+    ) -> BoxFuture<'a, Result<Result<(), String>>>;
 }
 
 impl<T: Validator + Send + Sync + 'static> ValidatorDyn for T {
     fn run<'a>(
         &'a self,
         sandbox: &'a mut DaggerSandbox,
-    ) -> FutureBoxed<'a, Result<Result<(), String>>> {
+    ) -> BoxFuture<'a, Result<Result<(), String>>> {
         Box::pin(self.run(sandbox))
     }
 }

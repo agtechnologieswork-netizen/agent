@@ -24,6 +24,7 @@ pub enum Command<T> {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "event_type")]
 pub enum Event<T> {
     UserCompletion {
         content: rig::OneOrMany<rig::message::UserContent>,

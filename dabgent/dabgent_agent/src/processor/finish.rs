@@ -1,7 +1,7 @@
 use super::agent::{Agent, AgentState, Command, Event};
-use super::tools::TemplateConfig;
+use super::sandbox::{SandboxCtx, TemplateConfig};
 use crate::llm::FinishReason;
-use crate::toolbox::ToolDyn;
+use crate::tool::ToolDyn;
 use dabgent_mq::listener::EventHandler;
 use dabgent_mq::{Envelope, EventStore, Handler};
 use dabgent_sandbox::{DaggerSandbox, Sandbox, SandboxDyn, SandboxHandle};
@@ -19,7 +19,7 @@ pub trait ArtifactPreparer: Send + Sync {
 pub struct FinishHandler {
     sandbox_handle: SandboxHandle,
     export_path: String,
-    tools: Vec<Box<dyn ToolDyn>>,
+    tools: Vec<Box<dyn ToolDyn<SandboxCtx>>>,
     template_config: TemplateConfig,
 }
 
@@ -27,7 +27,7 @@ impl FinishHandler {
     pub fn new(
         sandbox_handle: SandboxHandle,
         export_path: String,
-        tools: Vec<Box<dyn ToolDyn>>,
+        tools: Vec<Box<dyn ToolDyn<SandboxCtx>>>,
         template_config: TemplateConfig,
     ) -> Self {
         Self {
@@ -76,9 +76,10 @@ impl FinishHandler {
     ) -> Result<()> {
         for event in events {
             if let Event::AgentCompletion { response } = event
-                && response.finish_reason == FinishReason::ToolUse {
-                    self.replay_tool_calls(sandbox, response).await?;
-                }
+                && response.finish_reason == FinishReason::ToolUse
+            {
+                self.replay_tool_calls(sandbox, response).await?;
+            }
         }
         Ok(())
     }
@@ -94,10 +95,10 @@ impl FinishHandler {
                 let args = call.function.arguments.clone();
 
                 if let Some(tool) = self.tools.iter().find(|t| t.name() == *tool_name)
-                    && tool.needs_replay()
-                        && let Err(e) = tool.call(args, sandbox).await {
-                            tracing::warn!("Failed tool call during replay {}: {:?}", tool_name, e);
-                        }
+                    && let Err(e) = tool.call(&args, sandbox).await
+                {
+                    tracing::warn!("Failed tool call during replay {}: {:?}", tool_name, e);
+                }
             }
         }
         Ok(())

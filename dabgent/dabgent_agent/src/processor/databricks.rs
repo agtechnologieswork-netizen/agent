@@ -1,9 +1,9 @@
 use super::agent::{Agent, AgentState, Command, Event};
-use crate::toolbox::ToolCallExt;
+use crate::tool::ToolCallExt;
 use dabgent_integrations::databricks::DatabricksRestClient;
 use dabgent_mq::{Envelope, EventHandler, EventStore, Handler};
-use dabgent_sandbox::FutureBoxed;
 use eyre::Result;
+use futures::future::BoxFuture;
 use rig::message::{ToolCall, ToolResult};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -130,7 +130,7 @@ pub trait DatabricksToolDyn: Send + Sync {
         &'a self,
         args: serde_json::Value,
         client: &'a DatabricksRestClient,
-    ) -> FutureBoxed<'a, DatabricksToolDynResult>;
+    ) -> BoxFuture<'a, DatabricksToolDynResult>;
 }
 
 impl<T: DatabricksTool> DatabricksToolDyn for T {
@@ -146,7 +146,7 @@ impl<T: DatabricksTool> DatabricksToolDyn for T {
         &'a self,
         args: serde_json::Value,
         client: &'a DatabricksRestClient,
-    ) -> FutureBoxed<'a, DatabricksToolDynResult> {
+    ) -> BoxFuture<'a, DatabricksToolDynResult> {
         Box::pin(async move {
             match serde_json::from_value::<<Self as DatabricksTool>::Args>(args) {
                 Ok(args) => {
