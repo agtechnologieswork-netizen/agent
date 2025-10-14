@@ -1,7 +1,4 @@
-use dabgent_mcp::providers::{CombinedProvider, FilesystemProvider};
-use rmcp::model::CallToolRequestParam;
-use rmcp::ServiceExt;
-use rmcp_in_process_transport::in_process::TokioInProcess;
+use dabgent_mcp::providers::IOProvider;
 use std::fs;
 use std::path::Path;
 use tempfile::TempDir;
@@ -10,104 +7,65 @@ use tempfile::TempDir;
 fn verify_template_files(work_dir: &Path) {
     assert!(work_dir.exists(), "work_dir should exist");
 
-    // verify Dockerfile exists in root
-    let dockerfile = work_dir.join("Dockerfile");
-    assert!(dockerfile.exists(), "Dockerfile should exist in work_dir root");
-
     // verify .gitignore exists in root
     let gitignore = work_dir.join(".gitignore");
     assert!(gitignore.exists(), ".gitignore should exist in work_dir root");
+
+    // verify build.sh exists in root
+    let build_sh = work_dir.join("build.sh");
+    assert!(build_sh.exists(), "build.sh should exist in work_dir root");
+
+    // verify client directory exists
+    let client_dir = work_dir.join("client");
+    assert!(client_dir.exists(), "client directory should exist");
+
+    // verify server directory exists
+    let server_dir = work_dir.join("server");
+    assert!(server_dir.exists(), "server directory should exist");
 
     // verify we have some files
     let has_files = work_dir.read_dir().unwrap().count() > 0;
     assert!(has_files, "work_dir should contain files from template");
 }
 
-#[tokio::test]
-async fn test_optimistic() {
+#[test]
+fn test_optimistic() {
     let temp_dir = TempDir::new().unwrap();
     let work_dir = temp_dir.path().join("optimistic_test");
 
-    let filesystem = FilesystemProvider::new().unwrap();
-    let provider = CombinedProvider::new(None, None, Some(filesystem)).unwrap();
-    let tokio_in_process = TokioInProcess::new(provider).await.unwrap();
-    let service = ().serve(tokio_in_process).await.unwrap();
+    let result = IOProvider::initiate_project_impl(&work_dir, false).unwrap();
 
-    let args = serde_json::json!({
-        "work_dir": work_dir.to_string_lossy(),
-        "force_rewrite": false
-    });
-
-    let result = service
-        .call_tool(CallToolRequestParam {
-            name: "initiate_project".into(),
-            arguments: Some(args.as_object().unwrap().clone()),
-        })
-        .await
-        .unwrap();
-
-    // verify success message
-    let content = result.content.first().unwrap();
-    let text = content.as_text().unwrap();
-    assert!(text.text.contains("Successfully copied"));
-    assert!(text.text.contains("from default template"));
+    // verify result
+    assert!(result.files_copied > 0);
+    assert_eq!(result.work_dir, work_dir.display().to_string());
+    assert_eq!(result.template_source, "default template");
 
     // verify files including Dockerfile and .gitignore
     verify_template_files(&work_dir);
-
-    service.cancel().await.unwrap();
 }
 
-#[tokio::test]
-async fn test_force_rewrite() {
+#[test]
+fn test_force_rewrite() {
     let temp_dir = TempDir::new().unwrap();
     let work_dir = temp_dir.path().join("force_rewrite_test");
 
-    let filesystem = FilesystemProvider::new().unwrap();
-    let provider = CombinedProvider::new(None, None, Some(filesystem)).unwrap();
-    let tokio_in_process = TokioInProcess::new(provider).await.unwrap();
-    let service = ().serve(tokio_in_process).await.unwrap();
-
-    let args = serde_json::json!({
-        "work_dir": work_dir.to_string_lossy(),
-        "force_rewrite": false
-    });
-
     // initial copy
-    service
-        .call_tool(CallToolRequestParam {
-            name: "initiate_project".into(),
-            arguments: Some(args.as_object().unwrap().clone()),
-        })
-        .await
-        .unwrap();
+    IOProvider::initiate_project_impl(&work_dir, false).unwrap();
 
-    // read original Dockerfile content
-    let dockerfile_path = work_dir.join("Dockerfile");
-    let original_dockerfile = fs::read_to_string(&dockerfile_path).unwrap();
+    // read original .gitignore content
+    let gitignore_path = work_dir.join(".gitignore");
+    let original_gitignore = fs::read_to_string(&gitignore_path).unwrap();
 
-    // mess with files: add extra file and modify Dockerfile
+    // mess with files: add extra file and modify .gitignore
     fs::write(work_dir.join("extra_file.txt"), "should be deleted").unwrap();
-    fs::write(&dockerfile_path, "modified content").unwrap();
+    fs::write(&gitignore_path, "modified content").unwrap();
     assert!(work_dir.join("extra_file.txt").exists());
 
     // force rewrite
-    let args = serde_json::json!({
-        "work_dir": work_dir.to_string_lossy(),
-        "force_rewrite": true
-    });
+    let result = IOProvider::initiate_project_impl(&work_dir, true).unwrap();
 
-    let result = service
-        .call_tool(CallToolRequestParam {
-            name: "initiate_project".into(),
-            arguments: Some(args.as_object().unwrap().clone()),
-        })
-        .await
-        .unwrap();
-
-    let content = result.content.first().unwrap();
-    let text = content.as_text().unwrap();
-    assert!(text.text.contains("Successfully copied"));
+    // verify result
+    assert!(result.files_copied > 0);
 
     // verify extra file was removed
     assert!(
@@ -115,20 +73,18 @@ async fn test_force_rewrite() {
         "extra_file.txt should be removed by force_rewrite"
     );
 
-    // verify Dockerfile is restored to original
-    let restored_dockerfile = fs::read_to_string(&dockerfile_path).unwrap();
+    // verify .gitignore is restored to original
+    let restored_gitignore = fs::read_to_string(&gitignore_path).unwrap();
     assert_eq!(
-        original_dockerfile, restored_dockerfile,
-        "Dockerfile should be restored to original content"
+        original_gitignore, restored_gitignore,
+        ".gitignore should be restored to original content"
     );
 
     verify_template_files(&work_dir);
-
-    service.cancel().await.unwrap();
 }
 
-#[tokio::test]
-async fn test_pessimistic_no_write_access() {
+#[test]
+fn test_pessimistic_no_write_access() {
     let temp_dir = TempDir::new().unwrap();
     let work_dir = temp_dir.path().join("readonly_test");
 
@@ -143,27 +99,10 @@ async fn test_pessimistic_no_write_access() {
         fs::set_permissions(&work_dir, perms).unwrap();
     }
 
-    let filesystem = FilesystemProvider::new().unwrap();
-    let provider = CombinedProvider::new(None, None, Some(filesystem)).unwrap();
-    let tokio_in_process = TokioInProcess::new(provider).await.unwrap();
-    let service = ().serve(tokio_in_process).await.unwrap();
-
-    let args = serde_json::json!({
-        "work_dir": work_dir.to_string_lossy(),
-        "force_rewrite": false
-    });
-
-    let result = service
-        .call_tool(CallToolRequestParam {
-            name: "initiate_project".into(),
-            arguments: Some(args.as_object().unwrap().clone()),
-        })
-        .await;
+    let result = IOProvider::initiate_project_impl(&work_dir, false);
 
     // should fail with permission error
     assert!(result.is_err(), "should fail due to permission denied");
-
-    service.cancel().await.unwrap();
 
     // cleanup: restore permissions before dropping TempDir
     #[cfg(unix)]

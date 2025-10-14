@@ -5,18 +5,18 @@
 //! - Basic MCP protocol operations work (list_tools, call_tool)
 //! - At least one provider is available
 
-use dabgent_mcp::providers::{CombinedProvider, FilesystemProvider};
+use dabgent_mcp::providers::{CombinedProvider, IOProvider};
 use eyre::Result;
 use rmcp::ServiceExt;
 use rmcp_in_process_transport::in_process::TokioInProcess;
 
 #[tokio::test]
 async fn smoke_test_mcp_server() -> Result<()> {
-    // use FilesystemProvider as it requires no credentials
-    let filesystem = FilesystemProvider::new()?;
+    // use IOProvider as it requires no credentials
+    let io = IOProvider::new()?;
 
     // create provider (no need to try other providers for smoke test)
-    let provider = CombinedProvider::new(None, None, Some(filesystem))?;
+    let provider = CombinedProvider::new(None, None, Some(io))?;
 
     // create in-process service
     let tokio_in_process = TokioInProcess::new(provider).await?;
@@ -33,6 +33,18 @@ async fn smoke_test_mcp_server() -> Result<()> {
     // list tools
     let tools_response = service.list_tools(Default::default()).await?;
     assert!(!tools_response.tools.is_empty(), "Should have at least one tool");
+
+    // verify initiate_project tool is exposed
+    assert!(
+        tools_response.tools.iter().any(|t| t.name == "initiate_project"),
+        "initiate_project tool should be exposed"
+    );
+
+    // verify validate_project tool is exposed
+    assert!(
+        tools_response.tools.iter().any(|t| t.name == "validate_project"),
+        "validate_project tool should be exposed"
+    );
 
     // cleanup
     service.cancel().await?;
