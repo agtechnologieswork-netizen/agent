@@ -1,6 +1,7 @@
 mod common;
 
 use common::{PythonValidator, create_test_store};
+use serial_test::serial;
 use dabgent_agent::llm::{LLMClientDyn, WithRetryExt};
 use dabgent_agent::processor::agent::{Agent, AgentState, Command, Event};
 use dabgent_agent::processor::link::Runtime;
@@ -102,6 +103,7 @@ impl Agent for BasicAgent {
 
 /// Test with Anthropic (Claude)
 #[tokio::test]
+#[serial]
 async fn test_e2e_basic_anthropic() {
     dotenvy::dotenv().ok();
     if std::env::var("ANTHROPIC_API_KEY").is_err() {
@@ -128,6 +130,7 @@ async fn test_e2e_basic_anthropic() {
 
 /// Test with OpenRouter (DeepSeek)
 #[tokio::test]
+#[serial]
 async fn test_e2e_basic_openrouter() {
     dotenvy::dotenv().ok();
     if std::env::var("OPENROUTER_API_KEY").is_err() {
