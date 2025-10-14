@@ -3,30 +3,30 @@ use rmcp::model::CallToolRequestParam;
 use rmcp::ServiceExt;
 use rmcp_in_process_transport::in_process::TokioInProcess;
 use std::fs;
-use std::path::PathBuf;
+use std::path::Path;
+use tempfile::TempDir;
 
-fn setup_work_dir(test_name: &str) -> PathBuf {
-    let temp_dir = std::env::temp_dir();
-    let work_dir = temp_dir.join(format!("test_work_{}", test_name));
-
-    // clean up if exists
-    let _ = fs::remove_dir_all(&work_dir);
-
-    work_dir
-}
-
-fn verify_work_dir_has_basic_files(work_dir: &PathBuf) {
-    // just verify the directory exists and has some files
+// helper to verify expected files in work_dir
+fn verify_template_files(work_dir: &Path) {
     assert!(work_dir.exists(), "work_dir should exist");
 
-    // check for some expected files from template_minimal
+    // verify Dockerfile exists in root
+    let dockerfile = work_dir.join("Dockerfile");
+    assert!(dockerfile.exists(), "Dockerfile should exist in work_dir root");
+
+    // verify .gitignore exists in root
+    let gitignore = work_dir.join(".gitignore");
+    assert!(gitignore.exists(), ".gitignore should exist in work_dir root");
+
+    // verify we have some files
     let has_files = work_dir.read_dir().unwrap().count() > 0;
     assert!(has_files, "work_dir should contain files from template");
 }
 
 #[tokio::test]
-async fn test_normal_copy() {
-    let work_dir = setup_work_dir("normal_copy");
+async fn test_optimistic() {
+    let temp_dir = TempDir::new().unwrap();
+    let work_dir = temp_dir.path().join("optimistic_test");
 
     let filesystem = FilesystemProvider::new().unwrap();
     let provider = CombinedProvider::new(None, None, Some(filesystem)).unwrap();
@@ -52,60 +52,16 @@ async fn test_normal_copy() {
     assert!(text.text.contains("Successfully copied"));
     assert!(text.text.contains("from default template"));
 
-    // verify files
-    verify_work_dir_has_basic_files(&work_dir);
+    // verify files including Dockerfile and .gitignore
+    verify_template_files(&work_dir);
 
-    // cleanup
     service.cancel().await.unwrap();
-    fs::remove_dir_all(&work_dir).unwrap();
-}
-
-#[tokio::test]
-async fn test_copy_twice_without_force() {
-    let work_dir = setup_work_dir("copy_twice");
-
-    let filesystem = FilesystemProvider::new().unwrap();
-    let provider = CombinedProvider::new(None, None, Some(filesystem)).unwrap();
-    let tokio_in_process = TokioInProcess::new(provider).await.unwrap();
-    let service = ().serve(tokio_in_process).await.unwrap();
-
-    let args = serde_json::json!({
-        "work_dir": work_dir.to_string_lossy(),
-        "force_rewrite": false
-    });
-
-    // first copy
-    service
-        .call_tool(CallToolRequestParam {
-            name: "initiate_project".into(),
-            arguments: Some(args.as_object().unwrap().clone()),
-        })
-        .await
-        .unwrap();
-
-    // second copy (should succeed, overwriting files)
-    let result = service
-        .call_tool(CallToolRequestParam {
-            name: "initiate_project".into(),
-            arguments: Some(args.as_object().unwrap().clone()),
-        })
-        .await
-        .unwrap();
-
-    let content = result.content.first().unwrap();
-    let text = content.as_text().unwrap();
-    assert!(text.text.contains("Successfully copied"));
-
-    verify_work_dir_has_basic_files(&work_dir);
-
-    // cleanup
-    service.cancel().await.unwrap();
-    fs::remove_dir_all(&work_dir).unwrap();
 }
 
 #[tokio::test]
 async fn test_force_rewrite() {
-    let work_dir = setup_work_dir("force_rewrite");
+    let temp_dir = TempDir::new().unwrap();
+    let work_dir = temp_dir.path().join("force_rewrite_test");
 
     let filesystem = FilesystemProvider::new().unwrap();
     let provider = CombinedProvider::new(None, None, Some(filesystem)).unwrap();
@@ -117,7 +73,7 @@ async fn test_force_rewrite() {
         "force_rewrite": false
     });
 
-    // first copy
+    // initial copy
     service
         .call_tool(CallToolRequestParam {
             name: "initiate_project".into(),
@@ -126,8 +82,13 @@ async fn test_force_rewrite() {
         .await
         .unwrap();
 
-    // add extra file
+    // read original Dockerfile content
+    let dockerfile_path = work_dir.join("Dockerfile");
+    let original_dockerfile = fs::read_to_string(&dockerfile_path).unwrap();
+
+    // mess with files: add extra file and modify Dockerfile
     fs::write(work_dir.join("extra_file.txt"), "should be deleted").unwrap();
+    fs::write(&dockerfile_path, "modified content").unwrap();
     assert!(work_dir.join("extra_file.txt").exists());
 
     // force rewrite
@@ -154,17 +115,33 @@ async fn test_force_rewrite() {
         "extra_file.txt should be removed by force_rewrite"
     );
 
-    verify_work_dir_has_basic_files(&work_dir);
+    // verify Dockerfile is restored to original
+    let restored_dockerfile = fs::read_to_string(&dockerfile_path).unwrap();
+    assert_eq!(
+        original_dockerfile, restored_dockerfile,
+        "Dockerfile should be restored to original content"
+    );
 
-    // cleanup
+    verify_template_files(&work_dir);
+
     service.cancel().await.unwrap();
-    fs::remove_dir_all(&work_dir).unwrap();
 }
 
 #[tokio::test]
-async fn test_with_default_template_path() {
-    // verify the hardcoded default template path works
-    let work_dir = setup_work_dir("default_template");
+async fn test_pessimistic_no_write_access() {
+    let temp_dir = TempDir::new().unwrap();
+    let work_dir = temp_dir.path().join("readonly_test");
+
+    // create work_dir and make it read-only
+    fs::create_dir_all(&work_dir).unwrap();
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mut perms = fs::metadata(&work_dir).unwrap().permissions();
+        perms.set_mode(0o444); // read-only
+        fs::set_permissions(&work_dir, perms).unwrap();
+    }
 
     let filesystem = FilesystemProvider::new().unwrap();
     let provider = CombinedProvider::new(None, None, Some(filesystem)).unwrap();
@@ -173,7 +150,7 @@ async fn test_with_default_template_path() {
 
     let args = serde_json::json!({
         "work_dir": work_dir.to_string_lossy(),
-        "force_rewrite": true
+        "force_rewrite": false
     });
 
     let result = service
@@ -181,18 +158,19 @@ async fn test_with_default_template_path() {
             name: "initiate_project".into(),
             arguments: Some(args.as_object().unwrap().clone()),
         })
-        .await
-        .unwrap();
+        .await;
 
-    let content = result.content.first().unwrap();
-    let text = content.as_text().unwrap();
-    assert!(text.text.contains("Successfully copied"));
-    assert!(text.text.contains("from default template"));
-    assert!(work_dir.exists());
+    // should fail with permission error
+    assert!(result.is_err(), "should fail due to permission denied");
 
-    verify_work_dir_has_basic_files(&work_dir);
-
-    // cleanup
     service.cancel().await.unwrap();
-    fs::remove_dir_all(&work_dir).unwrap();
+
+    // cleanup: restore permissions before dropping TempDir
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mut perms = fs::metadata(&work_dir).unwrap().permissions();
+        perms.set_mode(0o755);
+        fs::set_permissions(&work_dir, perms).unwrap();
+    }
 }

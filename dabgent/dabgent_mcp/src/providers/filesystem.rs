@@ -1,3 +1,4 @@
+use dabgent_integrations::ToolResultDisplay;
 use eyre::Result;
 use rmcp::handler::server::router::tool::ToolRouter;
 use rmcp::handler::server::wrapper::Parameters;
@@ -23,6 +24,22 @@ pub struct InitiateProjectArgs {
     /// If true, wipe the work directory before copying
     #[serde(default)]
     pub force_rewrite: bool,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct InitiateProjectResult {
+    pub files_copied: usize,
+    pub work_dir: String,
+    pub template_source: String,
+}
+
+impl ToolResultDisplay for InitiateProjectResult {
+    fn display(&self) -> String {
+        format!(
+            "Successfully copied {} files from default template to {}",
+            self.files_copied, self.work_dir
+        )
+    }
 }
 
 
@@ -82,13 +99,13 @@ impl FilesystemProvider {
             ErrorData::internal_error(format!("failed to collect template files: {}", e), None)
         })?;
 
-        let message = format!(
-            "Successfully copied {} files from default template to {}",
-            files.len(),
-            args.work_dir
-        );
+        let result = InitiateProjectResult {
+            files_copied: files.len(),
+            work_dir: args.work_dir,
+            template_source: "default template".to_string(),
+        };
 
-        Ok(CallToolResult::success(vec![Content::text(message)]))
+        Ok(CallToolResult::success(vec![Content::text(result.display())]))
     }
 }
 
