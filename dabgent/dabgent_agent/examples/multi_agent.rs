@@ -14,15 +14,11 @@ use dabgent_mq::db::sqlite::SqliteStore;
 use dabgent_mq::{Envelope, Event as MQEvent, EventStore, Handler, PollingQueue};
 use dabgent_sandbox::SandboxHandle;
 use eyre::Result;
-use rig::client::ProviderClient;
+use dabgent_agent::llm::{LLMClient, LLMProvider, WithRetryExt};
 use rig::completion::ToolDefinition;
 use rig::message::{Text, ToolCall, ToolResult, ToolResultContent, UserContent};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
-
-// Configuration constants
-const ANTHROPIC_MODEL: &str = "claude-sonnet-4-5-20250929";
-const OPENROUTER_MODEL: &str = "z-ai/glm-4.6";
 
 // Prompts
 const PLANNER_PROMPT: &str = "
@@ -71,12 +67,6 @@ const USER_PROMPT: &str = "
 Explore the 'main' catalog in Databricks and tell me about any bakery or sales data.
 After that, create a Python script that fetches my IP using ipify.org API.
 ";
-
-#[derive(Debug, Clone, Copy)]
-pub enum LLMProvider {
-    Anthropic,
-    OpenRouter,
-}
 
 #[tokio::main]
 async fn main() {
@@ -177,26 +167,15 @@ fn create_llm_handler(
     preamble: &str,
     tools: Vec<ToolDefinition>,
 ) -> LLMHandler {
-    match provider {
-        LLMProvider::Anthropic => LLMHandler::new(
-            Arc::new(rig::providers::anthropic::Client::from_env()),
-            LLMConfig {
-                model: ANTHROPIC_MODEL.to_string(),
-                preamble: Some(preamble.to_string()),
-                tools: Some(tools),
-                ..Default::default()
-            },
-        ),
-        LLMProvider::OpenRouter => LLMHandler::new(
-            Arc::new(rig::providers::openrouter::Client::from_env()),
-            LLMConfig {
-                model: OPENROUTER_MODEL.to_string(),
-                preamble: Some(preamble.to_string()),
-                tools: Some(tools),
-                ..Default::default()
-            },
-        ),
-    }
+    LLMHandler::new(
+        provider.client_from_env_raw().with_retry().into_arc(),
+        LLMConfig {
+            model: provider.default_model().to_string(),
+            preamble: Some(preamble.to_string()),
+            tools: Some(tools),
+            ..Default::default()
+        },
+    )
 }
 
 // ============================================================================

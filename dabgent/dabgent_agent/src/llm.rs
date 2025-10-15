@@ -1,6 +1,8 @@
 use dabgent_sandbox::FutureBoxed;
 use rig::{client::CompletionClient, completion::CompletionModel};
 use serde::{Deserialize, Serialize};
+use std::future::Future;
+use std::sync::Arc;
 use std::time::Duration;
 use tokio::time::sleep;
 
@@ -137,17 +139,17 @@ pub enum FinishReason {
     Other(String),
 }
 
-pub trait LLMClient: Clone + Send + Sync {
+pub trait LLMClient: Send + Sync {
     fn completion(
         &self,
         completion: Completion,
     ) -> impl Future<Output = eyre::Result<CompletionResponse>> + Send;
 
-    fn boxed(self) -> Box<dyn LLMClientDyn>
+    fn into_arc(self) -> Arc<dyn LLMClientDyn>
     where
         Self: Sized + 'static,
     {
-        Box::new(self)
+        Arc::new(self)
     }
 }
 
@@ -164,6 +166,22 @@ impl<T: LLMClient> LLMClientDyn for T {
         completion: Completion,
     ) -> FutureBoxed<'_, eyre::Result<CompletionResponse>> {
         Box::pin(self.completion(completion))
+    }
+}
+
+impl LLMClient for Box<dyn LLMClientDyn> {
+    fn completion(
+        &self,
+        completion: Completion,
+    ) -> impl Future<Output = eyre::Result<CompletionResponse>> + Send {
+        self.as_ref().completion(completion)
+    }
+
+    fn into_arc(self) -> Arc<dyn LLMClientDyn>
+    where
+        Self: Sized + 'static,
+    {
+        self.into()
     }
 }
 
@@ -248,6 +266,69 @@ fn jitter_ms(base_ms: u64) -> u64 {
     let pct = 50 + (nanos % 101);
     let jittered = base_ms.saturating_mul(pct).saturating_div(100);
     jittered.min(MAX_BACKOFF_MS)
+}
+
+/// Factory for LLM Clients
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LLMProvider {
+    Anthropic,
+    Gemini,
+    OpenRouter,
+}
+
+impl LLMProvider {
+    pub fn name(&self) -> &str {
+        match self {
+            LLMProvider::Anthropic => "Anthropic",
+            LLMProvider::Gemini => "Gemini",
+            LLMProvider::OpenRouter => "OpenRouter",
+        }
+    }
+
+    pub fn default_model(&self) -> &str {
+        match self {
+            LLMProvider::Anthropic => "claude-sonnet-4-5-20250929",
+            LLMProvider::Gemini => "gemini-2.5-flash",
+            LLMProvider::OpenRouter => "deepseek/deepseek-v3.2-exp",
+        }
+    }
+
+    pub fn api_key_env_var(&self) -> &str {
+        match self {
+            LLMProvider::Anthropic => "ANTHROPIC_API_KEY",
+            LLMProvider::Gemini => "GEMINI_API_KEY",
+            LLMProvider::OpenRouter => "OPENROUTER_API_KEY",
+        }
+    }
+
+    /// Panics if the corresponding API key environment variable is not set.
+    /// To gracefully fail while creating the client use `client_from_env()` instead.
+    pub fn client_from_env_raw(&self) -> Box<dyn LLMClientDyn> {
+        use rig::client::ProviderClient;
+        match self {
+            LLMProvider::Anthropic => Box::new(rig::providers::anthropic::Client::from_env()),
+            LLMProvider::Gemini => Box::new(rig::providers::gemini::Client::from_env()),
+            LLMProvider::OpenRouter => Box::new(rig::providers::openrouter::Client::from_env()),
+        }
+    }
+
+    /// Returns an error if the corresponding API key environment variable is not set
+    pub fn client_from_env(&self) -> Result<Box<dyn LLMClientDyn>, String> {
+        use std::env;
+        let api_key_env_var = self.api_key_env_var();
+        env::var(api_key_env_var)
+            .map_err(|e| match e {
+                env::VarError::NotPresent => format!("env var {api_key_env_var} not set"),
+                env::VarError::NotUnicode(_) => {
+                    format!("env var {api_key_env_var} does not contain a valid Unicode")
+                }
+            })
+            .map(|_| self.client_from_env_raw())
+    }
+
+    pub fn is_api_key_env_var_set(&self) -> bool {
+        std::env::var(self.api_key_env_var()).is_ok()
+    }
 }
 
 impl LLMClient for rig::providers::anthropic::Client {

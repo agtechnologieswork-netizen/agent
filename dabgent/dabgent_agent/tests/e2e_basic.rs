@@ -1,7 +1,7 @@
 mod common;
 
 use common::{PythonValidator, create_test_store};
-use dabgent_agent::llm::{LLMClientDyn, WithRetryExt};
+use dabgent_agent::llm::{LLMClient, LLMProvider, WithRetryExt};
 use dabgent_agent::processor::agent::{Agent, AgentState, Command, Event};
 use dabgent_agent::processor::link::Runtime;
 use dabgent_agent::processor::llm::{LLMConfig, LLMHandler};
@@ -12,10 +12,8 @@ use dabgent_agent::toolbox::basic::toolset;
 use dabgent_mq::{Event as MQEvent, EventStore};
 use dabgent_sandbox::SandboxHandle;
 use eyre::Result;
-use rig::client::ProviderClient;
 use rig::message::{ToolResult, ToolResultContent};
 use serde::{Deserialize, Serialize};
-use std::sync::Arc;
 use std::time::Duration;
 use tokio::time::timeout;
 
@@ -103,60 +101,53 @@ impl Agent for BasicAgent {
 /// Test with Anthropic (Claude)
 #[tokio::test]
 async fn test_e2e_basic_anthropic() {
-    dotenvy::dotenv().ok();
-    if std::env::var("ANTHROPIC_API_KEY").is_err() {
-        eprintln!("Skipping test_e2e_basic_anthropic: ANTHROPIC_API_KEY not set");
-        return;
-    }
-
-    let result = timeout(
-        Duration::from_secs(180),
-        run_basic_workflow(
-            "claude-sonnet-4-5-20250929",
-            Arc::new(rig::providers::anthropic::Client::from_env().with_retry()),
-            "anthropic_basic",
-        ),
+    test_e2e_basic_impl(
+        "test_e2e_basic_anthropic",
+        LLMProvider::Anthropic,
+        "anthropic_basic",
     )
-    .await;
-
-    match result {
-        Ok(Ok(())) => eprintln!("✓ E2E test completed successfully with Anthropic"),
-        Ok(Err(e)) => panic!("E2E test failed: {}", e),
-        Err(_) => panic!("E2E test timed out after 180 seconds"),
-    }
+    .await
 }
 
 /// Test with OpenRouter (DeepSeek)
 #[tokio::test]
+#[ignore] // API performance variability causes timeouts
 async fn test_e2e_basic_openrouter() {
+    test_e2e_basic_impl(
+        "test_e2e_basic_openrouter",
+        LLMProvider::OpenRouter,
+        "openrouter_basic",
+    )
+    .await
+}
+
+async fn test_e2e_basic_impl(test_name: &str, llm_provider: LLMProvider, aggregate_id: &str) {
     dotenvy::dotenv().ok();
-    if std::env::var("OPENROUTER_API_KEY").is_err() {
-        eprintln!("Skipping test_e2e_basic_openrouter: OPENROUTER_API_KEY not set");
+    if !llm_provider.is_api_key_env_var_set() {
+        eprintln!(
+            "Skipping {test_name}: env var {} not set",
+            llm_provider.api_key_env_var()
+        );
         return;
     }
 
     let result = timeout(
         Duration::from_secs(180),
-        run_basic_workflow(
-            "deepseek/deepseek-v3.2-exp",
-            Arc::new(rig::providers::openrouter::Client::from_env().with_retry()),
-            "openrouter_basic",
-        ),
+        run_basic_workflow(llm_provider, aggregate_id),
     )
     .await;
 
     match result {
-        Ok(Ok(())) => eprintln!("✓ E2E test completed successfully with OpenRouter"),
+        Ok(Ok(())) => eprintln!(
+            "✓ E2E test completed successfully with {}",
+            llm_provider.name()
+        ),
         Ok(Err(e)) => panic!("E2E test failed: {}", e),
         Err(_) => panic!("E2E test timed out after 180 seconds"),
     }
 }
 
-async fn run_basic_workflow(
-    model: &str,
-    client: Arc<dyn LLMClientDyn>,
-    aggregate_id: &str,
-) -> Result<()> {
+async fn run_basic_workflow(llm_provider: LLMProvider, aggregate_id: &str) -> Result<()> {
     let store = create_test_store().await;
     let tools = toolset(PythonValidator);
 
@@ -172,9 +163,9 @@ IMPORTANT: After the script runs successfully, you MUST call the 'done' tool to 
         "write a simple python script that prints 'Hello World!' and the result of 1+1";
 
     let llm = LLMHandler::new(
-        client,
+        llm_provider.client_from_env_raw().with_retry().into_arc(),
         LLMConfig {
-            model: model.to_string(),
+            model: llm_provider.default_model().to_string(),
             preamble: Some(system_prompt.to_string()),
             tools: Some(tools.iter().map(|tool| tool.definition()).collect()),
             ..Default::default()

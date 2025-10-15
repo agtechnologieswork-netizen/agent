@@ -1,7 +1,7 @@
 mod common;
 
 use common::{PythonValidator, create_test_store};
-use dabgent_agent::llm::{LLMClientDyn, WithRetryExt};
+use dabgent_agent::llm::{LLMClient, LLMProvider, WithRetryExt};
 use dabgent_agent::processor::agent::{Agent, AgentState, Command, Event};
 use dabgent_agent::processor::link::{Link, Runtime, link_runtimes};
 use dabgent_agent::processor::llm::{LLMConfig, LLMHandler};
@@ -12,11 +12,9 @@ use dabgent_agent::toolbox::{ToolCallExt, basic::toolset};
 use dabgent_mq::{Envelope, Event as MQEvent, EventStore, Handler};
 use dabgent_sandbox::SandboxHandle;
 use eyre::Result;
-use rig::client::ProviderClient;
 use rig::completion::ToolDefinition;
 use rig::message::{ToolCall, ToolResult, ToolResultContent, UserContent};
 use serde::{Deserialize, Serialize};
-use std::sync::Arc;
 use std::time::Duration;
 use tokio::time::timeout;
 
@@ -244,60 +242,53 @@ fn send_task_tool_definition() -> ToolDefinition {
 /// Test planner-worker workflow with Anthropic (Claude)
 #[tokio::test]
 async fn test_e2e_planner_anthropic() {
-    dotenvy::dotenv().ok();
-    if std::env::var("ANTHROPIC_API_KEY").is_err() {
-        eprintln!("Skipping test_e2e_planner_anthropic: ANTHROPIC_API_KEY not set");
-        return;
-    }
-
-    let result = timeout(
-        Duration::from_secs(240),
-        run_planner_workflow(
-            "claude-sonnet-4-5-20250929",
-            Arc::new(rig::providers::anthropic::Client::from_env().with_retry()),
-            "anthropic_planner",
-        ),
+    test_e2e_planner_impl(
+        "test_e2e_planner_anthropic",
+        LLMProvider::Anthropic,
+        "anthropic_planner",
     )
-    .await;
-
-    match result {
-        Ok(Ok(())) => eprintln!("✓ E2E planner test completed successfully with Anthropic"),
-        Ok(Err(e)) => panic!("E2E planner test failed: {}", e),
-        Err(_) => panic!("E2E planner test timed out after 240 seconds"),
-    }
+    .await
 }
 
 /// Test planner-worker workflow with OpenRouter (DeepSeek)
 #[tokio::test]
+#[ignore] // API performance variability causes timeouts
 async fn test_e2e_planner_openrouter() {
+    test_e2e_planner_impl(
+        "test_e2e_planner_openrouter",
+        LLMProvider::OpenRouter,
+        "openrouter_planner",
+    )
+    .await
+}
+
+async fn test_e2e_planner_impl(test_name: &str, llm_provider: LLMProvider, planner_id: &str) {
     dotenvy::dotenv().ok();
-    if std::env::var("OPENROUTER_API_KEY").is_err() {
-        eprintln!("Skipping test_e2e_planner_openrouter: OPENROUTER_API_KEY not set");
+    if !llm_provider.is_api_key_env_var_set() {
+        eprintln!(
+            "Skipping {test_name}: env var {} not set",
+            llm_provider.api_key_env_var()
+        );
         return;
     }
 
     let result = timeout(
         Duration::from_secs(240),
-        run_planner_workflow(
-            "deepseek/deepseek-v3.2-exp",
-            Arc::new(rig::providers::openrouter::Client::from_env().with_retry()),
-            "openrouter_planner",
-        ),
+        run_planner_workflow(llm_provider, planner_id),
     )
     .await;
 
     match result {
-        Ok(Ok(())) => eprintln!("✓ E2E planner test completed successfully with OpenRouter"),
+        Ok(Ok(())) => eprintln!(
+            "✓ E2E planner test completed successfully with {}",
+            llm_provider.name()
+        ),
         Ok(Err(e)) => panic!("E2E planner test failed: {}", e),
         Err(_) => panic!("E2E planner test timed out after 240 seconds"),
     }
 }
 
-async fn run_planner_workflow(
-    model: &str,
-    client: Arc<dyn LLMClientDyn>,
-    planner_id: &str,
-) -> Result<()> {
+async fn run_planner_workflow(llm_provider: LLMProvider, planner_id: &str) -> Result<()> {
     let store = create_test_store().await;
 
     let planner_prompt = "
@@ -316,11 +307,13 @@ IMPORTANT: After the script runs successfully, you MUST call the 'done' tool to 
     let user_prompt =
         "Create a simple Python script that prints 'Hello from E2E Test!' and the result of 5+5";
 
+    let client = llm_provider.client_from_env_raw().with_retry().into_arc();
+
     // Setup planner
     let planner_llm = LLMHandler::new(
         client.clone(),
         LLMConfig {
-            model: model.to_string(),
+            model: llm_provider.default_model().to_string(),
             preamble: Some(planner_prompt.to_string()),
             tools: Some(vec![send_task_tool_definition()]),
             ..Default::default()
@@ -334,7 +327,7 @@ IMPORTANT: After the script runs successfully, you MUST call the 'done' tool to 
     let worker_llm = LLMHandler::new(
         client,
         LLMConfig {
-            model: model.to_string(),
+            model: llm_provider.default_model().to_string(),
             preamble: Some(worker_prompt.to_string()),
             tools: Some(worker_tools.iter().map(|tool| tool.definition()).collect()),
             ..Default::default()

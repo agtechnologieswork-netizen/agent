@@ -1,24 +1,23 @@
 mod common;
 
 use common::{PythonValidator, create_test_store};
+use dabgent_agent::llm::LLMProvider;
 use dabgent_agent::processor::agent::{Agent, AgentState, Command, Event};
 use dabgent_agent::processor::finish::FinishHandler;
 use dabgent_agent::processor::link::Runtime;
 use dabgent_agent::processor::llm::{LLMConfig, LLMHandler};
-use dabgent_agent::processor::tools::{TemplateConfig, ToolHandler};
+use dabgent_agent::processor::tools::{
+    TemplateConfig, ToolHandler, get_dockerfile_dir_from_src_ws,
+};
 use dabgent_agent::processor::utils::LogHandler;
 use dabgent_agent::toolbox::basic::toolset;
 use dabgent_mq::Event as MQEvent;
 use dabgent_sandbox::SandboxHandle;
 use eyre::Result;
-use rig::client::ProviderClient;
 use rig::message::ToolResult;
 use serde::{Deserialize, Serialize};
-use std::sync::Arc;
 use std::time::Duration;
 use tempfile::TempDir;
-
-const MODEL: &str = "claude-sonnet-4-20250514";
 
 const SYSTEM_PROMPT: &str = "
 You are a python software engineer.
@@ -112,22 +111,18 @@ impl Agent for Basic {
     }
 }
 
-fn get_llm_client() -> Option<Arc<rig::providers::anthropic::Client>> {
-    if std::env::var("ANTHROPIC_API_KEY").is_ok() {
-        Some(Arc::new(rig::providers::anthropic::Client::from_env()))
-    } else {
-        None
-    }
-}
-
 #[tokio::test]
 async fn test_finisher_e2e_with_real_dagger() -> Result<()> {
     dotenvy::dotenv().ok();
 
+    let llm_provider = LLMProvider::Anthropic;
     // Skip test if no LLM API key available
-    let Some(llm_client) = get_llm_client() else {
-        eprintln!("Skipping test_finisher_e2e_with_real_dagger: No ANTHROPIC_API_KEY set");
-        return Ok(());
+    let llm_client = match llm_provider.client_from_env().map(Into::into) {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!("Skipping test_finisher_e2e_with_real_dagger: {e}");
+            return Ok(());
+        }
     };
 
     tracing_subscriber::fmt::init();
@@ -147,7 +142,7 @@ async fn test_finisher_e2e_with_real_dagger() -> Result<()> {
     let llm = LLMHandler::new(
         llm_client,
         LLMConfig {
-            model: MODEL.to_string(),
+            model: llm_provider.default_model().to_string(),
             preamble: Some(SYSTEM_PROMPT.to_string()),
             tools: Some(tools.iter().map(|tool| tool.definition()).collect()),
             ..Default::default()
@@ -156,11 +151,7 @@ async fn test_finisher_e2e_with_real_dagger() -> Result<()> {
 
     // Setup sandbox and template
     let sandbox_handle = SandboxHandle::new(Default::default());
-
-    // Find the examples directory relative to the test
-    let manifest_dir = std::env::var("CARGO_MANIFEST_DIR")?;
-    let examples_dir = std::path::Path::new(&manifest_dir).join("examples");
-    let template_config = TemplateConfig::default_dir(examples_dir.to_str().unwrap());
+    let template_config = TemplateConfig::default_dir(get_dockerfile_dir_from_src_ws());
 
     // Setup tool handler
     let tool_handler = ToolHandler::new(tools, sandbox_handle.clone(), template_config.clone());
