@@ -13,7 +13,11 @@ async fn test_validate_after_initiate() {
     let result = IOProvider::validate_project_impl(work_dir).await.unwrap();
 
     // default template should pass validation
-    assert!(result.success, "default template should pass validation");
+    assert!(
+        result.success,
+        "default template should pass validation. Details: {:?}",
+        result.details
+    );
     assert!(result.details.is_none());
 }
 
