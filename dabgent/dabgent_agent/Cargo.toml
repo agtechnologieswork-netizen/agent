@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-tokio = { version = "1", features = ["full"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "fs", "io-util", "process", "sync", "time"] }
 serde = { version = "1", features = ["derive"] }
 eyre = "0.6"
 chrono = { version = "0.4", features = ["serde"] }
@@ -23,6 +23,7 @@ tempfile = "3.0"
 sha2 = "0.10"
 hex = "0.4"
 regex = "1.0"
+schemars = "1"
 
 [dev-dependencies]
 dagger-sdk = "0.18.16"

@@ -1,5 +1,21 @@
 pub mod databricks;
 pub mod google_sheets;
 
-pub use databricks::DatabricksRestClient;
-pub use google_sheets::GoogleSheetsClient;
+// ============================================================================
+// Shared Display Trait
+// ============================================================================
+
+pub trait ToolResultDisplay {
+    fn display(&self) -> String;
+}
+
+pub use databricks::{
+    ColumnMetadata, DatabricksRestClient, DescribeTableRequest, ExecuteSqlRequest,
+    ExecuteSqlResult, ListCatalogsResult, ListSchemasRequest, ListSchemasResult,
+    ListTablesRequest, ListTablesResult, TableDetails, TableInfo,
+};
+pub use google_sheets::{
+    FetchSpreadsheetDataRequest, GetSpreadsheetMetadataRequest, GoogleSheetsClient,
+    ReadRangeRequest, ReadRangeResult, SheetData, SheetMetadata, SpreadsheetData,
+    SpreadsheetMetadata,
+};

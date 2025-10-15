@@ -223,7 +223,8 @@ IMPORTANT: After the script runs successfully, you MUST call the 'done' tool to 
 
         // Check if runtime has crashed
         if runtime_handle.is_finished() {
-            return Err(eyre::eyre!("Runtime terminated unexpectedly"));
+            let result = runtime_handle.await.expect("runtime task panicked");
+            return Err(eyre::eyre!("Runtime terminated unexpectedly: {:?}", result));
         }
     }
 }

@@ -401,8 +401,13 @@ IMPORTANT: After the script runs successfully, you MUST call the 'done' tool to 
         }
 
         // Check if runtimes have crashed
-        if planner_handle.is_finished() || worker_handle.is_finished() {
-            return Err(eyre::eyre!("Runtime terminated unexpectedly"));
+        if planner_handle.is_finished() {
+            let result = planner_handle.await.expect("planner runtime task panicked");
+            return Err(eyre::eyre!("Planner runtime terminated unexpectedly: {:?}", result));
+        }
+        if worker_handle.is_finished() {
+            let result = worker_handle.await.expect("worker runtime task panicked");
+            return Err(eyre::eyre!("Worker runtime terminated unexpectedly: {:?}", result));
         }
     }
 }
