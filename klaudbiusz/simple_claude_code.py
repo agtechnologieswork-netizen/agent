@@ -2,10 +2,14 @@
 """Simplified Claude Code CLI that spawns dabgent-mcp server."""
 
 import asyncio
+import os
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
+from uuid import UUID, uuid4
 import fire
 import coloredlogs
+from dotenv import load_dotenv
 from claude_agent_sdk import (
     query,
     ClaudeAgentOptions,
@@ -17,11 +21,74 @@ from claude_agent_sdk import (
     TextBlock,
 )
 
+try:
+    import asyncpg  # type: ignore[import-untyped]
+except ImportError:
+    asyncpg = None
+
+
+class TrackerDB:
+    """Simple Neon/Postgres tracker for message logging."""
+
+    def __init__(self, wipe_on_start: bool = True):
+        load_dotenv()
+        self.database_url = os.getenv("DATABASE_URL")
+        self.wipe_on_start = wipe_on_start
+        self.pool = None
+
+    async def init(self) -> None:
+        """Initialize DB connection and schema."""
+        if not self.database_url or not asyncpg:
+            return
+
+        try:
+            self.pool = await asyncpg.create_pool(self.database_url, min_size=1, max_size=5)
+
+            async with self.pool.acquire() as conn:
+                if self.wipe_on_start:
+                    await conn.execute("DROP TABLE IF EXISTS messages")
+
+                await conn.execute("""
+                    CREATE TABLE IF NOT EXISTS messages (
+                        id UUID PRIMARY KEY,
+                        role TEXT NOT NULL,
+                        message TEXT NOT NULL,
+                        datetime TIMESTAMP NOT NULL,
+                        run_id UUID NOT NULL
+                    )
+                """)
+        except Exception as e:
+            print(f"⚠️  DB init failed: {e}", file=sys.stderr)
+            self.pool = None
+
+    async def log(self, run_id: UUID, role: str, message: str) -> None:
+        """Log a message to the database."""
+        if not self.pool:
+            return
+
+        try:
+            async with self.pool.acquire() as conn:
+                await conn.execute(
+                    "INSERT INTO messages (id, role, message, datetime, run_id) VALUES ($1, $2, $3, $4, $5)",
+                    uuid4(),
+                    role,
+                    message,
+                    datetime.now(timezone.utc),
+                    run_id,
+                )
+        except Exception as e:
+            print(f"⚠️  DB log failed: {e}", file=sys.stderr)
+
+    async def close(self) -> None:
+        """Close DB connection pool."""
+        if self.pool:
+            await self.pool.close()
+
 
 class SimplifiedClaudeCode:
     """CLI for running Claude Code with dabgent-mcp integration."""
 
-    def __init__(self):
+    def __init__(self, wipe_db: bool = True):
         """Initialize the CLI."""
         # configure colored logging
         coloredlogs.install(level="INFO")
@@ -33,12 +100,21 @@ class SimplifiedClaudeCode:
         if not self.mcp_manifest.exists():
             raise RuntimeError(f"dabgent-mcp Cargo.toml not found at {self.mcp_manifest}")
 
+        # tracker for DB logging
+        self.tracker = TrackerDB(wipe_on_start=wipe_db)
+        self.run_id: UUID = uuid4()  # will be reset at run_async start
+
     async def run_async(self, prompt: str) -> None:
         """Run the agent with the given prompt.
 
         Args:
             prompt: User prompt for the agent
         """
+        # init tracker and generate run ID
+        await self.tracker.init()
+        self.run_id = uuid4()
+        await self.tracker.log(self.run_id, "system", f"run_id: {self.run_id}, prompt: {prompt}")
+
         # configure MCP server to spawn via cargo run
         options = ClaudeAgentOptions(
             system_prompt={
@@ -75,12 +151,14 @@ class SimplifiedClaudeCode:
 
         try:
             async for message in query(prompt=prompt, options=options):
-                self._log_message(message)
+                await self._log_message(message)
         except Exception as e:
             print(f"\n❌ Error: {e}", file=sys.stderr)
             raise
+        finally:
+            await self.tracker.close()
 
-    def _log_message(self, message) -> None:
+    async def _log_message(self, message) -> None:
         """Log a message with appropriate formatting.
 
         Args:
@@ -97,32 +175,51 @@ class SimplifiedClaudeCode:
             for block in message.content:
                 if isinstance(block, TextBlock):
                     logger.info(f"💬 {block.text}")
+                    await self.tracker.log(self.run_id, "assistant", f"text: {block.text}")
                 elif isinstance(block, ToolUseBlock):
                     # format tool parameters nicely
                     params = ", ".join(f"{k}={v}" for k, v in (block.input or {}).items())
                     logger.info(f"🔧 Tool: {block.name}({truncate(params, 150)})")
+                    await self.tracker.log(self.run_id, "assistant", f"tool_call: {block.name}({params})")
 
         elif isinstance(message, UserMessage):
             for block in message.content:
                 if isinstance(block, ToolResultBlock):
                     if block.is_error:
                         logger.warning(f"❌ Tool error: {truncate(str(block.content))}")
+                        await self.tracker.log(self.run_id, "user", f"tool_error: {block.content}")
                     else:
                         result_text = str(block.content)
                         if result_text:
                             logger.info(f"✅ Tool result: {truncate(result_text)}")
+                            await self.tracker.log(self.run_id, "user", f"tool_result: {result_text}")
 
         elif isinstance(message, ResultMessage):
+            usage = message.usage or {}
+            input_tokens = usage.get("input_tokens", 0)
+            output_tokens = usage.get("output_tokens", 0)
+            cache_creation = usage.get("cache_creation_input_tokens", 0)
+            cache_read = usage.get("cache_read_input_tokens", 0)
+
             logger.info(f"🏁 Session complete: {message.num_turns} turns, ${message.total_cost_usd:.4f}")
+            logger.info(f"   Tokens - in: {input_tokens}, out: {output_tokens}, cache_create: {cache_creation}, cache_read: {cache_read}")
             if message.result:
                 logger.info(f"Final result: {truncate(message.result)}")
 
-    def run(self, prompt: str) -> None:
+            await self.tracker.log(
+                self.run_id,
+                "result",
+                f"complete: turns={message.num_turns}, cost=${message.total_cost_usd:.4f}, tokens_in={input_tokens}, tokens_out={output_tokens}, cache_create={cache_creation}, cache_read={cache_read}, result={message.result or 'N/A'}"
+            )
+
+    def run(self, prompt: str, wipe_db: bool = True) -> None:
         """CLI entry point.
 
         Args:
             prompt: User prompt for the agent
+            wipe_db: Whether to wipe the DB on start (default: True)
         """
+        self.tracker.wipe_on_start = wipe_db
         asyncio.run(self.run_async(prompt))
 
 
