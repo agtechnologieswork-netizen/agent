@@ -52,6 +52,7 @@ class TrackerDB:
                     CREATE TABLE IF NOT EXISTS messages (
                         id UUID PRIMARY KEY,
                         role TEXT NOT NULL,
+                        message_type TEXT NOT NULL,
                         message TEXT NOT NULL,
                         datetime TIMESTAMP NOT NULL,
                         run_id UUID NOT NULL
@@ -61,7 +62,7 @@ class TrackerDB:
             print(f"⚠️  DB init failed: {e}", file=sys.stderr)
             self.pool = None
 
-    async def log(self, run_id: UUID, role: str, message: str) -> None:
+    async def log(self, run_id: UUID, role: str, message_type: str, message: str) -> None:
         """Log a message to the database."""
         if not self.pool:
             return
@@ -69,11 +70,12 @@ class TrackerDB:
         try:
             async with self.pool.acquire() as conn:
                 await conn.execute(
-                    "INSERT INTO messages (id, role, message, datetime, run_id) VALUES ($1, $2, $3, $4, $5)",
+                    "INSERT INTO messages (id, role, message_type, message, datetime, run_id) VALUES ($1, $2, $3, $4, $5, $6)",
                     uuid4(),
                     role,
+                    message_type,
                     message,
-                    datetime.now(timezone.utc),
+                    datetime.now(timezone.utc).replace(tzinfo=None),
                     run_id,
                 )
         except Exception as e:
@@ -113,7 +115,7 @@ class SimplifiedClaudeCode:
         # init tracker and generate run ID
         await self.tracker.init()
         self.run_id = uuid4()
-        await self.tracker.log(self.run_id, "system", f"run_id: {self.run_id}, prompt: {prompt}")
+        await self.tracker.log(self.run_id, "user", "prompt", f"run_id: {self.run_id}, prompt: {prompt}")
 
         # configure MCP server to spawn via cargo run
         options = ClaudeAgentOptions(
@@ -175,24 +177,24 @@ class SimplifiedClaudeCode:
             for block in message.content:
                 if isinstance(block, TextBlock):
                     logger.info(f"💬 {block.text}")
-                    await self.tracker.log(self.run_id, "assistant", f"text: {block.text}")
+                    await self.tracker.log(self.run_id, "assistant", "text", block.text)
                 elif isinstance(block, ToolUseBlock):
                     # format tool parameters nicely
                     params = ", ".join(f"{k}={v}" for k, v in (block.input or {}).items())
                     logger.info(f"🔧 Tool: {block.name}({truncate(params, 150)})")
-                    await self.tracker.log(self.run_id, "assistant", f"tool_call: {block.name}({params})")
+                    await self.tracker.log(self.run_id, "assistant", "tool_call", f"{block.name}({params})")
 
         elif isinstance(message, UserMessage):
             for block in message.content:
                 if isinstance(block, ToolResultBlock):
                     if block.is_error:
                         logger.warning(f"❌ Tool error: {truncate(str(block.content))}")
-                        await self.tracker.log(self.run_id, "user", f"tool_error: {block.content}")
+                        await self.tracker.log(self.run_id, "user", "tool_error", str(block.content))
                     else:
                         result_text = str(block.content)
                         if result_text:
                             logger.info(f"✅ Tool result: {truncate(result_text)}")
-                            await self.tracker.log(self.run_id, "user", f"tool_result: {result_text}")
+                            await self.tracker.log(self.run_id, "user", "tool_result", result_text)
 
         elif isinstance(message, ResultMessage):
             usage = message.usage or {}
@@ -209,7 +211,8 @@ class SimplifiedClaudeCode:
             await self.tracker.log(
                 self.run_id,
                 "result",
-                f"complete: turns={message.num_turns}, cost=${message.total_cost_usd:.4f}, tokens_in={input_tokens}, tokens_out={output_tokens}, cache_create={cache_creation}, cache_read={cache_read}, result={message.result or 'N/A'}"
+                "complete",
+                f"turns={message.num_turns}, cost=${message.total_cost_usd:.4f}, tokens_in={input_tokens}, tokens_out={output_tokens}, cache_create={cache_creation}, cache_read={cache_read}, result={message.result or 'N/A'}"
             )
 
     def run(self, prompt: str, wipe_db: bool = True) -> None:

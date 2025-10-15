@@ -11,6 +11,7 @@ node_modules/
 /dist
 /.next/
 /out/
+server/public
 
 # Environment variables
 .env
