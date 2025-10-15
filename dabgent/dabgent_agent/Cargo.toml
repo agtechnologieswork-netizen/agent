@@ -29,7 +29,6 @@ schemars = "1"
 dagger-sdk = "0.18.16"
 sqlx = { version = "0.8", features = ["postgres", "sqlite", "runtime-tokio", "tls-native-tls", "json", "chrono", "migrate"] }
 dotenvy = "0.15"
-serial_test = "3.2"
 
 [[example]]
 name = "multi_agent"

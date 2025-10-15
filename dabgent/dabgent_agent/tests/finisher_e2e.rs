@@ -1,7 +1,6 @@
 mod common;
 
 use common::{PythonValidator, create_test_store};
-use serial_test::serial;
 use dabgent_agent::processor::agent::{Agent, AgentState, Command, Event};
 use dabgent_agent::processor::finish::FinishHandler;
 use dabgent_agent::processor::link::Runtime;
@@ -122,7 +121,6 @@ fn get_llm_client() -> Option<Arc<rig::providers::anthropic::Client>> {
 }
 
 #[tokio::test]
-#[serial]
 async fn test_finisher_e2e_with_real_dagger() -> Result<()> {
     dotenvy::dotenv().ok();
 
