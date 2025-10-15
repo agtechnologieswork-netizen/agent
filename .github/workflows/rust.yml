@@ -64,5 +64,4 @@ jobs:
 
       - name: Run integration tests
         working-directory: ./dabgent
-        # Run with single thread due to Dagger connection race conditions
-        run: cargo nextest run --tests --workspace --test-threads=1
+        run: cargo nextest run --tests --workspace
