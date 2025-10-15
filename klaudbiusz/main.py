@@ -21,10 +21,15 @@ from claude_agent_sdk import (
     TextBlock,
 )
 
+import logging
+
 try:
     import asyncpg  # type: ignore[import-untyped]
 except ImportError:
     asyncpg = None
+
+logger = logging.getLogger(__name__)
+coloredlogs.install(level="INFO")
 
 
 class TrackerDB:
@@ -63,7 +68,6 @@ class TrackerDB:
             self.pool = None
 
     async def log(self, run_id: UUID, role: str, message_type: str, message: str) -> None:
-        """Log a message to the database."""
         if not self.pool:
             return
 
@@ -88,14 +92,8 @@ class TrackerDB:
 
 
 class SimplifiedClaudeCode:
-    """CLI for running Claude Code with dabgent-mcp integration."""
-
     def __init__(self, wipe_db: bool = True):
-        """Initialize the CLI."""
-        # configure colored logging
-        coloredlogs.install(level="INFO")
-
-        # determine path to dabgent-mcp manifest
+        # make the MCP path less ugly
         self.project_root = Path(__file__).parent.parent
         self.mcp_manifest = self.project_root / "dabgent" / "dabgent_mcp" / "Cargo.toml"
 
@@ -107,11 +105,6 @@ class SimplifiedClaudeCode:
         self.run_id: UUID = uuid4()  # will be reset at run_async start
 
     async def run_async(self, prompt: str) -> None:
-        """Run the agent with the given prompt.
-
-        Args:
-            prompt: User prompt for the agent
-        """
         # init tracker and generate run ID
         await self.tracker.init()
         self.run_id = uuid4()
@@ -122,7 +115,11 @@ class SimplifiedClaudeCode:
             system_prompt={
                 "type": "preset",
                 "preset": "claude_code",
-                "append": "The project should start with initiate_project in ./app/ for scaffolding and validate_project is required to finish the work"
+                "append": """The project should start with initiate_project in ./app/ for scaffolding and validate_project is required to finish the work.\n
+Make sure to add tests for what you're implementing.\n
+Bias towards backend code when the task allows to implement it in multiple places.\n
+Be concise and to the point in your responses.\n
+Use up to 10 tools per call to speed up the process.\n"""
             },
             permission_mode="bypassPermissions",  # auto-accept all tool usage including MCP tools
             disallowed_tools=[
@@ -161,14 +158,6 @@ class SimplifiedClaudeCode:
             await self.tracker.close()
 
     async def _log_message(self, message) -> None:
-        """Log a message with appropriate formatting.
-
-        Args:
-            message: Message to log
-        """
-        import logging
-        logger = logging.getLogger(__name__)
-
         # truncate helper
         def truncate(text: str, max_len: int = 300) -> str:
             return text if len(text) <= max_len else text[:max_len] + "..."
@@ -216,20 +205,12 @@ class SimplifiedClaudeCode:
             )
 
     def run(self, prompt: str, wipe_db: bool = True) -> None:
-        """CLI entry point.
-
-        Args:
-            prompt: User prompt for the agent
-            wipe_db: Whether to wipe the DB on start (default: True)
-        """
         self.tracker.wipe_on_start = wipe_db
         asyncio.run(self.run_async(prompt))
 
 
 def main():
-    """Fire CLI entry point."""
-    cli = SimplifiedClaudeCode()
-    fire.Fire(cli.run)
+    fire.Fire(SimplifiedClaudeCode().run)
 
 
 if __name__ == "__main__":

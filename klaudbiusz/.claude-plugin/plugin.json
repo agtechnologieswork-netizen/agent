@@ -1,0 +1,20 @@
+{
+  "name": "klaudbiusz",
+  "description": "AI agent for generating production-ready data applications with testing, linting and deployment setup",
+  "version": "0.1.0",
+  "author": {
+    "name": "apps codegen team",
+    "email": "eng-appbuild@databricks.com"
+  },
+  "mcpServers": {
+    "klaudbiusz": {
+      "command": "cargo",
+      "args": [
+        "run",
+        "--manifest-path",
+        "${CLAUDE_PLUGIN_ROOT}/../dabgent/dabgent_mcp/Cargo.toml"
+      ],
+      "env": {}
+    }
+  }
+}
