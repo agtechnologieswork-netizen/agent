@@ -1,9 +1,9 @@
 import fire
-from codegen import SimplifiedClaudeCode
+from codegen import AppBuilder
 
 
 def main():
-    fire.Fire(SimplifiedClaudeCode().run)
+    fire.Fire(AppBuilder().run)
 
 
 if __name__ == "__main__":
