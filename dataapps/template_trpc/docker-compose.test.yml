@@ -1,0 +1,32 @@
+services:
+  app:
+    build: .
+    container_name: ${COMPOSE_PROJECT_NAME:-dataapps-test}-app
+    environment:
+      - PORT=8000
+      - CORS_ORIGINS=*
+      - DATABRICKS_HOST=${DATABRICKS_HOST:-}
+      - DATABRICKS_TOKEN=${DATABRICKS_TOKEN:-}
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/healthcheck"]
+      interval: 2s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+    networks:
+      - test-network
+
+  playwright:
+    build: ./tests/playwright
+    container_name: ${COMPOSE_PROJECT_NAME:-dataapps-test}-playwright
+    depends_on:
+      app:
+        condition: service_healthy
+    volumes:
+      - ${SCREENSHOT_DIR:-./screenshots}:/screenshots
+    networks:
+      - test-network
+
+networks:
+  test-network:
+    driver: bridge

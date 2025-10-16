@@ -34,3 +34,6 @@ yarn-error.log*
 # OS files
 .DS_Store
 Thumbs.db
+
+# Screenshots from testing
+screenshots/

@@ -1,12 +1,12 @@
 """Bulk runner for generating multiple apps from hardcoded prompts."""
 
 import json
+import subprocess
 from datetime import datetime
 from pathlib import Path
 from typing import TypedDict
 
 from joblib import Parallel, delayed
-from tqdm import tqdm
 
 from codegen import AppBuilder, GenerationMetrics
 
@@ -16,6 +16,9 @@ class RunResult(TypedDict):
     success: bool
     metrics: GenerationMetrics | None
     error: str | None
+    app_dir: str | None
+    screenshot_path: str | None
+    screenshot_log: str | None
 
 
 PROMPTS = [
@@ -42,14 +45,65 @@ PROMPTS = [
 ]
 
 
+def capture_screenshot(app_dir: str) -> tuple[str | None, str]:
+    """Capture screenshot for generated app by running run-screenshot.sh.
+
+    Returns:
+        Tuple of (screenshot_path, log_output):
+        - screenshot_path: Path to screenshot.png if successful, None otherwise
+        - log_output: Full stdout/stderr from the script execution
+    """
+    app_path = Path(app_dir)
+    screenshot_script = app_path / "run-screenshot.sh"
+
+    if not screenshot_script.exists():
+        log = f"Screenshot script not found at {screenshot_script}"
+        return None, log
+
+    try:
+        result = subprocess.run(
+            ["bash", str(screenshot_script)],
+            cwd=str(app_path),
+            capture_output=True,
+            text=True,
+            timeout=300,  # 5 minute timeout for docker operations
+        )
+
+        log = f"=== STDOUT ===\n{result.stdout}\n\n=== STDERR ===\n{result.stderr}\n\n=== EXIT CODE ===\n{result.returncode}"
+
+        screenshot_path = app_path / "screenshot.png"
+        if result.returncode == 0 and screenshot_path.exists():
+            return str(screenshot_path), log
+        else:
+            return None, log
+
+    except subprocess.TimeoutExpired:
+        log = "Screenshot capture timed out after 5 minutes"
+        return None, log
+    except Exception as e:
+        log = f"Exception during screenshot capture: {type(e).__name__}: {str(e)}"
+        return None, log
+
+
 def run_single_generation(prompt: str, wipe_db: bool = False, use_subagents: bool = False) -> RunResult:
     codegen = AppBuilder(wipe_db=wipe_db, suppress_logs=True, use_subagents=use_subagents)
     metrics = codegen.run(prompt, wipe_db=wipe_db)
+    app_dir = metrics.get("app_dir") if metrics else None
+
+    # capture screenshot if app was generated successfully
+    screenshot_path = None
+    screenshot_log = None
+    if app_dir:
+        screenshot_path, screenshot_log = capture_screenshot(app_dir)
+
     return {
         "prompt": prompt,
         "success": True,
         "metrics": metrics,
         "error": None,
+        "app_dir": app_dir,
+        "screenshot_path": screenshot_path,
+        "screenshot_log": screenshot_log,
     }
 
 
@@ -59,52 +113,98 @@ def main(wipe_db: bool = False, n_jobs: int = -1, use_subagents: bool = False) -
     print(f"Wipe DB: {wipe_db}")
     print(f"Use subagents: {use_subagents}\n")
 
-    with tqdm(total=len(PROMPTS), desc="Generating apps") as pbar:
-        def update_progress(result: RunResult) -> RunResult:
-            pbar.update(1)
-            return result
+    results: list[RunResult] = Parallel(n_jobs=n_jobs, verbose=10)(  # type: ignore[assignment]
+        delayed(run_single_generation)(prompt, wipe_db, use_subagents)
+        for prompt in PROMPTS
+    )
 
-        results = Parallel(n_jobs=n_jobs)(
-            delayed(lambda p: update_progress(run_single_generation(p, wipe_db, use_subagents)))(prompt)
-            for prompt in PROMPTS
-        )
+    successful: list[RunResult] = []
+    failed: list[RunResult] = []
+    for r in results:
+        success = r["success"]
+        if success:
+            successful.append(r)
+        else:
+            failed.append(r)
 
-    successful = [r for r in results if r["success"]]
-    failed = [r for r in results if not r["success"]]
+    successful_with_metrics: list[RunResult] = []
+    for r in successful:
+        metrics = r["metrics"]
+        if metrics is not None:
+            successful_with_metrics.append(r)
 
-    total_cost = sum(r["metrics"]["cost_usd"] for r in successful if r["metrics"])
-    total_input_tokens = sum(r["metrics"]["input_tokens"] for r in successful if r["metrics"])
-    total_output_tokens = sum(r["metrics"]["output_tokens"] for r in successful if r["metrics"])
-    total_turns = sum(r["metrics"]["turns"] for r in successful if r["metrics"])
+    total_cost = 0.0
+    total_input_tokens = 0
+    total_output_tokens = 0
+    total_turns = 0
+    for r in successful_with_metrics:
+        metrics = r["metrics"]
+        assert metrics is not None
+        total_cost += metrics["cost_usd"]
+        total_input_tokens += metrics["input_tokens"]
+        total_output_tokens += metrics["output_tokens"]
+        total_turns += metrics["turns"]
+    # calculate screenshot statistics
+    screenshot_successful = 0
+    screenshot_failed = 0
+    for r in successful:
+        if r["screenshot_path"] is not None:
+            screenshot_successful += 1
+        elif r["app_dir"] is not None:  # only count as failed if app was generated but screenshot failed
+            screenshot_failed += 1
+
     print(f"\n{'=' * 80}")
     print(f"Bulk Generation Summary")
     print(f"{'=' * 80}")
     print(f"Total prompts: {len(PROMPTS)}")
     print(f"Successful: {len(successful)}")
     print(f"Failed: {len(failed)}")
+    print(f"\nScreenshots captured: {screenshot_successful}")
+    print(f"Screenshot failures: {screenshot_failed}")
+    if screenshot_failed > 0:
+        print(f"  (Screenshot logs available in JSON output)")
     print(f"\nTotal cost: ${total_cost:.4f}")
     print(f"Total input tokens: {total_input_tokens}")
     print(f"Total output tokens: {total_output_tokens}")
     print(f"Total turns: {total_turns}")
 
-    if successful:
-        avg_cost = total_cost / len(successful)
-        avg_input = total_input_tokens / len(successful)
-        avg_output = total_output_tokens / len(successful)
-        avg_turns = total_turns / len(successful)
+    if successful_with_metrics:
+        avg_cost = total_cost / len(successful_with_metrics)
+        avg_input = total_input_tokens / len(successful_with_metrics)
+        avg_output = total_output_tokens / len(successful_with_metrics)
+        avg_turns = total_turns / len(successful_with_metrics)
         print(f"\nAverage per generation:")
         print(f"  Cost: ${avg_cost:.4f}")
         print(f"  Input tokens: {avg_input:.0f}")
         print(f"  Output tokens: {avg_output:.0f}")
         print(f"  Turns: {avg_turns:.1f}")
 
-    if failed:
+    if len(failed) > 0:
         print(f"\n{'=' * 80}")
         print(f"Failed generations:")
         print(f"{'=' * 80}")
         for r in failed:
-            print(f"  - {r['prompt'][:50]}...")
-            print(f"    Error: {r['error']}")
+            prompt = r["prompt"]
+            error = r["error"]
+            print(f"  - {prompt[:50]}...")
+            if error is not None:
+                print(f"    Error: {error}")
+
+    if len(successful) > 0:
+        apps_with_dirs: list[tuple[str, str]] = []
+        for r in successful:
+            prompt = r["prompt"]
+            app_dir = r["app_dir"]
+            if app_dir is not None:
+                apps_with_dirs.append((prompt, app_dir))
+
+        if apps_with_dirs:
+            print(f"\n{'=' * 80}")
+            print(f"Generated apps:")
+            print(f"{'=' * 80}")
+            for prompt, app_dir in apps_with_dirs:
+                print(f"  - {prompt[:60]}...")
+                print(f"    Dir: {app_dir}")
 
     print(f"\n{'=' * 80}\n")
 

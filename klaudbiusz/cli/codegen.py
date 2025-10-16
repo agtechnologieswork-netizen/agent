@@ -5,7 +5,7 @@ import sys
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import TYPE_CHECKING, TypedDict
+from typing import TYPE_CHECKING, NotRequired, TypedDict
 from uuid import UUID, uuid4
 
 import coloredlogs
@@ -82,6 +82,7 @@ class GenerationMetrics(TypedDict):
     input_tokens: int
     output_tokens: int
     turns: int
+    app_dir: NotRequired[str | None]
 
 
 class TrackerDB:
@@ -160,6 +161,7 @@ class AppBuilder:
         self.run_id: UUID = uuid4()
         self.use_subagents = use_subagents
         self.suppress_logs = suppress_logs
+        self.app_dir: str | None = None
 
     def _setup_logging(self) -> None:
         if self.suppress_logs:
@@ -252,12 +254,17 @@ Use up to 10 tools per call to speed up the process.\n"""
             async for message in query(prompt=prompt, options=options):
                 await self._log_message(message)
                 if isinstance(message, ResultMessage):
-                    usage = message.usage or {}
+                    if message.total_cost_usd is None:
+                        raise RuntimeError("total_cost_usd is None in ResultMessage")
+                    if message.usage is None:
+                        raise RuntimeError("usage is None in ResultMessage")
+                    usage = message.usage
                     metrics = {
                         "cost_usd": message.total_cost_usd,
                         "input_tokens": usage.get("input_tokens", 0),
                         "output_tokens": usage.get("output_tokens", 0),
                         "turns": message.num_turns,
+                        "app_dir": self.app_dir,
                     }
         except Exception as e:
             if not self.suppress_logs:
@@ -304,6 +311,11 @@ Use up to 10 tools per call to speed up the process.\n"""
                     await self.tracker.log(self.run_id, "assistant", "text", block.text)
                 case ToolUseBlock(name="Task"):
                     await self._log_tool_use(block, truncate)
+                case ToolUseBlock(name="mcp__dabgent__initiate_project"):
+                    # capture app directory from initiate_project tool call
+                    if block.input and "work_dir" in block.input:
+                        self.app_dir = block.input["work_dir"]
+                    await self._log_generic_tool(block, truncate)
                 case ToolUseBlock():
                     await self._log_generic_tool(block, truncate)
 
