@@ -20,18 +20,12 @@ const appRouter = router({
   healthcheck: publicProcedure.query(() => {
     return { status: "ok", timestamp: new Date().toISOString() };
   }),
-  executeQuery: publicProcedure
-    .input(
-      z.object({
-        sql: z.string(),
-        // Optional: pass a zod schema for runtime validation
-        // schema: z.object({ id: z.number(), name: z.string() })
-      })
-    )
-    .query(async ({ input }) => {
-      const client = new DatabricksClient();
-      return await client.executeQuery(input.sql);
-    }),
+  // Add specific data endpoints here
+  // Example:
+  // getUsers: publicProcedure.query(async () => {
+  //   const client = new DatabricksClient();
+  //   return await client.executeQuery("SELECT * FROM users LIMIT 100");
+  // }),
 });
 
 export type AppRouter = typeof appRouter;

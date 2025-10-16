@@ -25,8 +25,8 @@ PROMPTS = [
 ]
 
 
-def run_single_generation(prompt: str, wipe_db: bool = False) -> RunResult:
-    codegen = AppBuilder(wipe_db=wipe_db, suppress_logs=True)
+def run_single_generation(prompt: str, wipe_db: bool = False, use_subagents: bool = False) -> RunResult:
+    codegen = AppBuilder(wipe_db=wipe_db, suppress_logs=True, use_subagents=use_subagents)
     metrics = codegen.run(prompt, wipe_db=wipe_db)
     return {
         "prompt": prompt,
@@ -36,13 +36,14 @@ def run_single_generation(prompt: str, wipe_db: bool = False) -> RunResult:
     }
 
 
-def main(wipe_db: bool = False, n_jobs: int = -1) -> None:
+def main(wipe_db: bool = False, n_jobs: int = -1, use_subagents: bool = False) -> None:
     print(f"Starting bulk generation for {len(PROMPTS)} prompts...")
     print(f"Parallel jobs: {n_jobs}")
-    print(f"Wipe DB: {wipe_db}\n")
+    print(f"Wipe DB: {wipe_db}")
+    print(f"Use subagents: {use_subagents}\n")
 
     results = Parallel(n_jobs=n_jobs)(
-        delayed(run_single_generation)(prompt, wipe_db) for prompt in tqdm(PROMPTS, desc="Generating apps")
+        delayed(run_single_generation)(prompt, wipe_db, use_subagents) for prompt in tqdm(PROMPTS, desc="Generating apps")
     )
 
     successful = [r for r in results if r["success"]]
