@@ -9,6 +9,8 @@ dependencies = [
     "coloredlogs>=15.0.1",
     "asyncpg>=0.30.0",
     "python-dotenv>=1.0.0",
+    "tqdm>=4.66.0",
+    "joblib>=1.4.0",
 ]
 
 [tool.ruff]
