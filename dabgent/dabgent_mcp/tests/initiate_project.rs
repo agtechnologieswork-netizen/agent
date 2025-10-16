@@ -84,6 +84,17 @@ fn test_force_rewrite() {
 }
 
 #[test]
+fn test_force_rewrite_on_missing_directory() {
+    let temp_dir = TempDir::new().unwrap();
+    let work_dir = temp_dir.path().join("missing_force_rewrite");
+
+    let result = IOProvider::initiate_project_impl(&work_dir, Template::Trpc, true).unwrap();
+
+    assert!(result.files_copied > 0);
+    verify_template_files(&work_dir);
+}
+
+#[test]
 fn test_pessimistic_no_write_access() {
     let temp_dir = TempDir::new().unwrap();
     let work_dir = temp_dir.path().join("readonly_test");
