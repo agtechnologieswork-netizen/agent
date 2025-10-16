@@ -15,6 +15,12 @@ use rmcp::service::{RequestContext, RoleServer};
 use rmcp::{ErrorData, ServerHandler};
 use std::sync::Arc;
 
+enum TargetProvider {
+    Databricks(Arc<DatabricksProvider>),
+    GoogleSheets(Arc<GoogleSheetsProvider>),
+    Io(Arc<IOProvider>),
+}
+
 #[derive(Clone)]
 pub struct CombinedProvider {
     databricks: Option<Arc<DatabricksProvider>>,
@@ -36,6 +42,57 @@ impl CombinedProvider {
             google_sheets: google_sheets.map(Arc::new),
             io: io.map(Arc::new),
         })
+    }
+
+    fn resolve_provider(&self, tool_name: &str) -> std::result::Result<TargetProvider, ErrorData> {
+        if tool_name.starts_with("databricks_") {
+            let provider = self.databricks.clone().ok_or_else(|| {
+                ErrorData::invalid_params(
+                    "Databricks provider not configured. Set DATABRICKS_HOST and DATABRICKS_TOKEN.",
+                    None,
+                )
+            })?;
+            return Ok(TargetProvider::Databricks(provider));
+        }
+
+        if tool_name.starts_with("google_sheets_") {
+            let provider = self.google_sheets.clone().ok_or_else(|| {
+                ErrorData::invalid_params(
+                    "Google Sheets provider not configured. Provide credentials at ~/.config/gspread/credentials.json.",
+                    None,
+                )
+            })?;
+            return Ok(TargetProvider::GoogleSheets(provider));
+        }
+
+        if let Some(io) = self.io.clone() {
+            match tool_name {
+                "initiate_project" | "validate_project" => {
+                    return Ok(TargetProvider::Io(io));
+                }
+                _ => {}
+            }
+        }
+
+        let mut configured = Vec::new();
+        if let Some(provider) = &self.databricks {
+            configured.push(TargetProvider::Databricks(Arc::clone(provider)));
+        }
+        if let Some(provider) = &self.google_sheets {
+            configured.push(TargetProvider::GoogleSheets(Arc::clone(provider)));
+        }
+        if let Some(provider) = &self.io {
+            configured.push(TargetProvider::Io(Arc::clone(provider)));
+        }
+
+        if configured.len() == 1 {
+            return Ok(configured.into_iter().next().unwrap());
+        }
+
+        Err(ErrorData::invalid_params(
+            format!("unknown tool: {}", tool_name),
+            None,
+        ))
     }
 }
 
@@ -74,38 +131,11 @@ impl ServerHandler for CombinedProvider {
         params: CallToolRequestParam,
         context: RequestContext<RoleServer>,
     ) -> std::result::Result<CallToolResult, ErrorData> {
-        // route to appropriate provider based on tool name prefix or availability
-        if let Some(ref databricks) = self.databricks {
-            if let Ok(result) = databricks
-                .call_tool(params.clone(), context.clone())
-                .await
-            {
-                return Ok(result);
-            }
+        match self.resolve_provider(&params.name)? {
+            TargetProvider::Databricks(provider) => provider.call_tool(params, context).await,
+            TargetProvider::GoogleSheets(provider) => provider.call_tool(params, context).await,
+            TargetProvider::Io(provider) => provider.call_tool(params, context).await,
         }
-
-        if let Some(ref google_sheets) = self.google_sheets {
-            if let Ok(result) = google_sheets
-                .call_tool(params.clone(), context.clone())
-                .await
-            {
-                return Ok(result);
-            }
-        }
-
-        if let Some(ref io) = self.io {
-            if let Ok(result) = io
-                .call_tool(params.clone(), context.clone())
-                .await
-            {
-                return Ok(result);
-            }
-        }
-
-        Err(ErrorData::invalid_params(
-            format!("unknown tool: {}", params.name),
-            None,
-        ))
     }
 
     async fn list_tools(

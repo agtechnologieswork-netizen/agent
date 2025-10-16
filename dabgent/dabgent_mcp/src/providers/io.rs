@@ -10,6 +10,7 @@ use rmcp::model::{
 use rmcp::{tool, tool_handler, tool_router, ErrorData, ServerHandler};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 
 /// Internal template enum - not exposed via MCP protocol.
@@ -139,8 +140,12 @@ impl IOProvider {
         }
 
         // handle force rewrite
-        if force_rewrite && work_dir.exists() {
-            std::fs::remove_dir_all(work_dir)?;
+        if force_rewrite {
+            match std::fs::remove_dir_all(work_dir) {
+                Ok(_) => {}
+                Err(err) if err.kind() == ErrorKind::NotFound => {}
+                Err(err) => return Err(err.into()),
+            }
         }
 
         // create work directory if it doesn't exist
