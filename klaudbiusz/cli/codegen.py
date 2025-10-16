@@ -221,6 +221,7 @@ Use up to 10 tools per call to speed up the process.\n"""
             permission_mode="bypassPermissions",
             disallowed_tools=disallowed_tools,
             agents=agents,
+            max_turns=75,
             mcp_servers={
                 "dabgent": {
                     "type": "stdio",

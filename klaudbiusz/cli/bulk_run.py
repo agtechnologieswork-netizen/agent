@@ -19,9 +19,26 @@ class RunResult(TypedDict):
 
 
 PROMPTS = [
-    "create a single user todo app with in memory storage",
-    "make a simple +1 counter web app",
-    "build a tool that converts sq feet to square meters, and vice versa",
+    "Build me a dashboard to identify customers who might cancel soon. I think we have customer info and their usage metrics somewhere in the churn or customer schemas.",
+    "I need to see our sales trends across all channels - stores, web, catalog. The data should be in something like sales or revenue tables.",
+    "Can you create a customer clustering view? We have demographics and purchase history somewhere, probably in customer-related tables.",
+    "Make a taxi trip analysis dashboard with fare predictions and route patterns. The trip data should be in some taxi or transportation schema.",
+    "I want to track which products are sitting in our warehouses too long. Check inventory or warehouse tables for stock levels and movement.",
+    "Build a complete customer profile view showing everything about a customer - their orders, preferences, payments. Look in customer and sales schemas.",
+    "Create something that shows which products customers buy together. The purchase data is probably in sales or transactions somewhere.",
+    "I need revenue forecasting with seasonal patterns. Pull historical sales from wherever we keep store or web sales data.",
+    "Build a monitoring system for our ML features - are they drifting? The feature data should be in ML or feature store schemas.",
+    "Compare sales performance across our different channels. Data might be split across store, web, and catalog tables.",
+    "Show me how customer support calls relate to cancellations. Look for support call logs and customer status data.",
+    "Analyze which price points work best for each product category. Check sales and product tables for pricing and revenue.",
+    "I need a supplier scorecard - delivery times, quality, fulfillment rates. The data is probably in supplier or order tables.",
+    "Create a geographic breakdown of sales by region or zip code. Sales and customer address data should have this.",
+    "Calculate our customer acquisition costs by marketing channel. Look at customer sign-ups and promotional data.",
+    "Predict which customers will upgrade or downgrade their contracts. We have customer tiers and usage somewhere.",
+    "Show me which products are actually profitable after returns and discounts. Check sales and returns tables.",
+    "Build a warehouse operations dashboard with fulfillment speed and capacity. Data is in warehouse or inventory schemas.",
+    "Calculate lifetime value for each customer segment. Pull all their historical purchases from sales tables.",
+    "Measure how effective our promotions are. Look at promotion tables and compare sales during and after campaigns.",
 ]
 
 
@@ -42,9 +59,15 @@ def main(wipe_db: bool = False, n_jobs: int = -1, use_subagents: bool = False) -
     print(f"Wipe DB: {wipe_db}")
     print(f"Use subagents: {use_subagents}\n")
 
-    results = Parallel(n_jobs=n_jobs)(
-        delayed(run_single_generation)(prompt, wipe_db, use_subagents) for prompt in tqdm(PROMPTS, desc="Generating apps")
-    )
+    with tqdm(total=len(PROMPTS), desc="Generating apps") as pbar:
+        def update_progress(result: RunResult) -> RunResult:
+            pbar.update(1)
+            return result
+
+        results = Parallel(n_jobs=n_jobs)(
+            delayed(lambda p: update_progress(run_single_generation(p, wipe_db, use_subagents)))(prompt)
+            for prompt in PROMPTS
+        )
 
     successful = [r for r in results if r["success"]]
     failed = [r for r in results if not r["success"]]
