@@ -8,7 +8,7 @@ from typing import TypedDict
 from joblib import Parallel, delayed
 from tqdm import tqdm
 
-from codegen import SimplifiedClaudeCode, GenerationMetrics
+from codegen import AppBuilder, GenerationMetrics
 
 
 class RunResult(TypedDict):
@@ -26,7 +26,7 @@ PROMPTS = [
 
 
 def run_single_generation(prompt: str, wipe_db: bool = False) -> RunResult:
-    codegen = SimplifiedClaudeCode(wipe_db=wipe_db, suppress_logs=True)
+    codegen = AppBuilder(wipe_db=wipe_db, suppress_logs=True)
     metrics = codegen.run(prompt, wipe_db=wipe_db)
     return {
         "prompt": prompt,
