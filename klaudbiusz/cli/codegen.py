@@ -94,7 +94,7 @@ class TrackerDB:
             await self.pool.close()
 
 
-class SimplifiedClaudeCode:
+class AppBuilder:
     def __init__(self, wipe_db: bool = True, suppress_logs: bool = False):
         self.project_root = Path(__file__).parent.parent.parent
         self.mcp_manifest = self.project_root / "dabgent" / "dabgent_mcp" / "Cargo.toml"
