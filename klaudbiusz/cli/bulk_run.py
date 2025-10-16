@@ -1,5 +1,8 @@
 """Bulk runner for generating multiple apps from hardcoded prompts."""
 
+import json
+from datetime import datetime
+from pathlib import Path
 from typing import TypedDict
 
 from joblib import Parallel, delayed
@@ -16,9 +19,9 @@ class RunResult(TypedDict):
 
 
 PROMPTS = [
-    "Create a simple todo app with CRUD operations",
-    "Build a URL shortener service",
-    "Create a markdown previewer",
+    "create a single user todo app with in memory storage",
+    "make a simple +1 counter web app",
+    "build a tool that converts sq feet to square meters, and vice versa",
 ]
 
 
@@ -33,7 +36,7 @@ def run_single_generation(prompt: str, wipe_db: bool = False) -> RunResult:
     }
 
 
-def main(wipe_db: bool = False, n_jobs: int = 1) -> None:
+def main(wipe_db: bool = False, n_jobs: int = -1) -> None:
     print(f"Starting bulk generation for {len(PROMPTS)} prompts...")
     print(f"Parallel jobs: {n_jobs}")
     print(f"Wipe DB: {wipe_db}\n")
@@ -80,6 +83,12 @@ def main(wipe_db: bool = False, n_jobs: int = 1) -> None:
             print(f"    Error: {r['error']}")
 
     print(f"\n{'=' * 80}\n")
+
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    output_file = Path(f"bulk_run_results_{timestamp}.json")
+
+    output_file.write_text(json.dumps(results, indent=2))
+    print(f"Results saved to {output_file}")
 
 
 if __name__ == "__main__":
