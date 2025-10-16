@@ -62,7 +62,7 @@ def capture_screenshot(app_dir: str) -> tuple[str | None, str]:
 
     try:
         result = subprocess.run(
-            ["bash", str(screenshot_script)],
+            ["bash", "./run-screenshot.sh"],
             cwd=str(app_path),
             capture_output=True,
             text=True,
