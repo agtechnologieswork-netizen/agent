@@ -97,15 +97,16 @@ export class DatabricksClient {
     const host = process.env["DATABRICKS_HOST"];
     const token = process.env["DATABRICKS_TOKEN"];
 
-    if (!host || !token) {
+    if (!host) {
       throw new Error(
         "DATABRICKS_HOST and DATABRICKS_TOKEN environment variables must be set"
       );
     }
-
+    // Token is not strictly required as Databricks Apps runtime may provide other auth methods
     this.host = host.startsWith("http") ? host : `https://${host}`;
-    this.token = token;
-  }
+    if (token) {
+      this.token = token;
+    }
 
   private async apiRequest<T>(
     method: string,
