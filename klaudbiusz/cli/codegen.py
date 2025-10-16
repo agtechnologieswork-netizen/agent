@@ -191,7 +191,7 @@ class AppBuilder:
                 )
 
         base_instructions = """The project should start with initiate_project in ./app/$APP_NAME for scaffolding and validate_project is required to finish the work.\n
-Generate the app name from the prompt, keep it short (2-3 words, hyphen-connected), and ensure it is unique.\n
+Generate the app name from the prompt, keep it short (4 words, hyphen-connected), and ensure it is unique.\n
 Make sure to add tests for what you're implementing.\n
 Bias towards backend code when the task allows to implement it in multiple places.\n"""
 
