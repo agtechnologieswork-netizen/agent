@@ -15,35 +15,15 @@ The sidecar is completely independent and generic:
 
 ```bash
 cd screenshot-sidecar
-dagger call screenshot-app \
-  --app-source=../dataapps/template_trpc \
-  export --path=screenshot.png
-```
-
-### With convenience script
-
-```bash
-cd screenshot-sidecar
-./run-screenshot.sh ../dataapps/template_trpc screenshot.png
+dagger call screenshot-app --app-source=../dataapps/template_trpc export --path=screenshot.png
 ```
 
 ### With environment variables
 
-Pass any environment variables your app needs as comma-separated KEY=VALUE pairs:
-
-```bash
-./run-screenshot.sh \
-  ../dataapps/template_trpc \
-  screenshot.png \
-  "PORT=8000,DATABRICKS_HOST=https://workspace.databricks.com,DATABRICKS_TOKEN=secret"
-```
-
-### Direct API call with env vars
-
 ```bash
 dagger call screenshot-app \
   --app-source=../dataapps/template_trpc \
-  --env-vars="PORT=8000,DEBUG=true" \
+  --env-vars="PORT=8000,DATABRICKS_HOST=https://workspace.databricks.com,DATABRICKS_TOKEN=secret" \
   export --path=screenshot.png
 ```
 
@@ -97,5 +77,4 @@ High-level function to build from Dockerfile and screenshot.
   - `screenshot.spec.ts` - Screenshot capture test
   - `playwright.config.ts` - Playwright configuration
   - `package.json` - Playwright dependencies
-- `run-screenshot.sh` - Convenience wrapper script
 - `dagger.json` - Dagger module configuration
