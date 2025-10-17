@@ -1,6 +1,6 @@
 {
-  "name": "screenshot",
-  "engineVersion": "v0.18.16",
+  "name": "screenshot-sidecar",
+  "engineVersion": "v0.19.2",
   "sdk": {
     "source": "typescript"
   },

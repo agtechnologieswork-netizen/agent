@@ -1,19 +1,15 @@
 import { test, chromium } from "@playwright/test";
 import { mkdir } from "fs/promises";
-import { exec } from "child_process";
-import { promisify } from "util";
-
-const execAsync = promisify(exec);
 
 test("capture app screenshot", async () => {
   // ensure screenshots directory exists
   await mkdir("/screenshots", { recursive: true });
 
-  // resolve hostname to IP to avoid SSL protocol errors
-  const { stdout } = await execAsync("getent hosts app | awk '{ print $1 }'");
-  const appIp = stdout.trim();
+  const targetUrl = process.env.TARGET_URL || "/";
+  const targetPort = process.env.TARGET_PORT || "8000";
+  const waitTime = parseInt(process.env.WAIT_TIME || "5000");
 
-  console.log(`Connecting to app at IP: ${appIp}`);
+  console.log(`Navigating to http://app:${targetPort}${targetUrl}`);
 
   const browser = await chromium.launch({
     args: ["--no-sandbox", "--disable-setuid-sandbox"],
@@ -22,16 +18,15 @@ test("capture app screenshot", async () => {
   const page = await browser.newPage();
 
   try {
-    // navigate using IP instead of hostname to avoid SSL protocol errors
-    await page.goto(`http://${appIp}:8000/`, {
+    await page.goto(`http://app:${targetPort}${targetUrl}`, {
       waitUntil: "domcontentloaded",
       timeout: 30000,
     });
 
-    // wait for app to fully load
-    await page.waitForTimeout(20000);
+    // wait for app to load
+    await page.waitForTimeout(waitTime);
 
-    // take screenshot and save to /screenshots
+    // take full page screenshot
     await page.screenshot({
       path: "/screenshots/screenshot.png",
       fullPage: true,

@@ -46,34 +46,33 @@ PROMPTS = [
 
 
 def capture_screenshot(app_dir: str) -> tuple[str | None, str]:
-    """Capture screenshot for generated app by running run-screenshot.sh.
+    """Capture screenshot for generated app using Dagger.
+
+    Runs dagger from the template directory (sidecar pattern) and passes
+    the generated app path as the source parameter.
 
     Returns:
         Tuple of (screenshot_path, log_output):
         - screenshot_path: Path to screenshot.png if successful, None otherwise
-        - log_output: Full stdout/stderr from the script execution
+        - log_output: Full stdout/stderr from the dagger command execution
     """
-    app_path = Path(app_dir)
-    screenshot_script = app_path / "run-screenshot.sh"
-
-    if not screenshot_script.exists():
-        log = f"Screenshot script not found at {screenshot_script}"
-        return None, log
+    app_path = Path(app_dir).resolve()
+    template_path = Path(__file__).parent.parent.parent / "dataapps" / "template_trpc"
+    screenshot_dest = app_path / "screenshot.png"
 
     try:
         result = subprocess.run(
-            ["bash", "./run-screenshot.sh"],
-            cwd=str(app_path),
+            ["dagger", "call", "screenshot", f"--source={app_path}", "export", f"--path={screenshot_dest}"],
+            cwd=str(template_path),
             capture_output=True,
             text=True,
-            timeout=300,  # 5 minute timeout for docker operations
+            timeout=300,  # 5 minute timeout for dagger operations
         )
 
         log = f"=== STDOUT ===\n{result.stdout}\n\n=== STDERR ===\n{result.stderr}\n\n=== EXIT CODE ===\n{result.returncode}"
 
-        screenshot_path = app_path / "screenshot.png"
-        if result.returncode == 0 and screenshot_path.exists():
-            return str(screenshot_path), log
+        if result.returncode == 0 and screenshot_dest.exists():
+            return str(screenshot_dest), log
         else:
             return None, log
 
@@ -114,8 +113,7 @@ def main(wipe_db: bool = False, n_jobs: int = -1, use_subagents: bool = False) -
     print(f"Use subagents: {use_subagents}\n")
 
     results: list[RunResult] = Parallel(n_jobs=n_jobs, verbose=10)(  # type: ignore[assignment]
-        delayed(run_single_generation)(prompt, wipe_db, use_subagents)
-        for prompt in PROMPTS
+        delayed(run_single_generation)(prompt, wipe_db, use_subagents) for prompt in PROMPTS
     )
 
     successful: list[RunResult] = []
