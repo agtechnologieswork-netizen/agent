@@ -4,6 +4,8 @@ import express from "express";
 import "dotenv/config";
 import superjson from "superjson";
 import path from "node:path";
+import { z } from "zod";
+import { DatabricksClient } from "./databricks";
 
 const STATIC_DIR = path.join(__dirname, "..", "public");
 
@@ -18,6 +20,12 @@ const appRouter = router({
   healthcheck: publicProcedure.query(() => {
     return { status: "ok", timestamp: new Date().toISOString() };
   }),
+  // Add specific data endpoints here
+  // Example:
+  // getUsers: publicProcedure.query(async () => {
+  //   const client = new DatabricksClient();
+  //   return await client.executeQuery("SELECT * FROM users LIMIT 100");
+  // }),
 });
 
 export type AppRouter = typeof appRouter;
