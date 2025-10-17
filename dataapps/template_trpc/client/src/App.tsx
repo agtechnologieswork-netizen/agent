@@ -1,4 +1,3 @@
-import './App.css';
 import { useState, useEffect } from 'react';
 import { trpc } from './utils/trpc';
 
@@ -13,32 +12,22 @@ function App() {
   }, []);
 
   return (
-    <div>
-      <div className="gradient"></div>
-      <div className="grid"></div>
-      <div className="container">
-        <h1 className="title">tRPC Template</h1>
-        <p className="description">
-          Your tRPC app is running!
-        </p>
-        {health && (
-          <div style={{ marginTop: '2rem', padding: '1rem', background: 'rgba(0,255,0,0.1)', borderRadius: '8px' }}>
-            <p>✓ Server Status: {health.status}</p>
-            <p>Timestamp: {health.timestamp}</p>
-          </div>
-        )}
-        {error && (
-          <div style={{ marginTop: '2rem', padding: '1rem', background: 'rgba(255,0,0,0.1)', borderRadius: '8px' }}>
-            <p>✗ Error: {error}</p>
-          </div>
-        )}
-        <footer className="footer">
-          Built with ❤️ by{" "}
-          <a href="https://app.build" target="_blank" className="footer-link">
-            app.build
-          </a>
-        </footer>
-      </div>
+    <div className="container mx-auto p-4">
+      <h1 className="text-2xl font-bold mb-4">tRPC Template</h1>
+      <p className="text-gray-600 mb-8">
+        Your tRPC app is running!
+      </p>
+      {health && (
+        <div className="p-4 mb-4 bg-green-50 border border-green-200 rounded-md">
+          <p>✓ Server Status: {health.status}</p>
+          <p>Timestamp: {health.timestamp}</p>
+        </div>
+      )}
+      {error && (
+        <div className="p-4 mb-4 bg-red-50 border border-red-200 rounded-md">
+          <p>✗ Error: {error}</p>
+        </div>
+      )}
     </div>
   );
 }
