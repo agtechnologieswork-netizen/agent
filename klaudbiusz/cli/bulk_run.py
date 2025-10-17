@@ -5,6 +5,7 @@ import os
 import signal
 import subprocess
 import sys
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import TypedDict
@@ -73,37 +74,48 @@ def capture_screenshot(app_dir: str) -> tuple[str | None, str | None, str]:
 
     env_vars = f"DATABRICKS_HOST={databricks_host},DATABRICKS_TOKEN={databricks_token}"
 
-    try:
-        result = subprocess.run(
-            [
-                "dagger",
-                "call",
-                "screenshot-app",
-                f"--app-source={app_path}",
-                f"--env-vars={env_vars}",
-                "export",
-                f"--path={output_dir}",
-            ],
-            cwd=str(sidecar_path),
-            capture_output=True,
-            text=True,
-            timeout=300,  # 5 minute timeout for dagger operations
-        )
+    for attempt in range(2):
+        try:
+            result = subprocess.run(
+                [
+                    "dagger",
+                    "call",
+                    "screenshot-app",
+                    f"--app-source={app_path}",
+                    f"--env-vars={env_vars}",
+                    "export",
+                    f"--path={output_dir}",
+                ],
+                cwd=str(sidecar_path),
+                capture_output=True,
+                text=True,
+                timeout=300,  # 5 minute timeout for dagger operations
+            )
 
-        log = f"=== STDOUT ===\n{result.stdout}\n\n=== STDERR ===\n{result.stderr}\n\n=== EXIT CODE ===\n{result.returncode}"
+            log = f"=== STDOUT ===\n{result.stdout}\n\n=== STDERR ===\n{result.stderr}\n\n=== EXIT CODE ===\n{result.returncode}"
 
-        if result.returncode == 0 and screenshot_dest.exists():
-            browser_logs_path = str(logs_dest) if logs_dest.exists() else None
-            return str(screenshot_dest), browser_logs_path, log
-        else:
+            if result.returncode == 0 and screenshot_dest.exists():
+                browser_logs_path = str(logs_dest) if logs_dest.exists() else None
+                return str(screenshot_dest), browser_logs_path, log
+
+            if attempt == 0:
+                time.sleep(15)
+                continue
+
             return None, None, log
 
-    except subprocess.TimeoutExpired:
-        log = "Screenshot capture timed out after 5 minutes"
-        return None, None, log
-    except Exception as e:
-        log = f"Exception during screenshot capture: {type(e).__name__}: {str(e)}"
-        return None, None, log
+        except subprocess.TimeoutExpired:
+            log = "Screenshot capture timed out after 5 minutes"
+            if attempt == 1:
+                return None, None, log
+            time.sleep(15)
+        except Exception as e:
+            log = f"Exception during screenshot capture: {type(e).__name__}: {str(e)}"
+            if attempt == 1:
+                return None, None, log
+            time.sleep(15)
+
+    return None, None, log
 
 
 def run_single_generation(app_name: str, prompt: str, wipe_db: bool = False, use_subagents: bool = False) -> RunResult:

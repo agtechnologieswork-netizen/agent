@@ -193,11 +193,8 @@ class AppBuilder:
                     model=frontmatter.get("model"),  # type: ignore[arg-type]
                 )
 
-        base_instructions = """The project should start with initiate_project for scaffolding and validate_project is required to finish the work.\n
-Make sure to add tests for what you're implementing.\n
-Bias towards backend code when the task allows to implement it in multiple places.\n
-Do not create final summary file / report / readme. The user will ask for it separately if needed.\n
-"""
+        # workflow and template best practices are now in the MCP tool description
+        base_instructions = ""
 
         if self.use_subagents:
             base_instructions += """When you need to explore Databricks tables, schemas, or execute SQL queries, use the Task tool to delegate to the 'dataresearch' subagent. Do NOT use databricks_* tools directly.\n"""
@@ -316,8 +313,8 @@ Use up to 10 tools per call to speed up the process.\n"""
                     await self.tracker.log(self.run_id, "assistant", "text", block.text)
                 case ToolUseBlock(name="Task"):
                     await self._log_tool_use(block, truncate)
-                case ToolUseBlock(name="mcp__dabgent__initiate_project"):
-                    # capture app directory from initiate_project tool call
+                case ToolUseBlock(name="mcp__dabgent__scaffold_data_app"):
+                    # capture app directory from scaffold_data_app tool call
                     if block.input and "work_dir" in block.input:
                         self.app_dir = block.input["work_dir"]
                     await self._log_generic_tool(block, truncate)

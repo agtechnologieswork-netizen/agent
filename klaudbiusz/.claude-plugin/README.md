@@ -6,7 +6,7 @@ Production-ready data application generator for Claude Code.
 
 This plugin packages the **dabgent-mcp** MCP server for distribution via Claude Code. It provides:
 
-- **MCP Tools** - `initiate_project`, `validate_project`, and other app generation tools
+- **MCP Tools** - `scaffold_data_app`, `validate_data_app`, and other app generation tools
 - **Specialized Subagent** - klaudbiusz agent with workflow expertise
 - **Event Sourcing Architecture** - Full auditability and replay capabilities
 
@@ -77,8 +77,8 @@ Create a simple dashboard application that displays user statistics
 
 3. **Verify the appbuild agent is invoked:**
 - Check for "Using subagent: appbuild" message
-- `initiate_project` should scaffold the project in `./app/`
-- `validate_project` should run at the end
+- `scaffold_data_app` should scaffold the project in `./app/`
+- `validate_data_app` should run at the end
 - Tests should be added automatically
 
 4. **Or explicitly invoke the agent:**
@@ -117,7 +117,7 @@ The plugin includes two specialized subagents:
 Specializes in data application generation:
 - **Automatic invocation** - Triggered when user requests apps/dashboards
 - **Explicit invocation** - Use `@agent-klaudbiusz:appbuild` to invoke directly
-- **Workflow expertise** - Knows to use `initiate_project` → implement → `validate_project`
+- **Workflow expertise** - Knows to use `scaffold_data_app` → implement → `validate_data_app`
 - **Best practices** - Always adds tests, biases towards backend, validates before completion
 
 ### dataresearch

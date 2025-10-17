@@ -29,10 +29,7 @@ impl Template {
 
     fn description(&self) -> &'static str {
         match self {
-            Template::Trpc => "TypeScript full-stack template with tRPC for type-safe API communication between React frontend and Node.js backend. Use this when building type-safe TypeScript applications with the following structure:\n\
-            - server/: Node.js backend with tRPC API\n\
-            - client/: React frontend with tRPC client\n\
-            Use the validate tool to run all the necessary checks (build + tests).",
+            Template::Trpc => include_str!("../../templates/trpc_guidelines.md"),
         }
     }
 
@@ -50,7 +47,7 @@ pub struct IOProvider {
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
 pub struct InitiateProjectArgs {
-    /// Path to the work directory to copy to
+    /// Absolute path to the work directory to copy to (e.g., /path/to/project)
     pub work_dir: String,
     /// If true, wipe the work directory before copying
     #[serde(default)]
@@ -76,7 +73,7 @@ impl ToolResultDisplay for InitiateProjectResult {
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
 pub struct ValidateProjectArgs {
-    /// Path to the work directory to validate
+    /// Absolute path to the work directory to validate (e.g., /path/to/project)
     pub work_dir: String,
 }
 
@@ -149,7 +146,13 @@ impl IOProvider {
         }
 
         // create work directory if it doesn't exist
-        std::fs::create_dir_all(work_dir)?;
+        std::fs::create_dir_all(work_dir).map_err(|e| {
+            eyre::eyre!(
+                "failed to create work directory '{}': {}",
+                work_dir.display(),
+                e
+            )
+        })?;
 
         // collect and copy files using git ls-files
         let files = collect_template_files(&template_path, work_dir)?;
@@ -163,14 +166,25 @@ impl IOProvider {
     }
 
     #[tool(
-        name = "initiate_project",
-        description = "Initialize a project by copying template files from the default TypeScript (tRPC + React) template to a work directory. Supports force rewrite to wipe and recreate the directory."
+        name = "scaffold_data_app",
+        description = "Initialize a project by copying template files from the default TypeScript (tRPC + React) template to a work directory. Supports force rewrite to wipe and recreate the directory. It sets up a basic project structure, and should be ALWAYS used as the first step in creating a new app."
     )]
-    pub async fn initiate_project(
+    pub async fn scaffold_data_app(
         &self,
         Parameters(args): Parameters<InitiateProjectArgs>,
     ) -> Result<CallToolResult, ErrorData> {
         let work_path = PathBuf::from(&args.work_dir);
+
+        // validate that the path is absolute
+        if !work_path.is_absolute() {
+            return Err(ErrorData::invalid_params(
+                format!(
+                    "work_dir must be an absolute path, got: '{}'. Relative paths are not supported",
+                    args.work_dir
+                ),
+                None,
+            ));
+        }
 
         let result = Self::initiate_project_impl(&work_path, Template::Trpc, args.force_rewrite).map_err(|e| {
             ErrorData::internal_error(format!("failed to initiate project: {}", e), None)
@@ -246,14 +260,25 @@ impl IOProvider {
     }
 
     #[tool(
-        name = "validate_project",
+        name = "validate_data_app",
         description = "Validate a project by copying files to a sandbox and running TypeScript compilation check. Returns validation result with success status and details."
     )]
-    pub async fn validate_project(
+    pub async fn validate_data_app(
         &self,
         Parameters(args): Parameters<ValidateProjectArgs>,
     ) -> Result<CallToolResult, ErrorData> {
         let work_path = PathBuf::from(&args.work_dir);
+
+        // validate that the path is absolute
+        if !work_path.is_absolute() {
+            return Err(ErrorData::invalid_params(
+                format!(
+                    "work_dir must be an absolute path, got: '{}'. Relative paths are not supported",
+                    args.work_dir
+                ),
+                None,
+            ));
+        }
 
         let result = Self::validate_project_impl(&work_path).await.map_err(|e| {
             ErrorData::internal_error(format!("failed to validate project: {}", e), None)
@@ -349,11 +374,25 @@ fn collect_template_files(template_path: &Path, work_path: &Path) -> Result<Vec<
 
         // ensure parent directory exists
         if let Some(parent) = target_file.parent() {
-            std::fs::create_dir_all(parent)?;
+            std::fs::create_dir_all(parent).map_err(|e| {
+                eyre::eyre!(
+                    "failed to create directory '{}' for file '{}': {}",
+                    parent.display(),
+                    relative_path,
+                    e
+                )
+            })?;
         }
 
         // copy file
-        std::fs::copy(&source_file, &target_file)?;
+        std::fs::copy(&source_file, &target_file).map_err(|e| {
+            eyre::eyre!(
+                "failed to copy file '{}' to '{}': {}",
+                source_file.display(),
+                target_file.display(),
+                e
+            )
+        })?;
         copied_files.push(target_file);
     }
 
