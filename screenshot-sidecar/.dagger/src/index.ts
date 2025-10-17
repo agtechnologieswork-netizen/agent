@@ -4,7 +4,7 @@
  * A reusable Dagger module that captures screenshots of running web applications
  * using Playwright. Assumes the app has a Dockerfile.
  */
-import { dag, Directory, File, Service, object, func } from "@dagger.io/dagger"
+import { dag, Directory, Service, object, func } from "@dagger.io/dagger"
 
 @object()
 export class ScreenshotSidecar {
@@ -15,6 +15,7 @@ export class ScreenshotSidecar {
    * @param url The URL path to navigate to (default: "/")
    * @param port The port the service is listening on (default: 8000)
    * @param waitTime Time to wait for page to load in ms (default: 5000)
+   * @returns Directory containing screenshot.png and logs.txt
    */
   @func()
   async screenshot(
@@ -22,7 +23,7 @@ export class ScreenshotSidecar {
     url?: string,
     port?: number,
     waitTime?: number
-  ): Promise<File> {
+  ): Promise<Directory> {
     const targetUrl = url || "/"
     const targetPort = port || 8000
     const wait = waitTime || 5000
@@ -49,7 +50,7 @@ export class ScreenshotSidecar {
       .withEnvVariable("CACHE_BUST", timestamp)
       .withExec(["npx", "playwright", "test"])
 
-    return playwrightContainer.file("/screenshots/screenshot.png")
+    return playwrightContainer.directory("/screenshots")
   }
 
   /**
@@ -59,6 +60,7 @@ export class ScreenshotSidecar {
    * @param envVars Optional environment variables as comma-separated KEY=VALUE pairs (e.g., "PORT=8000,DEBUG=true")
    * @param waitTime Time to wait for page to load in ms (default: 20000)
    * @param port Port the app listens on (default: 8000)
+   * @returns Directory containing screenshot.png and logs.txt
    */
   @func()
   async screenshotApp(
@@ -66,7 +68,7 @@ export class ScreenshotSidecar {
     envVars?: string,
     waitTime?: number,
     port?: number
-  ): Promise<File> {
+  ): Promise<Directory> {
     const targetPort = port || 8000
 
     // build container from Dockerfile

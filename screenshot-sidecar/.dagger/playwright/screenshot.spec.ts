@@ -1,9 +1,16 @@
 import { test, chromium } from "@playwright/test";
-import { mkdir } from "fs/promises";
+import { mkdir, writeFile } from "fs/promises";
 import { exec } from "child_process";
 import { promisify } from "util";
 
 const execAsync = promisify(exec);
+
+interface LogEntry {
+  timestamp: string;
+  type: "console" | "pageerror";
+  level?: "log" | "warn" | "error" | "info" | "debug";
+  message: string;
+}
 
 test("capture app screenshot", async () => {
   // ensure screenshots directory exists
@@ -26,6 +33,28 @@ test("capture app screenshot", async () => {
 
   const page = await browser.newPage();
 
+  // collect browser logs
+  const logs: LogEntry[] = [];
+
+  // capture console messages
+  page.on("console", (msg) => {
+    logs.push({
+      timestamp: new Date().toISOString(),
+      type: "console",
+      level: msg.type() as "log" | "warn" | "error" | "info" | "debug",
+      message: msg.text(),
+    });
+  });
+
+  // capture page errors (JavaScript exceptions)
+  page.on("pageerror", (error) => {
+    logs.push({
+      timestamp: new Date().toISOString(),
+      type: "pageerror",
+      message: error.message,
+    });
+  });
+
   try {
     // use IP instead of hostname to avoid SSL protocol errors
     await page.goto(`http://${appIp}:${targetPort}${targetUrl}`, {
@@ -43,6 +72,17 @@ test("capture app screenshot", async () => {
     });
 
     console.log("Screenshot saved to /screenshots/screenshot.png");
+
+    // save browser logs as text
+    const logText = logs.map((log) => {
+      const prefix = log.type === "pageerror" ? "[ERROR]" : `[${log.level?.toUpperCase()}]`;
+      return `${log.timestamp} ${prefix} ${log.message}`;
+    }).join("\n");
+
+    await writeFile("/screenshots/logs.txt", logText, "utf-8");
+
+    console.log(`Captured ${logs.length} browser log entries`);
+    console.log("Logs saved to /screenshots/logs.txt");
   } finally {
     await browser.close();
   }

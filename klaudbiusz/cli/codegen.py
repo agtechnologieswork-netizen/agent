@@ -150,7 +150,7 @@ class TrackerDB:
 
 
 class AppBuilder:
-    def __init__(self, wipe_db: bool = True, suppress_logs: bool = False, use_subagents: bool = False):
+    def __init__(self, app_name: str, wipe_db: bool = True, suppress_logs: bool = False, use_subagents: bool = False):
         self.project_root = Path(__file__).parent.parent.parent
         self.mcp_manifest = self.project_root / "dabgent" / "dabgent_mcp" / "Cargo.toml"
 
@@ -159,6 +159,7 @@ class AppBuilder:
 
         self.tracker = TrackerDB(wipe_on_start=wipe_db)
         self.run_id: UUID = uuid4()
+        self.app_name = app_name
         self.use_subagents = use_subagents
         self.suppress_logs = suppress_logs
         self.app_dir: str | None = None
@@ -192,10 +193,11 @@ class AppBuilder:
                     model=frontmatter.get("model"),  # type: ignore[arg-type]
                 )
 
-        base_instructions = """The project should start with initiate_project in ./app/$APP_NAME for scaffolding and validate_project is required to finish the work.\n
-Generate the app name from the prompt, keep it short (4 words, hyphen-connected), and ensure it is unique.\n
+        base_instructions = """The project should start with initiate_project for scaffolding and validate_project is required to finish the work.\n
 Make sure to add tests for what you're implementing.\n
-Bias towards backend code when the task allows to implement it in multiple places.\n"""
+Bias towards backend code when the task allows to implement it in multiple places.\n
+Do not create final summary file / report / readme. The user will ask for it separately if needed.\n
+"""
 
         if self.use_subagents:
             base_instructions += """When you need to explore Databricks tables, schemas, or execute SQL queries, use the Task tool to delegate to the 'dataresearch' subagent. Do NOT use databricks_* tools directly.\n"""
@@ -250,8 +252,11 @@ Use up to 10 tools per call to speed up the process.\n"""
             "turns": 0,
         }
 
+        # inject app_name into user prompt to avoid caching issues with system prompt
+        user_prompt = f"App name: {self.app_name}\nApp directory: ./app/{self.app_name}\n\nTask: {prompt}"
+
         try:
-            async for message in query(prompt=prompt, options=options):
+            async for message in query(prompt=user_prompt, options=options):
                 await self._log_message(message)
                 if isinstance(message, ResultMessage):
                     if message.total_cost_usd is None:
