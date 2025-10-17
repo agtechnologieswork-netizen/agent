@@ -1,6 +1,7 @@
 """Bulk runner for generating multiple apps from hardcoded prompts."""
 
 import json
+import os
 import subprocess
 from datetime import datetime
 from pathlib import Path
@@ -25,19 +26,19 @@ PROMPTS = [
     "Build a churn risk dashboard showing customers with less than 30 day login activity, declining usage trends, and support ticket volume. Calculate a risk score.",
     "Show daily revenue by channel (store/web/catalog) for the last 90 days with week-over-week growth rates and contribution percentages.",
     "Create customer segments using RFM analysis (recency, frequency, monetary). Show 4-5 clusters with average spend, purchase frequency, and last order date.",
-    "Build a taxi fare prediction model using trip distance, time of day, and pickup location. Show actual vs predicted fares with error metrics.",
+    "Calculate taxi trip metrics: average fare by distance bracket and time of day. Show daily trip volume and revenue trends.",
     "Identify slow-moving inventory: products with more than 90 days in stock, low turnover ratio, and current warehouse capacity by location.",
     "Create a 360-degree customer view: lifetime orders, total spent, average order value, preferred categories, and payment methods used.",
-    "Build a market basket analysis showing top 10 product pairs frequently purchased together. Include bundle revenue opportunity.",
-    "Forecast next quarter revenue using historical sales with seasonal decomposition. Show trend, seasonality, and confidence intervals.",
-    "Monitor ML feature drift: compare training vs production distributions for top features. Flag significant distribution changes.",
+    "Show top 10 product pairs frequently purchased together with co-occurrence rates. Calculate potential bundle revenue opportunity.",
+    "Show revenue trends for next quarter based on historical growth rates. Display monthly comparisons and seasonal patterns.",
+    "Monitor data quality metrics: track completeness, outliers, and value distribution changes for key fields over time.",
     "Compare conversion rates and average order value across store/web/catalog channels. Break down by customer segment.",
-    "Correlate support ticket categories with churn within 30 days. Show relationship strength and ticket volume by issue type.",
-    "Analyze price elasticity by category: show revenue impact of different price changes. Identify optimal price points.",
+    "Show customer churn analysis: identify customers who stopped purchasing in last 90 days, segment by last order value and ticket history.",
+    "Analyze pricing impact: compare revenue at different price points by category. Show price recommendations based on historical data.",
     "Build supplier scorecard: on-time delivery percentage, defect rate, average lead time, and fill rate. Rank top 10 suppliers.",
     "Map sales density by zip code with heatmap visualization. Show top 20 zips by revenue and compare to population density.",
     "Calculate CAC by marketing channel (paid search, social, email, organic). Show CAC to LTV ratio and payback period in months.",
-    "Predict subscription tier changes: customers likely to upgrade (high usage near limit) or downgrade (consistently low usage for 60 days).",
+    "Identify subscription tier optimization opportunities: show high-usage users near tier limits and low-usage users in premium tiers.",
     "Show product profitability: revenue minus returns percentage minus discount cost. Rank bottom 20 products by net margin.",
     "Build warehouse efficiency dashboard: orders per hour, fulfillment SLA (percentage shipped within 24 hours), and capacity utilization by facility.",
     "Calculate customer LTV by acquisition cohort: average revenue per customer at 12, 24, 36 months. Show retention curves.",
@@ -60,9 +61,23 @@ def capture_screenshot(app_dir: str) -> tuple[str | None, str]:
     sidecar_path = Path(__file__).parent.parent.parent / "screenshot-sidecar"
     screenshot_dest = app_path / "screenshot.png"
 
+    # get Databricks credentials from environment (validated at script start)
+    databricks_host = os.environ["DATABRICKS_HOST"]
+    databricks_token = os.environ["DATABRICKS_TOKEN"]
+
+    env_vars = f"DATABRICKS_HOST={databricks_host},DATABRICKS_TOKEN={databricks_token}"
+
     try:
         result = subprocess.run(
-            ["dagger", "call", "screenshot-app", f"--app-source={app_path}", "export", f"--path={screenshot_dest}"],
+            [
+                "dagger",
+                "call",
+                "screenshot-app",
+                f"--app-source={app_path}",
+                f"--env-vars={env_vars}",
+                "export",
+                f"--path={screenshot_dest}",
+            ],
             cwd=str(sidecar_path),
             capture_output=True,
             text=True,
@@ -107,6 +122,10 @@ def run_single_generation(prompt: str, wipe_db: bool = False, use_subagents: boo
 
 
 def main(wipe_db: bool = False, n_jobs: int = -1, use_subagents: bool = False) -> None:
+    # validate required environment variables
+    if not os.environ.get("DATABRICKS_HOST") or not os.environ.get("DATABRICKS_TOKEN"):
+        raise ValueError("DATABRICKS_HOST and DATABRICKS_TOKEN environment variables must be set")
+
     print(f"Starting bulk generation for {len(PROMPTS)} prompts...")
     print(f"Parallel jobs: {n_jobs}")
     print(f"Wipe DB: {wipe_db}")
