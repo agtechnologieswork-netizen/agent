@@ -4,7 +4,7 @@ TypeScript full-stack template with tRPC for type-safe API communication between
 
 ## Workflow:
 - Projects MUST end with validate_project to verify build + tests pass
-- Always add tests for what you're implementing
+- Always add tests for what you're implementing, put them next to the code (e.g. src/*.test.ts)
 - Bias towards backend code when the task allows implementation in multiple places
 - Do NOT create summary files, reports, or README unless explicitly requested
 
@@ -49,7 +49,7 @@ File structure:
 - Feature components: client/src/components/FeatureName.tsx
 
 ### Visual Design:
-- Adjust visual mood to match user prompt (corporate = default clean but visually appealing, playful = add colors/emojis)
+- Adjust visual mood to match user prompt, prefer clean and modern visually appealing aesthetics, but avoid overly flashy designs - keep it professional and user-friendly;
 - Use shadcn/radix components (Button, Input, Card, etc.) for consistent UI
 - Forms should have loading states: `disabled={isLoading}`
 - Show empty states with helpful text when no data exists
