@@ -4,7 +4,7 @@ TypeScript full-stack template with tRPC for type-safe API communication between
 
 ## Workflow:
 - Projects MUST end with validate_project to verify build + tests pass
-- Always add tests for what you're implementing
+- Always add tests for what you're implementing, put them next to the code (e.g. src/*.test.ts)
 - Bias towards backend code when the task allows implementation in multiple places
 - Do NOT create summary files, reports, or README unless explicitly requested
 
