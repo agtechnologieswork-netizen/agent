@@ -167,7 +167,7 @@ impl IOProvider {
 
     #[tool(
         name = "scaffold_data_app",
-        description = "Initialize a project by copying template files from the default TypeScript (tRPC + React) template to a work directory. Supports force rewrite to wipe and recreate the directory. It sets up a basic project structure, and should be ALWAYS used as the first step in creating a new app."
+        description = "Initialize a project by copying template files from the default TypeScript (tRPC + React) template to a work directory. Supports force rewrite to wipe and recreate the directory. It sets up a basic project structure, and should be ALWAYS used as the first step in creating a new data or web app."
     )]
     pub async fn scaffold_data_app(
         &self,
@@ -261,7 +261,7 @@ impl IOProvider {
 
     #[tool(
         name = "validate_data_app",
-        description = "Validate a project by copying files to a sandbox and running TypeScript compilation check. Returns validation result with success status and details."
+        description = "Validate a project by copying files to a sandbox and running TypeScript compilation check and tests. Returns validation result with success status and details."
     )]
     pub async fn validate_data_app(
         &self,
@@ -294,17 +294,29 @@ async fn run_typescript_validation(
 ) -> Result<(), ValidationDetails> {
     tracing::info!("Starting validation (build + tests)...");
 
-    // re-copy fresh files from host before validation
+    refresh_sandbox_files(sandbox, &work_dir).await?;
+    run_build(sandbox).await?;
+    run_tests(sandbox).await?;
+
+    tracing::info!("All validation checks passed");
+    Ok(())
+}
+
+async fn refresh_sandbox_files(
+    sandbox: &mut DaggerSandbox,
+    work_dir: &str,
+) -> Result<(), ValidationDetails> {
     sandbox
-        .refresh_from_host(&work_dir, "/app")
+        .refresh_from_host(work_dir, "/app")
         .await
         .map_err(|e| ValidationDetails {
             exit_code: -1,
             stdout: String::new(),
             stderr: format!("Failed to refresh from host: {}", e),
-        })?;
+        })
+}
 
-    // run build from root (installs all deps and builds)
+async fn run_build(sandbox: &mut DaggerSandbox) -> Result<(), ValidationDetails> {
     let build_result = sandbox
         .exec("cd /app && npm run build")
         .await
@@ -323,9 +335,11 @@ async fn run_typescript_validation(
         });
     }
 
-    tracing::info!("Build passed, running tests...");
+    tracing::info!("Build passed");
+    Ok(())
+}
 
-    // run tests from root
+async fn run_tests(sandbox: &mut DaggerSandbox) -> Result<(), ValidationDetails> {
     let test_result = sandbox
         .exec("cd /app && npm test")
         .await
@@ -344,7 +358,7 @@ async fn run_typescript_validation(
         });
     }
 
-    tracing::info!("Validation passed (build + tests)");
+    tracing::info!("Tests passed");
     Ok(())
 }
 

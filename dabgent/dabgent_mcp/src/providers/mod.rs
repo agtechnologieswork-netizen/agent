@@ -67,7 +67,7 @@ impl CombinedProvider {
 
         if let Some(io) = self.io.clone() {
             match tool_name {
-                "initiate_project" | "validate_project" => {
+                "scaffold_data_app" | "validate_data_app" => {
                     return Ok(TargetProvider::Io(io));
                 }
                 _ => {}
