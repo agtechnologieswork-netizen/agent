@@ -1,6 +1,7 @@
 """Bulk runner for generating multiple apps from hardcoded prompts."""
 
 import json
+import os
 import subprocess
 from datetime import datetime
 from pathlib import Path
@@ -60,9 +61,27 @@ def capture_screenshot(app_dir: str) -> tuple[str | None, str]:
     sidecar_path = Path(__file__).parent.parent.parent / "screenshot-sidecar"
     screenshot_dest = app_path / "screenshot.png"
 
+    # validate and get Databricks credentials from environment
+    databricks_host = os.environ.get("DATABRICKS_HOST")
+    databricks_token = os.environ.get("DATABRICKS_TOKEN")
+
+    if not databricks_host or not databricks_token:
+        log = "ERROR: DATABRICKS_HOST and DATABRICKS_TOKEN environment variables must be set"
+        return None, log
+
+    env_vars = f"DATABRICKS_HOST={databricks_host},DATABRICKS_TOKEN={databricks_token}"
+
     try:
         result = subprocess.run(
-            ["dagger", "call", "screenshot-app", f"--app-source={app_path}", "export", f"--path={screenshot_dest}"],
+            [
+                "dagger",
+                "call",
+                "screenshot-app",
+                f"--app-source={app_path}",
+                f"--env-vars={env_vars}",
+                "export",
+                f"--path={screenshot_dest}",
+            ],
             cwd=str(sidecar_path),
             capture_output=True,
             text=True,

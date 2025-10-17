@@ -44,10 +44,6 @@ COPY --from=builder /app/client/dist/ ./server/public/
 # Set working directory to server
 WORKDIR /app/server
 
-# Environment variables for Databricks
-ENV DATABRICKS_HOST=${DATABRICKS_HOST}
-ENV DATABRICKS_TOKEN=${DATABRICKS_TOKEN}
-
 # Expose port
 EXPOSE 8000
 
