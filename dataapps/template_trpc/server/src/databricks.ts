@@ -91,7 +91,7 @@ export interface QueryResult<T = SqlRow> {
 
 export class DatabricksClient {
   private host: string;
-  private token: string;
+  private token: string = "";
 
   constructor() {
     const host = process.env["DATABRICKS_HOST"];
@@ -107,6 +107,7 @@ export class DatabricksClient {
     if (token) {
       this.token = token;
     }
+  }
 
   private async apiRequest<T>(
     method: string,

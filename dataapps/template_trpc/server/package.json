@@ -19,6 +19,7 @@
     "express": "^5.1.0",
     "pg": "8.14.0",
     "superjson": "2.2.2",
+    "tsx": "4.19.3",
     "zod": "3.24.2"
   },
   "devDependencies": {
@@ -26,7 +27,6 @@
     "@types/pg": "8.11.11",
     "drizzle-kit": "^0.31.5",
     "eslint": "^9.37.0",
-    "tsx": "4.19.3",
     "typescript": "~5.8.2"
   }
 }

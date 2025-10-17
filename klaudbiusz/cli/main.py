@@ -16,7 +16,14 @@ def run(prompt: str, wipe_db: bool = True, suppress_logs: bool = False, use_suba
         python main.py "build dashboard" --use_subagents --no-wipe_db
     """
     builder = AppBuilder(wipe_db=wipe_db, suppress_logs=suppress_logs, use_subagents=use_subagents)
-    return builder.run(prompt, wipe_db=wipe_db)
+    metrics = builder.run(prompt, wipe_db=wipe_db)
+    print(f"\n{'=' * 80}")
+    print(f"Final metrics:")
+    print(f"  Cost: ${metrics['cost_usd']:.4f}")
+    print(f"  Turns: {metrics['turns']}")
+    print(f"  App dir: {metrics.get('app_dir', 'NOT CAPTURED')}")
+    print(f"{'=' * 80}\n")
+    return metrics
 
 
 def main():
