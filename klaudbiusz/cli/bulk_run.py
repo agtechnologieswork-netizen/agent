@@ -2,7 +2,9 @@
 
 import json
 import os
+import signal
 import subprocess
+import sys
 from datetime import datetime
 from pathlib import Path
 from typing import TypedDict
@@ -20,6 +22,7 @@ class RunResult(TypedDict):
     app_dir: str | None
     screenshot_path: str | None
     screenshot_log: str | None
+    browser_logs_path: str | None
 
 
 PROMPTS = {
@@ -46,20 +49,23 @@ PROMPTS = {
 }
 
 
-def capture_screenshot(app_dir: str) -> tuple[str | None, str]:
+def capture_screenshot(app_dir: str) -> tuple[str | None, str | None, str]:
     """Capture screenshot for generated app using screenshot-sidecar.
 
     Uses the standalone screenshot-sidecar Dagger module to build and
     screenshot the app from its Dockerfile.
 
     Returns:
-        Tuple of (screenshot_path, log_output):
+        Tuple of (screenshot_path, browser_logs_path, log_output):
         - screenshot_path: Path to screenshot.png if successful, None otherwise
+        - browser_logs_path: Path to logs.txt if successful, None otherwise
         - log_output: Full stdout/stderr from the dagger command execution
     """
     app_path = Path(app_dir).resolve()
     sidecar_path = Path(__file__).parent.parent.parent / "screenshot-sidecar"
-    screenshot_dest = app_path / "screenshot.png"
+    output_dir = app_path / "screenshot_output"
+    screenshot_dest = output_dir / "screenshot.png"
+    logs_dest = output_dir / "logs.txt"
 
     # get Databricks credentials from environment (validated at script start)
     databricks_host = os.environ["DATABRICKS_HOST"]
@@ -76,7 +82,7 @@ def capture_screenshot(app_dir: str) -> tuple[str | None, str]:
                 f"--app-source={app_path}",
                 f"--env-vars={env_vars}",
                 "export",
-                f"--path={screenshot_dest}",
+                f"--path={output_dir}",
             ],
             cwd=str(sidecar_path),
             capture_output=True,
@@ -87,38 +93,64 @@ def capture_screenshot(app_dir: str) -> tuple[str | None, str]:
         log = f"=== STDOUT ===\n{result.stdout}\n\n=== STDERR ===\n{result.stderr}\n\n=== EXIT CODE ===\n{result.returncode}"
 
         if result.returncode == 0 and screenshot_dest.exists():
-            return str(screenshot_dest), log
+            browser_logs_path = str(logs_dest) if logs_dest.exists() else None
+            return str(screenshot_dest), browser_logs_path, log
         else:
-            return None, log
+            return None, None, log
 
     except subprocess.TimeoutExpired:
         log = "Screenshot capture timed out after 5 minutes"
-        return None, log
+        return None, None, log
     except Exception as e:
         log = f"Exception during screenshot capture: {type(e).__name__}: {str(e)}"
-        return None, log
+        return None, None, log
 
 
 def run_single_generation(app_name: str, prompt: str, wipe_db: bool = False, use_subagents: bool = False) -> RunResult:
-    codegen = AppBuilder(app_name=app_name, wipe_db=wipe_db, suppress_logs=True, use_subagents=use_subagents)
-    metrics = codegen.run(prompt, wipe_db=wipe_db)
-    app_dir = metrics.get("app_dir") if metrics else None
+    def timeout_handler(signum, frame):
+        raise TimeoutError(f"Generation timed out after 900 seconds")
 
-    # capture screenshot if app was generated successfully
-    screenshot_path = None
-    screenshot_log = None
-    if app_dir:
-        screenshot_path, screenshot_log = capture_screenshot(app_dir)
+    try:
+        # set 15 minute timeout for entire generation
+        signal.signal(signal.SIGALRM, timeout_handler)
+        signal.alarm(900)
 
-    return {
-        "prompt": prompt,
-        "success": True,
-        "metrics": metrics,
-        "error": None,
-        "app_dir": app_dir,
-        "screenshot_path": screenshot_path,
-        "screenshot_log": screenshot_log,
-    }
+        codegen = AppBuilder(app_name=app_name, wipe_db=wipe_db, suppress_logs=True, use_subagents=use_subagents)
+        metrics = codegen.run(prompt, wipe_db=wipe_db)
+        app_dir = metrics.get("app_dir") if metrics else None
+
+        # capture screenshot if app was generated successfully
+        screenshot_path = None
+        browser_logs_path = None
+        screenshot_log = None
+        if app_dir:
+            screenshot_path, browser_logs_path, screenshot_log = capture_screenshot(app_dir)
+
+        signal.alarm(0)  # cancel timeout
+
+        return {
+            "prompt": prompt,
+            "success": True,
+            "metrics": metrics,
+            "error": None,
+            "app_dir": app_dir,
+            "screenshot_path": screenshot_path,
+            "screenshot_log": screenshot_log,
+            "browser_logs_path": browser_logs_path,
+        }
+    except TimeoutError as e:
+        signal.alarm(0)  # cancel timeout
+        print(f"[TIMEOUT] {prompt[:80]}...", file=sys.stderr, flush=True)
+        return {
+            "prompt": prompt,
+            "success": False,
+            "metrics": None,
+            "error": str(e),
+            "app_dir": None,
+            "screenshot_path": None,
+            "screenshot_log": None,
+            "browser_logs_path": None,
+        }
 
 
 def main(wipe_db: bool = False, n_jobs: int = -1, use_subagents: bool = False) -> None:

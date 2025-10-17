@@ -195,7 +195,9 @@ class AppBuilder:
 
         base_instructions = """The project should start with initiate_project for scaffolding and validate_project is required to finish the work.\n
 Make sure to add tests for what you're implementing.\n
-Bias towards backend code when the task allows to implement it in multiple places.\n"""
+Bias towards backend code when the task allows to implement it in multiple places.\n
+Do not create final summary file / report / readme. The user will ask for it separately if needed.\n
+"""
 
         if self.use_subagents:
             base_instructions += """When you need to explore Databricks tables, schemas, or execute SQL queries, use the Task tool to delegate to the 'dataresearch' subagent. Do NOT use databricks_* tools directly.\n"""
