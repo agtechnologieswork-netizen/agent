@@ -46,10 +46,10 @@ PROMPTS = [
 
 
 def capture_screenshot(app_dir: str) -> tuple[str | None, str]:
-    """Capture screenshot for generated app using Dagger.
+    """Capture screenshot for generated app using screenshot-sidecar.
 
-    Runs dagger from the template directory (sidecar pattern) and passes
-    the generated app path as the source parameter.
+    Uses the standalone screenshot-sidecar Dagger module to build and
+    screenshot the app from its Dockerfile.
 
     Returns:
         Tuple of (screenshot_path, log_output):
@@ -57,13 +57,13 @@ def capture_screenshot(app_dir: str) -> tuple[str | None, str]:
         - log_output: Full stdout/stderr from the dagger command execution
     """
     app_path = Path(app_dir).resolve()
-    template_path = Path(__file__).parent.parent.parent / "dataapps" / "template_trpc"
+    sidecar_path = Path(__file__).parent.parent.parent / "screenshot-sidecar"
     screenshot_dest = app_path / "screenshot.png"
 
     try:
         result = subprocess.run(
-            ["dagger", "call", "screenshot", f"--source={app_path}", "export", f"--path={screenshot_dest}"],
-            cwd=str(template_path),
+            ["dagger", "call", "screenshot-app", f"--app-source={app_path}", "export", f"--path={screenshot_dest}"],
+            cwd=str(sidecar_path),
             capture_output=True,
             text=True,
             timeout=300,  # 5 minute timeout for dagger operations
