@@ -1,0 +1,8 @@
+{
+  "name": "screenshot",
+  "engineVersion": "v0.18.16",
+  "sdk": {
+    "source": "typescript"
+  },
+  "source": ".dagger"
+}

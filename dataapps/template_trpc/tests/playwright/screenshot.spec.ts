@@ -1,11 +1,15 @@
 import { test, chromium } from "@playwright/test";
+import { mkdir } from "fs/promises";
 import { exec } from "child_process";
 import { promisify } from "util";
 
 const execAsync = promisify(exec);
 
 test("capture app screenshot", async () => {
-  // Get the IP address of the app container
+  // ensure screenshots directory exists
+  await mkdir("/screenshots", { recursive: true });
+
+  // resolve hostname to IP to avoid SSL protocol errors
   const { stdout } = await execAsync("getent hosts app | awk '{ print $1 }'");
   const appIp = stdout.trim();
 
@@ -18,20 +22,22 @@ test("capture app screenshot", async () => {
   const page = await browser.newPage();
 
   try {
-    // navigate to the app using IP instead of hostname
+    // navigate using IP instead of hostname to avoid SSL protocol errors
     await page.goto(`http://${appIp}:8000/`, {
       waitUntil: "domcontentloaded",
       timeout: 30000,
     });
 
-    // wait for 15 seconds
-    await page.waitForTimeout(15000);
+    // wait for app to fully load
+    await page.waitForTimeout(20000);
 
-    // take screenshot and save to mounted volume
+    // take screenshot and save to /screenshots
     await page.screenshot({
       path: "/screenshots/screenshot.png",
       fullPage: true,
     });
+
+    console.log("Screenshot saved to /screenshots/screenshot.png");
   } finally {
     await browser.close();
   }
