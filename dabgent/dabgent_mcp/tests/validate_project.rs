@@ -59,11 +59,11 @@ async fn test_validate_with_failing_test() {
     initiate_project_for_tests(work_dir, false);
 
     // break the test file itself to make test fail
-    let test_file = work_dir.join("server/src/healthcheck.test.ts");
+    let test_file = work_dir.join("server/src/server.test.ts");
     let content = std::fs::read_to_string(&test_file).unwrap();
     let modified = content.replace(
-        r#"assert.equal(result.status, "ok");"#,
-        r#"assert.equal(result.status, "broken");"#
+        r#"assert.equal(data.result.data.json.status, "ok");"#,
+        r#"assert.equal(data.result.data.json.status, "broken");"#
     );
     std::fs::write(&test_file, modified).unwrap();
 
