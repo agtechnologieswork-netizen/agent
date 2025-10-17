@@ -1,4 +1,5 @@
 pub mod databricks;
+pub mod deployment;
 pub mod google_sheets;
 
 // ============================================================================
@@ -11,8 +12,8 @@ pub trait ToolResultDisplay {
 
 pub use databricks::{
     ColumnMetadata, DatabricksRestClient, DescribeTableRequest, ExecuteSqlRequest,
-    ExecuteSqlResult, ListCatalogsResult, ListSchemasRequest, ListSchemasResult,
-    ListTablesRequest, ListTablesResult, TableDetails, TableInfo,
+    ExecuteSqlResult, ListCatalogsResult, ListSchemasRequest, ListSchemasResult, ListTablesRequest,
+    ListTablesResult, TableDetails, TableInfo,
 };
 pub use google_sheets::{
     FetchSpreadsheetDataRequest, GetSpreadsheetMetadataRequest, GoogleSheetsClient,
