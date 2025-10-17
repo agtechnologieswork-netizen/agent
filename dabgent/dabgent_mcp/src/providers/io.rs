@@ -166,10 +166,10 @@ impl IOProvider {
     }
 
     #[tool(
-        name = "initiate_project",
+        name = "scaffold_data_app",
         description = "Initialize a project by copying template files from the default TypeScript (tRPC + React) template to a work directory. Supports force rewrite to wipe and recreate the directory. It sets up a basic project structure, and should be ALWAYS used as the first step in creating a new app."
     )]
-    pub async fn initiate_project(
+    pub async fn scaffold_data_app(
         &self,
         Parameters(args): Parameters<InitiateProjectArgs>,
     ) -> Result<CallToolResult, ErrorData> {
@@ -260,10 +260,10 @@ impl IOProvider {
     }
 
     #[tool(
-        name = "validate_project",
+        name = "validate_data_app",
         description = "Validate a project by copying files to a sandbox and running TypeScript compilation check. Returns validation result with success status and details."
     )]
-    pub async fn validate_project(
+    pub async fn validate_data_app(
         &self,
         Parameters(args): Parameters<ValidateProjectArgs>,
     ) -> Result<CallToolResult, ErrorData> {

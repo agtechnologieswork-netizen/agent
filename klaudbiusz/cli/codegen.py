@@ -313,8 +313,8 @@ Use up to 10 tools per call to speed up the process.\n"""
                     await self.tracker.log(self.run_id, "assistant", "text", block.text)
                 case ToolUseBlock(name="Task"):
                     await self._log_tool_use(block, truncate)
-                case ToolUseBlock(name="mcp__dabgent__initiate_project"):
-                    # capture app directory from initiate_project tool call
+                case ToolUseBlock(name="mcp__dabgent__scaffold_data_app"):
+                    # capture app directory from scaffold_data_app tool call
                     if block.input and "work_dir" in block.input:
                         self.app_dir = block.input["work_dir"]
                     await self._log_generic_tool(block, truncate)
