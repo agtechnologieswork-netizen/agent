@@ -61,13 +61,9 @@ def capture_screenshot(app_dir: str) -> tuple[str | None, str]:
     sidecar_path = Path(__file__).parent.parent.parent / "screenshot-sidecar"
     screenshot_dest = app_path / "screenshot.png"
 
-    # validate and get Databricks credentials from environment
-    databricks_host = os.environ.get("DATABRICKS_HOST")
-    databricks_token = os.environ.get("DATABRICKS_TOKEN")
-
-    if not databricks_host or not databricks_token:
-        log = "ERROR: DATABRICKS_HOST and DATABRICKS_TOKEN environment variables must be set"
-        return None, log
+    # get Databricks credentials from environment (validated at script start)
+    databricks_host = os.environ["DATABRICKS_HOST"]
+    databricks_token = os.environ["DATABRICKS_TOKEN"]
 
     env_vars = f"DATABRICKS_HOST={databricks_host},DATABRICKS_TOKEN={databricks_token}"
 
@@ -126,6 +122,10 @@ def run_single_generation(prompt: str, wipe_db: bool = False, use_subagents: boo
 
 
 def main(wipe_db: bool = False, n_jobs: int = -1, use_subagents: bool = False) -> None:
+    # validate required environment variables
+    if not os.environ.get("DATABRICKS_HOST") or not os.environ.get("DATABRICKS_TOKEN"):
+        raise ValueError("DATABRICKS_HOST and DATABRICKS_TOKEN environment variables must be set")
+
     print(f"Starting bulk generation for {len(PROMPTS)} prompts...")
     print(f"Parallel jobs: {n_jobs}")
     print(f"Wipe DB: {wipe_db}")
