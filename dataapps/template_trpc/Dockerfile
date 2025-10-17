@@ -7,9 +7,12 @@ WORKDIR /app
 COPY client/package*.json ./client/
 COPY server/package*.json ./server/
 
-# Install all dependencies
-RUN cd client && npm install
-RUN cd server && npm install
+# Install all dependencies with BuildKit cache mount
+RUN --mount=type=cache,target=/root/.npm \
+    cd client && npm ci
+
+RUN --mount=type=cache,target=/root/.npm \
+    cd server && npm ci
 
 # Copy server source (needed for client build due to tRPC types)
 COPY server/ ./server/
@@ -26,9 +29,10 @@ RUN apk add --no-cache curl
 
 WORKDIR /app
 
-# Install all dependencies (tsx needed for runtime)
+# Install production dependencies only with BuildKit cache mount
 COPY server/package*.json ./server/
-RUN cd server && npm install
+RUN --mount=type=cache,target=/root/.npm \
+    cd server && npm ci --omit=dev
 
 # Copy server source
 COPY server/ ./server/
