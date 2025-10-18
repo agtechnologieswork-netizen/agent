@@ -4,8 +4,9 @@ TypeScript full-stack template with tRPC for type-safe API communication between
 
 ## Workflow:
 - Projects MUST end with validate_project to verify build + tests pass
-- Always add tests for what you're implementing, put them next to the code (e.g. src/*.test.ts)
 - Bias towards backend code when the task allows implementation in multiple places
+- Always add tests for what you're implementing, put them next to the code (e.g. src/*.test.ts)
+- When working with Databricks or other services, use real API calls in tests (no mocks) to verify end-to-end functionality, unless explicitly instructed otherwise. It can be done on subset of data if applicable.
 - Do NOT create summary files, reports, or README unless explicitly requested
 
 ## Frontend Styling Guidelines:
