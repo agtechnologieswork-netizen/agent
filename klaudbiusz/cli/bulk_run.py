@@ -3,9 +3,7 @@
 import json
 import os
 import signal
-import subprocess
 import sys
-import time
 from datetime import datetime
 from pathlib import Path
 from typing import TypedDict
@@ -13,6 +11,7 @@ from typing import TypedDict
 from joblib import Parallel, delayed
 
 from codegen import AppBuilder, GenerationMetrics
+from screenshot import screenshot_apps
 
 
 class RunResult(TypedDict):
@@ -22,7 +21,6 @@ class RunResult(TypedDict):
     error: str | None
     app_dir: str | None
     screenshot_path: str | None
-    screenshot_log: str | None
     browser_logs_path: str | None
 
 
@@ -50,72 +48,31 @@ PROMPTS = {
 }
 
 
-def capture_screenshot(app_dir: str) -> tuple[str | None, str | None, str]:
-    """Capture screenshot for generated app using screenshot-sidecar.
+def enrich_results_with_screenshots(results: list[RunResult]) -> None:
+    """Enrich results by checking filesystem for screenshots and logs.
 
-    Uses the standalone screenshot-sidecar Dagger module to build and
-    screenshot the app from its Dockerfile.
-
-    Returns:
-        Tuple of (screenshot_path, browser_logs_path, log_output):
-        - screenshot_path: Path to screenshot.png if successful, None otherwise
-        - browser_logs_path: Path to logs.txt if successful, None otherwise
-        - log_output: Full stdout/stderr from the dagger command execution
+    Modifies results in-place, adding screenshot_path and has_logs flags.
     """
-    app_path = Path(app_dir).resolve()
-    sidecar_path = Path(__file__).parent.parent.parent / "screenshot-sidecar"
-    output_dir = app_path / "screenshot_output"
-    screenshot_dest = output_dir / "screenshot.png"
-    logs_dest = output_dir / "logs.txt"
+    for result in results:
+        app_dir = result.get("app_dir")
+        if not app_dir:
+            continue
 
-    # get Databricks credentials from environment (validated at script start)
-    databricks_host = os.environ["DATABRICKS_HOST"]
-    databricks_token = os.environ["DATABRICKS_TOKEN"]
+        screenshot_path = Path(app_dir) / "screenshot_output" / "screenshot.png"
+        logs_path = Path(app_dir) / "screenshot_output" / "logs.txt"
 
-    env_vars = f"DATABRICKS_HOST={databricks_host},DATABRICKS_TOKEN={databricks_token}"
+        result["screenshot_path"] = str(screenshot_path) if screenshot_path.exists() else None
 
-    for attempt in range(2):
-        try:
-            result = subprocess.run(
-                [
-                    "dagger",
-                    "call",
-                    "screenshot-app",
-                    f"--app-source={app_path}",
-                    f"--env-vars={env_vars}",
-                    "export",
-                    f"--path={output_dir}",
-                ],
-                cwd=str(sidecar_path),
-                capture_output=True,
-                text=True,
-                timeout=300,  # 5 minute timeout for dagger operations
-            )
-
-            log = f"=== STDOUT ===\n{result.stdout}\n\n=== STDERR ===\n{result.stderr}\n\n=== EXIT CODE ===\n{result.returncode}"
-
-            if result.returncode == 0 and screenshot_dest.exists():
-                browser_logs_path = str(logs_dest) if logs_dest.exists() else None
-                return str(screenshot_dest), browser_logs_path, log
-
-            if attempt == 0:
-                time.sleep(15)
-                continue
-
-            return None, None, log
-
-        except subprocess.TimeoutExpired:
-            log = "Screenshot capture timed out after 5 minutes"
-            if attempt == 1:
-                return None, None, log
-            time.sleep(15)
-        except Exception as e:
-            log = f"Exception during screenshot capture: {type(e).__name__}: {str(e)}"
-            if attempt == 1:
-                return None, None, log
-            time.sleep(15)
-
-    return None, None, log
+        # check if logs exist and are non-empty
+        has_logs = False
+        if logs_path.exists():
+            try:
+                has_logs = logs_path.stat().st_size > 0
+                result["browser_logs_path"] = str(logs_path)
+            except Exception:
+                result["browser_logs_path"] = None
+        else:
+            result["browser_logs_path"] = None
 
 
 def run_single_generation(app_name: str, prompt: str, wipe_db: bool = False, use_subagents: bool = False) -> RunResult:
@@ -131,13 +88,6 @@ def run_single_generation(app_name: str, prompt: str, wipe_db: bool = False, use
         metrics = codegen.run(prompt, wipe_db=wipe_db)
         app_dir = metrics.get("app_dir") if metrics else None
 
-        # capture screenshot if app was generated successfully
-        screenshot_path = None
-        browser_logs_path = None
-        screenshot_log = None
-        if app_dir:
-            screenshot_path, browser_logs_path, screenshot_log = capture_screenshot(app_dir)
-
         signal.alarm(0)  # cancel timeout
 
         return {
@@ -146,9 +96,8 @@ def run_single_generation(app_name: str, prompt: str, wipe_db: bool = False, use
             "metrics": metrics,
             "error": None,
             "app_dir": app_dir,
-            "screenshot_path": screenshot_path,
-            "screenshot_log": screenshot_log,
-            "browser_logs_path": browser_logs_path,
+            "screenshot_path": None,  # filled in later by enrichment
+            "browser_logs_path": None,  # filled in later by enrichment
         }
     except TimeoutError as e:
         signal.alarm(0)  # cancel timeout
@@ -160,12 +109,11 @@ def run_single_generation(app_name: str, prompt: str, wipe_db: bool = False, use
             "error": str(e),
             "app_dir": None,
             "screenshot_path": None,
-            "screenshot_log": None,
             "browser_logs_path": None,
         }
 
 
-def main(wipe_db: bool = False, n_jobs: int = -1, use_subagents: bool = False) -> None:
+def main(wipe_db: bool = False, n_jobs: int = -1, use_subagents: bool = False, screenshot_concurrency: int = 5) -> None:
     # validate required environment variables
     if not os.environ.get("DATABRICKS_HOST") or not os.environ.get("DATABRICKS_TOKEN"):
         raise ValueError("DATABRICKS_HOST and DATABRICKS_TOKEN environment variables must be set")
@@ -173,12 +121,15 @@ def main(wipe_db: bool = False, n_jobs: int = -1, use_subagents: bool = False) -
     print(f"Starting bulk generation for {len(PROMPTS)} prompts...")
     print(f"Parallel jobs: {n_jobs}")
     print(f"Wipe DB: {wipe_db}")
-    print(f"Use subagents: {use_subagents}\n")
+    print(f"Use subagents: {use_subagents}")
+    print(f"Screenshot concurrency: {screenshot_concurrency}\n")
 
+    # generate all apps
     results: list[RunResult] = Parallel(n_jobs=n_jobs, verbose=10)(  # type: ignore[assignment]
         delayed(run_single_generation)(app_name, prompt, wipe_db, use_subagents) for app_name, prompt in PROMPTS.items()
     )
 
+    # separate successful and failed generations
     successful: list[RunResult] = []
     failed: list[RunResult] = []
     for r in results:
@@ -187,6 +138,25 @@ def main(wipe_db: bool = False, n_jobs: int = -1, use_subagents: bool = False) -
             successful.append(r)
         else:
             failed.append(r)
+
+    apps_dir = "./app/"
+    # batch screenshot all successful apps
+    if successful:
+        # get apps directory from first successful app
+        first_app_dir = next((r["app_dir"] for r in successful if r["app_dir"]), None)
+        if first_app_dir:
+            apps_dir = str(Path(first_app_dir).parent)
+            print(f"\n{'=' * 80}")
+            print(f"Batch screenshotting {len(successful)} apps...")
+            print(f"{'=' * 80}\n")
+
+            try:
+                screenshot_apps(apps_dir, concurrency=screenshot_concurrency)
+            except Exception as e:
+                print(f"Screenshot batch failed: {e}")
+
+            # enrich results with screenshot info from filesystem
+            enrich_results_with_screenshots(results)
 
     successful_with_metrics: list[RunResult] = []
     for r in successful:
@@ -211,7 +181,8 @@ def main(wipe_db: bool = False, n_jobs: int = -1, use_subagents: bool = False) -
     for r in successful:
         if r["screenshot_path"] is not None:
             screenshot_successful += 1
-        elif r["app_dir"] is not None:  # only count as failed if app was generated but screenshot failed
+        else:
+            # count as failed if app was generated (has app_dir) but screenshot missing
             screenshot_failed += 1
 
     print(f"\n{'=' * 80}")
@@ -270,7 +241,7 @@ def main(wipe_db: bool = False, n_jobs: int = -1, use_subagents: bool = False) -
     print(f"\n{'=' * 80}\n")
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    output_file = Path(f"bulk_run_results_{timestamp}.json")
+    output_file = Path(apps_dir) / Path(f"bulk_run_results_{timestamp}.json")
 
     output_file.write_text(json.dumps(results, indent=2))
     print(f"Results saved to {output_file}")
