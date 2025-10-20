@@ -8,10 +8,14 @@ from datetime import datetime
 from pathlib import Path
 from typing import TypedDict
 
+from dotenv import load_dotenv
 from joblib import Parallel, delayed
 
 from codegen import AppBuilder, GenerationMetrics
 from screenshot import screenshot_apps
+
+# Load environment variables from .env file
+load_dotenv()
 
 
 class RunResult(TypedDict):
