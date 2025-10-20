@@ -149,20 +149,39 @@ def evaluate_app(app_dir: Path, prompt: str | None = None) -> EvalResult:
             run_command(["docker", "stop", container_id], timeout=10)
             run_command(["docker", "rm", container_id], timeout=10)
 
-    # Metric 3: Type Safety
-    type_ok_server, _, _ = run_command(["npx", "tsc", "--noEmit"], cwd=str(app_dir / "server"), timeout=60)
-    type_ok_client, _, _ = run_command(["npx", "tsc", "--noEmit"], cwd=str(app_dir / "client"), timeout=60)
-    metrics.type_safety = type_ok_server and type_ok_client
-    if not metrics.type_safety:
-        issues.append("TypeScript compilation errors")
+    # Install dependencies (needed for TypeScript and tests)
+    print("  Installing dependencies...")
+    server_deps_ok, _, _ = run_command(["npm", "install"], cwd=str(app_dir / "server"), timeout=180)
+    client_deps_ok, _, _ = run_command(["npm", "install"], cwd=str(app_dir / "client"), timeout=180)
+    deps_installed = server_deps_ok and client_deps_ok
 
-    # Metric 4: Tests Pass
-    tests_ok, stdout, stderr = run_command(["npm", "test"], cwd=str(app_dir / "server"), timeout=120)
-    metrics.tests_pass = tests_ok
-    test_files = list((app_dir / "server" / "src").glob("*.test.ts")) + list((app_dir / "server" / "src").glob("**/*.test.ts"))
-    metrics.has_tests = len(test_files) > 0
-    if not tests_ok:
-        issues.append("Tests failed")
+    if not deps_installed:
+        issues.append("Dependencies installation failed")
+
+    # Metric 3: Type Safety (requires dependencies)
+    if deps_installed:
+        type_ok_server, _, _ = run_command(["npx", "tsc", "--noEmit"], cwd=str(app_dir / "server"), timeout=60)
+        type_ok_client, _, _ = run_command(["npx", "tsc", "--noEmit"], cwd=str(app_dir / "client"), timeout=60)
+        metrics.type_safety = type_ok_server and type_ok_client
+        # Only flag TS errors as issues if they cause build/runtime problems
+        # (Since apps use tsx which skips type checking, TS strictness is informational)
+        if not metrics.type_safety and not metrics.build_success:
+            issues.append("TypeScript compilation errors prevent build")
+
+    # Metric 4: Tests Pass (requires dependencies)
+    if deps_installed:
+        tests_ok, stdout, stderr = run_command(["npm", "test"], cwd=str(app_dir / "server"), timeout=120)
+        metrics.tests_pass = tests_ok
+        test_files = list((app_dir / "server" / "src").glob("*.test.ts")) + list((app_dir / "server" / "src").glob("**/*.test.ts"))
+        metrics.has_tests = len(test_files) > 0
+        if not tests_ok:
+            issues.append("Tests failed")
+    else:
+        # If dependencies failed, tests also fail
+        tests_ok = False
+        metrics.tests_pass = False
+        stdout = ""
+        stderr = ""
 
     # Parse coverage
     output = stdout + stderr

@@ -633,8 +633,10 @@ def evaluate_app(app_dir: Path, prompt: str | None = None) -> EvalResult:
         if deps_installed:
             type_safety = check_type_safety(app_dir)
             metrics.type_safety = type_safety
-            if not type_safety:
-                issues.append("TypeScript compilation errors")
+            # Only flag TS errors as issues if they cause build/runtime problems
+            # (Since apps use tsx which skips type checking, TS strictness is informational)
+            if not type_safety and not build_success:
+                issues.append("TypeScript compilation errors prevent build")
         else:
             issues.append("Dependencies installation failed")
 
