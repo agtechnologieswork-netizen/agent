@@ -181,3 +181,9 @@ dabgent/dabgent_agent/output/**
 
 # Serena
 .serena
+
+# klaudbiusz 
+klaudbiusz/klaudbiusz_evaluation_*.tar.gz
+klaudbiusz/klaudbiusz_evaluation_*.tar.gz.sha256
+klaudbiusz/evaluation_report.csv
+klaudbiusz/evaluation_report.json
