@@ -9,17 +9,67 @@ PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 
 # Create archive name with timestamp
 TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
+ARCHIVE_DIR="${PROJECT_ROOT}/archive/${TIMESTAMP}"
 ARCHIVE_NAME="klaudbiusz_evaluation_${TIMESTAMP}.tar.gz"
 ARCHIVE_PATH="${PROJECT_ROOT}/${ARCHIVE_NAME}"
 
 echo "📦 Creating evaluation archive..."
-echo "Archive: ${ARCHIVE_NAME}"
+echo "Timestamp: ${TIMESTAMP}"
+echo "Archive Dir: archive/${TIMESTAMP}/"
+echo "Archive File: ${ARCHIVE_NAME}"
 echo ""
 
 # Change to project root
 cd "${PROJECT_ROOT}"
 
-# Create archive with all apps and reports
+# Create archive directory structure
+echo "📁 Syncing to archive/${TIMESTAMP}/..."
+mkdir -p "${ARCHIVE_DIR}"
+
+# Sync app directory to archive (exclude large build artifacts)
+if [ -d "app" ]; then
+    rsync -a --exclude='node_modules' \
+             --exclude='client/node_modules' \
+             --exclude='server/node_modules' \
+             --exclude='client/dist' \
+             --exclude='server/dist' \
+             --exclude='.next' \
+             --exclude='build' \
+             --exclude='*.tar.gz' \
+             --exclude='*.tar.gz.sha256' \
+             app/ "${ARCHIVE_DIR}/app/"
+    echo "   ✅ Synced app/ directory"
+fi
+
+# Copy evaluation reports from both locations
+if [ -f "evaluation_report.json" ]; then
+    cp "evaluation_report.json" "${ARCHIVE_DIR}/"
+    echo "   ✅ Copied evaluation_report.json"
+elif [ -f "app/evaluation_report.json" ]; then
+    cp "app/evaluation_report.json" "${ARCHIVE_DIR}/"
+    echo "   ✅ Copied app/evaluation_report.json"
+fi
+
+if [ -f "evaluation_report.csv" ]; then
+    cp "evaluation_report.csv" "${ARCHIVE_DIR}/"
+    echo "   ✅ Copied evaluation_report.csv"
+elif [ -f "app/evaluation_report.csv" ]; then
+    cp "app/evaluation_report.csv" "${ARCHIVE_DIR}/"
+    echo "   ✅ Copied app/evaluation_report.csv"
+fi
+
+if [ -f "EVALUATION_REPORT.md" ]; then
+    cp "EVALUATION_REPORT.md" "${ARCHIVE_DIR}/"
+    echo "   ✅ Copied EVALUATION_REPORT.md"
+elif [ -f "app/EVALUATION_REPORT.md" ]; then
+    cp "app/EVALUATION_REPORT.md" "${ARCHIVE_DIR}/"
+    echo "   ✅ Copied app/EVALUATION_REPORT.md"
+fi
+
+echo ""
+echo "📦 Creating compressed archive..."
+
+# Create tar.gz archive with all apps and reports
 tar -czf "${ARCHIVE_NAME}" \
   --exclude='app/*/node_modules' \
   --exclude='app/*/client/node_modules' \
@@ -28,23 +78,18 @@ tar -czf "${ARCHIVE_NAME}" \
   --exclude='app/*/server/dist' \
   --exclude='app/*/.next' \
   --exclude='app/*/build' \
-  app/ \
-  evaluation_report.json \
-  evaluation_report.csv \
-  EVALUATION_REPORT.md \
-  EVALUATION_METHODOLOGY.md \
-  DORA_METRICS.md \
-  evals.md \
-  IMPLEMENTATION_SUMMARY.md
+  -C "${ARCHIVE_DIR}" \
+  .
 
-# Get archive size
+# Get sizes
 ARCHIVE_SIZE=$(du -h "${ARCHIVE_NAME}" | cut -f1)
+ARCHIVE_DIR_SIZE=$(du -sh "${ARCHIVE_DIR}" | cut -f1)
 
 echo "✅ Archive created successfully!"
 echo ""
 echo "Archive Details:"
-echo "  Location: ${ARCHIVE_PATH}"
-echo "  Size: ${ARCHIVE_SIZE}"
+echo "  Persistent: archive/${TIMESTAMP}/ (${ARCHIVE_DIR_SIZE})"
+echo "  Compressed: ${ARCHIVE_NAME} (${ARCHIVE_SIZE})"
 echo ""
 
 # Show contents summary
@@ -58,5 +103,14 @@ echo ""
 CHECKSUM=$(shasum -a 256 "${ARCHIVE_NAME}" | cut -d' ' -f1)
 echo "SHA-256: ${CHECKSUM}" | tee "${ARCHIVE_NAME}.sha256"
 
+# Move both tar.gz and checksum into the archive directory
+mv "${ARCHIVE_NAME}" "${ARCHIVE_DIR}/"
+mv "${ARCHIVE_NAME}.sha256" "${ARCHIVE_DIR}/"
+
 echo ""
-echo "🎉 Archive complete: ${ARCHIVE_NAME}"
+echo "🎉 Archive complete!"
+echo ""
+echo "Locations:"
+echo "  📁 archive/${TIMESTAMP}/  (persistent, contains all files)"
+echo "  📦 archive/${TIMESTAMP}/${ARCHIVE_NAME}  (compressed backup)"
+echo "  🔐 archive/${TIMESTAMP}/${ARCHIVE_NAME}.sha256  (checksum)"
