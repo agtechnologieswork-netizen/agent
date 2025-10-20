@@ -18,6 +18,10 @@ Usage:
 import json
 import os
 import subprocess
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
 import sys
 import time
 from dataclasses import asdict, dataclass

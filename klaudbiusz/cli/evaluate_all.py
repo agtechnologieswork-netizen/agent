@@ -13,6 +13,10 @@ import json
 import os
 import subprocess
 import sys
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
 import time
 from collections import Counter, defaultdict
 from dataclasses import asdict, dataclass
