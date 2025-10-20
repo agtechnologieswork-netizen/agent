@@ -354,6 +354,9 @@ def generate_html_viewer(eval_json_path: Path, output_path: Path):
                             <th>Tests</th>
                             <th>DB</th>
                             <th>LOC</th>
+                            <th>💰 Cost</th>
+                            <th>🎯 Tokens</th>
+                            <th>🔄 Turns</th>
                             <th>Issues</th>
                         </tr>
                     </thead>
@@ -376,6 +379,7 @@ def generate_html_viewer(eval_json_path: Path, output_path: Path):
         // Render stats grid
         function renderStatsGrid() {{
             const stats = evalData.summary.metrics_summary || {{}};
+            const genMetrics = evalData.summary.generation_metrics || {{}};
             const total = evalData.summary.total_apps || 0;
 
             // Helper function to safely format numbers
@@ -419,6 +423,21 @@ def generate_html_viewer(eval_json_path: Path, output_path: Path):
                     <div class="label">Local Runability</div>
                     <div class="value">${{safe(stats.avg_local_runability || stats.local_runability_avg).toFixed(1)}}/5</div>
                     <div class="percentage">${{'⭐'.repeat(Math.round(safe(stats.avg_local_runability || stats.local_runability_avg)))}}</div>
+                </div>
+                <div class="stat-card" style="border: 2px solid #10b981;">
+                    <div class="label">💰 Total Cost</div>
+                    <div class="value">${{safe(genMetrics.total_cost_usd) > 0 ? '$' + safe(genMetrics.total_cost_usd).toFixed(2) : 'N/A'}}</div>
+                    <div class="percentage">Avg: ${{safe(genMetrics.avg_cost_usd).toFixed(2)}}/app</div>
+                </div>
+                <div class="stat-card" style="border: 2px solid #3b82f6;">
+                    <div class="label">🎯 Avg Output Tokens</div>
+                    <div class="value">${{safe(genMetrics.avg_output_tokens) > 0 ? safe(genMetrics.avg_output_tokens).toFixed(0) : 'N/A'}}</div>
+                    <div class="percentage">Per app</div>
+                </div>
+                <div class="stat-card" style="border: 2px solid #8b5cf6;">
+                    <div class="label">🔄 Avg Turns</div>
+                    <div class="value">${{safe(genMetrics.avg_turns) > 0 ? safe(genMetrics.avg_turns).toFixed(0) : 'N/A'}}</div>
+                    <div class="percentage">${{safe(genMetrics.avg_tokens_per_turn) > 0 ? safe(genMetrics.avg_tokens_per_turn).toFixed(0) + ' tokens/turn' : ''}}</div>
                 </div>
             `;
 
@@ -539,7 +558,14 @@ def generate_html_viewer(eval_json_path: Path, output_path: Path):
 
             const tableHtml = apps.map(app => {{
                 const m = app.metrics || {{}};
+                const gen = app.generation_metrics || {{}};
                 const issueCount = (app.issues || []).length;
+
+                // Format generation metrics
+                const cost = gen.cost_usd ? '$' + gen.cost_usd.toFixed(2) : '-';
+                const tokens = gen.output_tokens ? gen.output_tokens.toLocaleString() : '-';
+                const turns = gen.turns || '-';
+
                 return `
                 <tr>
                     <td><strong>${{app.app_name}}</strong></td>
@@ -550,6 +576,9 @@ def generate_html_viewer(eval_json_path: Path, output_path: Path):
                     <td>${{m.tests_pass ? '<span class="badge success">✅</span>' : '<span class="badge error">❌</span>'}}</td>
                     <td>${{m.databricks_connectivity ? '<span class="badge success">✅</span>' : '<span class="badge error">❌</span>'}}</td>
                     <td>${{m.total_loc || 0}}</td>
+                    <td style="font-weight: 600; color: #10b981;">${{cost}}</td>
+                    <td style="font-weight: 600; color: #3b82f6;">${{tokens}}</td>
+                    <td style="font-weight: 600; color: #8b5cf6;">${{turns}}</td>
                     <td><span class="badge warning">${{issueCount}}</span></td>
                 </tr>
             `}}).join('');

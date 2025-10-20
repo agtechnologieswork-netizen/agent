@@ -281,22 +281,54 @@ def evaluate_app(app_dir: Path, prompt: str | None = None) -> EvalResult:
     )
 
 
-def load_prompts_from_bulk_results(bulk_results_file: Path) -> dict[str, str]:
-    """Load prompts from bulk_run results."""
-    if not bulk_results_file.exists():
-        return {}
+def load_prompts_and_metrics_from_bulk_run() -> tuple[dict[str, str], dict[str, dict]]:
+    """Load prompts and generation metrics using PROMPTS dict from bulk_run.
+
+    Returns:
+        (prompts_dict, metrics_dict) where metrics_dict contains cost_usd, input_tokens, output_tokens, turns
+    """
     try:
-        data = json.loads(bulk_results_file.read_text())
-        prompts = {}
+        # Import PROMPTS from bulk_run.py
+        from bulk_run import PROMPTS
+    except ImportError:
+        return {}, {}
+
+    # Look for bulk_run_results file
+    script_dir = Path(__file__).parent
+    results_files = sorted(script_dir.glob("../bulk_run_results_*.json"), reverse=True)
+    if not results_files:
+        results_files = sorted(script_dir.glob("../app/bulk_run_results_*.json"), reverse=True)
+
+    if not results_files:
+        return dict(PROMPTS), {}
+
+    # Load generation metrics from results file
+    try:
+        data = json.loads(results_files[0].read_text())
+
+        # Create a prompt->metrics mapping
+        prompt_to_metrics = {}
         for result in data:
-            app_dir = result.get("app_dir")
             prompt = result.get("prompt")
-            if app_dir and prompt:
-                app_name = Path(app_dir).name
-                prompts[app_name] = prompt
-        return prompts
+            metrics = result.get("metrics", {})
+            if prompt:
+                prompt_to_metrics[prompt] = {
+                    "cost_usd": metrics.get("cost_usd", 0),
+                    "input_tokens": metrics.get("input_tokens", 0),
+                    "output_tokens": metrics.get("output_tokens", 0),
+                    "turns": metrics.get("turns", 0),
+                }
+
+        # Match app names to metrics using PROMPTS dict
+        gen_metrics = {}
+        for app_name, prompt in PROMPTS.items():
+            if prompt in prompt_to_metrics:
+                gen_metrics[app_name] = prompt_to_metrics[prompt]
+
+        return dict(PROMPTS), gen_metrics
+
     except Exception:
-        return {}
+        return dict(PROMPTS), {}
 
 
 def generate_summary_report(results: list[dict]) -> dict:
@@ -327,6 +359,16 @@ def generate_summary_report(results: list[dict]) -> dict:
             "avg_loc_per_app": sum(r["metrics"]["total_loc"] for r in results) / total if total > 0 else 0,
             "avg_build_time": sum(r["metrics"]["build_time_sec"] for r in results) / total if total > 0 else 0,
             "avg_startup_time": sum(r["metrics"]["startup_time_sec"] for r in results) / total if total > 0 else 0,
+        },
+        "generation_metrics": {
+            "total_cost_usd": sum(r.get("generation_metrics", {}).get("cost_usd", 0) for r in results),
+            "avg_cost_usd": sum(r.get("generation_metrics", {}).get("cost_usd", 0) for r in results) / total if total > 0 else 0,
+            "total_input_tokens": sum(r.get("generation_metrics", {}).get("input_tokens", 0) for r in results),
+            "total_output_tokens": sum(r.get("generation_metrics", {}).get("output_tokens", 0) for r in results),
+            "avg_input_tokens": sum(r.get("generation_metrics", {}).get("input_tokens", 0) for r in results) / total if total > 0 else 0,
+            "avg_output_tokens": sum(r.get("generation_metrics", {}).get("output_tokens", 0) for r in results) / total if total > 0 else 0,
+            "avg_turns": sum(r.get("generation_metrics", {}).get("turns", 0) for r in results) / total if total > 0 else 0,
+            "avg_tokens_per_turn": (sum(r.get("generation_metrics", {}).get("output_tokens", 0) for r in results) / sum(r.get("generation_metrics", {}).get("turns", 0) for r in results)) if sum(r.get("generation_metrics", {}).get("turns", 0) for r in results) > 0 else 0,
         },
         "quality_distribution": {
             "excellent": [],  # No issues
@@ -420,6 +462,21 @@ def generate_markdown_report(results: list[dict], summary: dict) -> str:
         md.append(f"- **Average Build Time:** {metrics['avg_build_time']:.1f}s")
     if metrics['avg_startup_time'] > 0:
         md.append(f"- **Average Startup Time:** {metrics['avg_startup_time']:.1f}s")
+
+    # Generation Metrics (if available)
+    if "generation_metrics" in summary and summary["generation_metrics"]["total_cost_usd"] > 0:
+        gen = summary["generation_metrics"]
+        md.append("\n### AI Generation Metrics")
+        md.append(f"- **Total Cost:** ${gen['total_cost_usd']:.2f}")
+        md.append(f"- **Average Cost per App:** ${gen['avg_cost_usd']:.2f}")
+        md.append(f"- **Total Output Tokens:** {gen['total_output_tokens']:,}")
+        md.append(f"- **Average Output Tokens per App:** {gen['avg_output_tokens']:.0f}")
+        md.append(f"- **Average Turns per App:** {gen['avg_turns']:.0f}")
+
+        # Calculate tokens per turn
+        if gen['avg_turns'] > 0:
+            tokens_per_turn = gen['avg_output_tokens'] / gen['avg_turns']
+            md.append(f"- **Average Output Tokens per Turn:** {tokens_per_turn:.0f}")
 
     # Quality Distribution
     md.append("\n## Quality Distribution\n")
@@ -691,9 +748,8 @@ def main():
         print(f"Error: Apps directory not found: {apps_dir}")
         sys.exit(1)
 
-    # Load prompts
-    results_files = sorted(script_dir.glob("../bulk_run_results_*.json"), reverse=True)
-    prompts = load_prompts_from_bulk_results(results_files[0]) if results_files else {}
+    # Load prompts and generation metrics from bulk_run.py and bulk_run_results
+    prompts, gen_metrics = load_prompts_and_metrics_from_bulk_run()
 
     # Get all app directories
     app_dirs = [d for d in sorted(apps_dir.iterdir()) if d.is_dir() and not d.name.startswith(".")]
@@ -708,7 +764,13 @@ def main():
         try:
             prompt = prompts.get(app_dir.name)
             result = evaluate_app(app_dir, prompt)
-            results.append(asdict(result))
+            result_dict = asdict(result)
+
+            # Add generation metrics if available
+            if app_dir.name in gen_metrics:
+                result_dict["generation_metrics"] = gen_metrics[app_dir.name]
+
+            results.append(result_dict)
 
             # Quick status
             status = "✓" if len(result.issues) <= 2 else "⚠" if len(result.issues) <= 4 else "✗"
