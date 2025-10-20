@@ -30,7 +30,7 @@ const appRouter = router({
 
 export type AppRouter = typeof appRouter;
 
-const app = express();
+export const app = express();
 
 // Serve static files
 app.use(express.static(STATIC_DIR));
@@ -49,10 +49,15 @@ app.get("/{*zzz}", (req, res) => {
   res.sendFile(path.join(STATIC_DIR, "index.html"));
 });
 
-const port = process.env["PORT"] || 8000;
+export function startServer(port: number = Number(process.env["PORT"]) || 8000) {
+  return app.listen(port, () => {
+    console.log(`Server listening at port: ${port}`);
+    console.log(`tRPC endpoint: http://localhost:${port}/api`);
+    console.log(`Frontend: http://localhost:${port}/`);
+  });
+}
 
-app.listen(port, () => {
-  console.log(`Server listening at port: ${port}`);
-  console.log(`tRPC endpoint: http://localhost:${port}/api`);
-  console.log(`Frontend: http://localhost:${port}/`);
-});
+// start server if this file is run directly
+if (require.main === module) {
+  startServer();
+}

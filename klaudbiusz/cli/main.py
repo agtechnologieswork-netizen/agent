@@ -21,6 +21,7 @@ def run(prompt: str, app_name: str | None = None, wipe_db: bool = True, suppress
     if app_name is None:
         app_name = f"app-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
 
+
     builder = AppBuilder(app_name=app_name, wipe_db=wipe_db, suppress_logs=suppress_logs, use_subagents=use_subagents)
     metrics = builder.run(prompt, wipe_db=wipe_db)
     print(f"\n{'=' * 80}")

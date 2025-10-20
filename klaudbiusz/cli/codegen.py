@@ -163,6 +163,8 @@ class AppBuilder:
         self.use_subagents = use_subagents
         self.suppress_logs = suppress_logs
         self.app_dir: str | None = None
+        # track tool_use_id -> (tool_name, work_dir) to capture app_dir from results
+        self._pending_scaffold_calls: dict[str, str] = {}
 
     def _setup_logging(self) -> None:
         if self.suppress_logs:
@@ -193,11 +195,8 @@ class AppBuilder:
                     model=frontmatter.get("model"),  # type: ignore[arg-type]
                 )
 
-        base_instructions = """The project should start with initiate_project for scaffolding and validate_project is required to finish the work.\n
-Make sure to add tests for what you're implementing.\n
-Bias towards backend code when the task allows to implement it in multiple places.\n
-Do not create final summary file / report / readme. The user will ask for it separately if needed.\n
-"""
+        # workflow and template best practices are now in the MCP tool description
+        base_instructions = ""
 
         if self.use_subagents:
             base_instructions += """When you need to explore Databricks tables, schemas, or execute SQL queries, use the Task tool to delegate to the 'dataresearch' subagent. Do NOT use databricks_* tools directly.\n"""
@@ -258,19 +257,24 @@ Use up to 10 tools per call to speed up the process.\n"""
         try:
             async for message in query(prompt=user_prompt, options=options):
                 await self._log_message(message)
-                if isinstance(message, ResultMessage):
-                    if message.total_cost_usd is None:
+                match message:
+                    case ResultMessage(total_cost_usd=None):
                         raise RuntimeError("total_cost_usd is None in ResultMessage")
-                    if message.usage is None:
+                    case ResultMessage(usage=None):
                         raise RuntimeError("usage is None in ResultMessage")
-                    usage = message.usage
-                    metrics = {
-                        "cost_usd": message.total_cost_usd,
-                        "input_tokens": usage.get("input_tokens", 0),
-                        "output_tokens": usage.get("output_tokens", 0),
-                        "turns": message.num_turns,
-                        "app_dir": self.app_dir,
-                    }
+                    case ResultMessage() as msg:
+                        # we've already checked that total_cost_usd and usage are not None
+                        assert msg.total_cost_usd is not None
+                        assert msg.usage is not None
+                        metrics = {
+                            "cost_usd": msg.total_cost_usd,
+                            "input_tokens": msg.usage.get("input_tokens", 0),
+                            "output_tokens": msg.usage.get("output_tokens", 0),
+                            "turns": msg.num_turns,
+                            "app_dir": self.app_dir,
+                        }
+                    case _:
+                        pass
         except Exception as e:
             if not self.suppress_logs:
                 print(f"\n❌ Error: {e}", file=sys.stderr)
@@ -298,6 +302,25 @@ Use up to 10 tools per call to speed up the process.\n"""
             f"subagent={tool_input.subagent_type}, task={tool_input.description}, prompt={tool_input.prompt}",
         )
 
+    async def _log_todo_update(self, block: ToolUseBlock, truncate) -> None:
+        input_dict = block.input or {}
+        todos = input_dict.get("todos", [])
+
+        if not self.suppress_logs and todos:
+            completed = sum(1 for t in todos if t.get("status") == "completed")
+            in_progress = [t for t in todos if t.get("status") == "in_progress"]
+
+            logger.info(f"📋 Todo update: {completed}/{len(todos)} completed")
+            for todo in in_progress:
+                logger.info(f"   ▶ {todo.get('activeForm', todo.get('content', 'Unknown'))}")
+
+        await self.tracker.log(
+            self.run_id,
+            "assistant",
+            "todo_update",
+            f"todos={len(todos)}, completed={sum(1 for t in todos if t.get('status') == 'completed')}",
+        )
+
     async def _log_generic_tool(self, block: ToolUseBlock, truncate) -> None:
         params = ", ".join(f"{k}={v}" for k, v in (block.input or {}).items())
         if not self.suppress_logs:
@@ -314,12 +337,14 @@ Use up to 10 tools per call to speed up the process.\n"""
                     if not self.suppress_logs:
                         logger.info(f"💬 {block.text}")
                     await self.tracker.log(self.run_id, "assistant", "text", block.text)
+                case ToolUseBlock(name="TodoWrite"):
+                    await self._log_todo_update(block, truncate)
                 case ToolUseBlock(name="Task"):
                     await self._log_tool_use(block, truncate)
-                case ToolUseBlock(name="mcp__dabgent__initiate_project"):
-                    # capture app directory from initiate_project tool call
+                case ToolUseBlock(name="mcp__dabgent__scaffold_data_app"):
+                    # track scaffold call to capture app_dir from result
                     if block.input and "work_dir" in block.input:
-                        self.app_dir = block.input["work_dir"]
+                        self._pending_scaffold_calls[block.id] = block.input["work_dir"]
                     await self._log_generic_tool(block, truncate)
                 case ToolUseBlock():
                     await self._log_generic_tool(block, truncate)
@@ -329,12 +354,20 @@ Use up to 10 tools per call to speed up the process.\n"""
             return text if len(text) <= max_len else text[:max_len] + "..."
 
         for block in message.content:
-            if isinstance(block, ToolResultBlock):
-                if block.is_error:
+            match block:
+                case ToolResultBlock(tool_use_id=tool_id, is_error=False) if tool_id in self._pending_scaffold_calls:
+                    # capture app_dir from successful scaffold_data_app result
+                    self.app_dir = self._pending_scaffold_calls.pop(tool_id)
+                    result_text = str(block.content)
+                    if result_text:
+                        if not self.suppress_logs:
+                            logger.info(f"✅ Tool result: {truncate(result_text)}")
+                        await self.tracker.log(self.run_id, "user", "tool_result", result_text)
+                case ToolResultBlock(is_error=True):
                     if not self.suppress_logs:
                         logger.warning(f"❌ Tool error: {truncate(str(block.content))}")
                     await self.tracker.log(self.run_id, "user", "tool_error", str(block.content))
-                else:
+                case ToolResultBlock():
                     result_text = str(block.content)
                     if result_text:
                         if not self.suppress_logs:
