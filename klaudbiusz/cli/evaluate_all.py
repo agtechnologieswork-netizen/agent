@@ -782,6 +782,17 @@ def main():
 
     print(f"\n📄 Full report: {md_output}")
 
+    # Generate interactive HTML viewer
+    print("\n🌐 Generating interactive HTML viewer...")
+    try:
+        from generate_eval_viewer import generate_html_viewer
+        html_output = output_dir / "evaluation_viewer.html"
+        generate_html_viewer(json_output, html_output)
+        print(f"✓ HTML viewer: {html_output}")
+        print(f"\n🎉 Open in browser: file://{html_output.absolute()}")
+    except Exception as e:
+        print(f"⚠️  Could not generate HTML viewer: {e}")
+
 
 if __name__ == "__main__":
     main()
