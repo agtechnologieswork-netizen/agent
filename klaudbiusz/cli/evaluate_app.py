@@ -164,6 +164,36 @@ def check_runtime_success(app_dir: Path, container_name: str) -> tuple[bool, dic
     return False, {}
 
 
+def install_dependencies(app_dir: Path) -> bool:
+    """Install npm dependencies for both client and server."""
+    print("  [0/7] Installing dependencies...")
+
+    # Install server dependencies
+    server_success, _, _ = run_command(
+        ["npm", "install"],
+        cwd=str(app_dir / "server"),
+        timeout=180,
+    )
+
+    if not server_success:
+        print("    ⚠️  Server npm install failed")
+        return False
+
+    # Install client dependencies
+    client_success, _, _ = run_command(
+        ["npm", "install"],
+        cwd=str(app_dir / "client"),
+        timeout=180,
+    )
+
+    if not client_success:
+        print("    ⚠️  Client npm install failed")
+        return False
+
+    print("    ✅ Dependencies installed")
+    return True
+
+
 def check_type_safety(app_dir: Path) -> bool:
     """Metric 3: TypeScript compiles without errors."""
     print("  [3/7] Checking type safety...")
@@ -581,6 +611,9 @@ def evaluate_app(app_dir: Path, prompt: str | None = None) -> EvalResult:
     runtime_success = False  # Initialize to avoid UnboundLocalError
 
     try:
+        # Install dependencies first (needed for TypeScript and tests)
+        deps_installed = install_dependencies(app_dir)
+
         # Metric 1: Build
         build_success, build_meta = check_build_success(app_dir)
         metrics.build_success = build_success
@@ -596,20 +629,24 @@ def evaluate_app(app_dir: Path, prompt: str | None = None) -> EvalResult:
             if not runtime_success:
                 issues.append("Container failed to start or healthcheck failed")
 
-        # Metric 3: Type safety
-        type_safety = check_type_safety(app_dir)
-        metrics.type_safety = type_safety
-        if not type_safety:
-            issues.append("TypeScript compilation errors")
+        # Metric 3: Type safety (requires dependencies)
+        if deps_installed:
+            type_safety = check_type_safety(app_dir)
+            metrics.type_safety = type_safety
+            if not type_safety:
+                issues.append("TypeScript compilation errors")
+        else:
+            issues.append("Dependencies installation failed")
 
-        # Metric 4: Tests
-        tests_pass, coverage = check_tests_pass(app_dir)
-        metrics.tests_pass = tests_pass
-        metrics.test_coverage_pct = coverage
-        if not tests_pass:
-            issues.append("Tests failed")
-        if coverage < 70:
-            issues.append(f"Test coverage below 70% ({coverage:.1f}%)")
+        # Metric 4: Tests (requires dependencies)
+        if deps_installed:
+            tests_pass, coverage = check_tests_pass(app_dir)
+            metrics.tests_pass = tests_pass
+            metrics.test_coverage_pct = coverage
+            if not tests_pass:
+                issues.append("Tests failed")
+            if coverage < 70:
+                issues.append(f"Test coverage below 70% ({coverage:.1f}%)")
 
         # Metric 5: Databricks connectivity (only if runtime succeeded)
         if runtime_success:
