@@ -41,29 +41,10 @@ if [ -d "app" ]; then
     echo "   ✅ Synced app/ directory"
 fi
 
-# Copy evaluation reports from both locations
-if [ -f "evaluation_report.json" ]; then
-    cp "evaluation_report.json" "${ARCHIVE_DIR}/"
-    echo "   ✅ Copied evaluation_report.json"
-elif [ -f "app/evaluation_report.json" ]; then
-    cp "app/evaluation_report.json" "${ARCHIVE_DIR}/"
-    echo "   ✅ Copied app/evaluation_report.json"
-fi
-
-if [ -f "evaluation_report.csv" ]; then
-    cp "evaluation_report.csv" "${ARCHIVE_DIR}/"
-    echo "   ✅ Copied evaluation_report.csv"
-elif [ -f "app/evaluation_report.csv" ]; then
-    cp "app/evaluation_report.csv" "${ARCHIVE_DIR}/"
-    echo "   ✅ Copied app/evaluation_report.csv"
-fi
-
-if [ -f "EVALUATION_REPORT.md" ]; then
-    cp "EVALUATION_REPORT.md" "${ARCHIVE_DIR}/"
-    echo "   ✅ Copied EVALUATION_REPORT.md"
-elif [ -f "app/EVALUATION_REPORT.md" ]; then
-    cp "app/EVALUATION_REPORT.md" "${ARCHIVE_DIR}/"
-    echo "   ✅ Copied app/EVALUATION_REPORT.md"
+# Sync app-eval directory to archive (contains all evaluation reports)
+if [ -d "app-eval" ]; then
+    rsync -a app-eval/ "${ARCHIVE_DIR}/app-eval/"
+    echo "   ✅ Synced app-eval/ directory (evaluation reports)"
 fi
 
 echo ""

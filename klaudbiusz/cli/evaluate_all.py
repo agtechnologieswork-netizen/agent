@@ -13,6 +13,7 @@ import json
 import os
 import subprocess
 import sys
+from datetime import datetime
 from dotenv import load_dotenv
 
 # Load environment variables from .env file
@@ -706,8 +707,24 @@ def main():
     summary = generate_summary_report(results)
     markdown = generate_markdown_report(results, summary)
 
-    # Determine output paths
-    output_dir = script_dir.parent
+    # Determine output paths - save to app-eval directory
+    output_dir = script_dir.parent / "app-eval"
+    output_dir.mkdir(exist_ok=True)
+
+    # Rename existing evaluation files before creating new ones
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    old_files = [
+        (output_dir / "evaluation_report.json", f"evaluation_report_{timestamp}.json"),
+        (output_dir / "evaluation_report.csv", f"evaluation_report_{timestamp}.csv"),
+        (output_dir / "EVALUATION_REPORT.md", f"EVALUATION_REPORT_{timestamp}.md"),
+    ]
+
+    for old_file, new_name in old_files:
+        if old_file.exists():
+            renamed = old_file.parent / new_name
+            old_file.rename(renamed)
+            print(f"  Preserved: {old_file.name} → {new_name}")
+
     json_output = output_dir / "evaluation_report.json"
     md_output = output_dir / "EVALUATION_REPORT.md"
 
@@ -715,6 +732,8 @@ def main():
     full_report = {
         "summary": summary,
         "apps": results,
+        "timestamp": timestamp,
+        "evaluation_run_id": timestamp,
     }
     json_output.write_text(json.dumps(full_report, indent=2))
     print(f"✓ JSON report saved: {json_output}")

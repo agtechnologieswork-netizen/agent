@@ -54,29 +54,10 @@ if [ -d "app" ] && [ "$APP_COUNT" -gt 0 ]; then
     echo "   ✅ Synced app/ → archive/${TIMESTAMP}/app/"
 fi
 
-# Copy evaluation reports from both locations
-if [ -f "evaluation_report.json" ]; then
-    cp "evaluation_report.json" "${ARCHIVE_DIR}/"
-    echo "   ✅ Synced evaluation_report.json"
-elif [ -f "app/evaluation_report.json" ]; then
-    cp "app/evaluation_report.json" "${ARCHIVE_DIR}/"
-    echo "   ✅ Synced app/evaluation_report.json"
-fi
-
-if [ -f "evaluation_report.csv" ]; then
-    cp "evaluation_report.csv" "${ARCHIVE_DIR}/"
-    echo "   ✅ Synced evaluation_report.csv"
-elif [ -f "app/evaluation_report.csv" ]; then
-    cp "app/evaluation_report.csv" "${ARCHIVE_DIR}/"
-    echo "   ✅ Synced app/evaluation_report.csv"
-fi
-
-if [ -f "EVALUATION_REPORT.md" ]; then
-    cp "EVALUATION_REPORT.md" "${ARCHIVE_DIR}/"
-    echo "   ✅ Synced EVALUATION_REPORT.md"
-elif [ -f "app/EVALUATION_REPORT.md" ]; then
-    cp "app/EVALUATION_REPORT.md" "${ARCHIVE_DIR}/"
-    echo "   ✅ Synced app/EVALUATION_REPORT.md"
+# Sync app-eval directory to archive (contains all evaluation reports)
+if [ -d "app-eval" ]; then
+    rsync -a app-eval/ "${ARCHIVE_DIR}/app-eval/"
+    echo "   ✅ Synced app-eval/ → archive/${TIMESTAMP}/app-eval/"
 fi
 
 echo ""
@@ -92,41 +73,16 @@ else
     echo "   ℹ️  No apps to remove"
 fi
 
-# Remove evaluation reports from both locations
+# Remove app-eval directory (all evaluation reports)
 echo ""
 echo "📄 Removing evaluation reports..."
 
-if [ -f "evaluation_report.json" ]; then
-    rm -f evaluation_report.json
-    echo "   ✅ Removed evaluation_report.json"
+if [ -d "app-eval" ]; then
+    rm -rf app-eval/
+    echo "   ✅ Removed app-eval/ directory (all evaluation reports)"
 fi
 
-if [ -f "evaluation_report.csv" ]; then
-    rm -f evaluation_report.csv
-    echo "   ✅ Removed evaluation_report.csv"
-fi
-
-if [ -f "EVALUATION_REPORT.md" ]; then
-    rm -f EVALUATION_REPORT.md
-    echo "   ✅ Removed EVALUATION_REPORT.md"
-fi
-
-if [ -f "app/evaluation_report.json" ]; then
-    rm -f app/evaluation_report.json
-    echo "   ✅ Removed app/evaluation_report.json"
-fi
-
-if [ -f "app/evaluation_report.csv" ]; then
-    rm -f app/evaluation_report.csv
-    echo "   ✅ Removed app/evaluation_report.csv"
-fi
-
-if [ -f "app/EVALUATION_REPORT.md" ]; then
-    rm -f app/EVALUATION_REPORT.md
-    echo "   ✅ Removed app/EVALUATION_REPORT.md"
-fi
-
-# Remove old tar.gz archives from app/ (they belong in root)
+# Remove old tar.gz archives from app/ (they belong in archive/)
 if ls app/*.tar.gz 1> /dev/null 2>&1; then
     rm -f app/*.tar.gz app/*.tar.gz.sha256
     echo "   ✅ Removed old archives from app/"
@@ -138,7 +94,7 @@ echo "✅ Cleanup complete!"
 echo ""
 echo "📁 Kept (safe in archive/):"
 echo "  - archive/${TIMESTAMP}/app/ (all app code)"
-echo "  - archive/${TIMESTAMP}/*.{json,csv,md} (evaluation reports)"
+echo "  - archive/${TIMESTAMP}/app-eval/ (all evaluation reports)"
 echo "  - archive/*/ (all previous evaluations)"
 echo ""
 echo "📦 Also kept:"
@@ -146,8 +102,8 @@ echo "  - archive/*/klaudbiusz_evaluation_*.tar.gz (compressed backups)"
 echo "  - eval-docs/ (evaluation framework)"
 echo "  - cli/ (scripts)"
 echo ""
-echo "🗑️  Removed from app/:"
+echo "🗑️  Removed:"
 echo "  - app/*/ (${APP_COUNT} generated apps)"
-echo "  - app/evaluation_report.* (report files)"
+echo "  - app-eval/ (evaluation reports)"
 echo ""
 echo "✨ Ready for fresh generation run!"
