@@ -19,22 +19,23 @@ load_dotenv()
 
 
 # Data context for vanilla Claude SDK mode (non-MCP)
+# This provides ONLY table schemas - no implementation hints
 DATA_CONTEXT = """
-## Databricks Environment Setup
-Set these environment variables before running:
-- DATABRICKS_HOST: Your Databricks workspace URL (e.g., https://your-workspace.cloud.databricks.com/)
-- DATABRICKS_TOKEN: Your Databricks personal access token
+## Databricks Connection
+Environment variables required:
+- DATABRICKS_HOST
+- DATABRICKS_TOKEN
 
-## Available Databricks Sample Tables
+## Available Sample Tables
 
-### samples.tpch.* (TPC-H E-commerce Benchmark)
+### samples.tpch.*
 - **orders**: o_orderkey, o_custkey, o_orderstatus, o_totalprice, o_orderdate, o_orderpriority
 - **customer**: c_custkey, c_name, c_address, c_nationkey, c_phone, c_acctbal, c_mktsegment
 - **lineitem**: l_orderkey, l_partkey, l_suppkey, l_linenumber, l_quantity, l_extendedprice, l_discount, l_tax, l_returnflag, l_linestatus, l_shipdate, l_commitdate, l_receiptdate
 - **part**: p_partkey, p_name, p_mfgr, p_brand, p_type, p_size, p_container, p_retailprice
 - **supplier**: s_suppkey, s_name, s_address, s_nationkey, s_phone, s_acctbal
 
-### samples.tpcds_sf1.* (TPC-DS Retail Benchmark)
+### samples.tpcds_sf1.*
 - **store_sales**: ss_sold_date_sk, ss_sold_time_sk, ss_item_sk, ss_customer_sk, ss_store_sk, ss_quantity, ss_sales_price, ss_net_paid, ss_net_profit
 - **web_sales**: ws_sold_date_sk, ws_item_sk, ws_bill_customer_sk, ws_quantity, ws_sales_price, ws_net_paid, ws_net_profit
 - **catalog_sales**: cs_sold_date_sk, cs_item_sk, cs_bill_customer_sk, cs_quantity, cs_sales_price, cs_net_paid, cs_net_profit
@@ -45,10 +46,8 @@ Set these environment variables before running:
 - **item**: i_item_sk, i_item_id, i_item_desc, i_current_price, i_class, i_category, i_brand, i_manager_id
 - **promotion**: p_promo_sk, p_promo_id, p_promo_name, p_start_date_sk, p_end_date_sk, p_cost, p_response_target, p_channel_dmail, p_channel_email, p_channel_tv
 
-### samples.nyctaxi.trips (NYC Taxi Trip Data)
+### samples.nyctaxi.trips
 - **trips**: tpep_pickup_datetime, tpep_dropoff_datetime, passenger_count, trip_distance, fare_amount, extra, tip_amount, tolls_amount, total_amount, payment_type, pickup_location_id, dropoff_location_id
-
-Use SQL queries against these tables to fetch and analyze data. Connect using DatabricksClient with environment variables.
 
 """
 
@@ -86,87 +85,67 @@ PROMPTS = {
     "promotion-roi-analysis": "Measure promotion ROI: incremental revenue during promo vs cost, with 7-day post-promotion lift. Flag underperforming promotions.",
 }
 
-# Table recommendations for vanilla SDK mode
+# Table hints for vanilla SDK mode - ONLY lists relevant tables, NO implementation guidance
 PROMPT_TABLE_HINTS = {
     "churn-risk-dashboard": """
-Recommended tables: samples.tpcds_sf1.customer, samples.tpcds_sf1.store_sales/web_sales/catalog_sales (for activity trends), samples.tpcds_sf1.date_dim
-Note: Login activity may need to be simulated from purchase activity. Support ticket data may need to be mocked.""",
+Relevant tables: samples.tpcds_sf1.customer, samples.tpcds_sf1.store_sales, samples.tpcds_sf1.web_sales, samples.tpcds_sf1.catalog_sales, samples.tpcds_sf1.date_dim""",
 
     "revenue-by-channel": """
-Recommended tables: samples.tpcds_sf1.store_sales, samples.tpcds_sf1.web_sales, samples.tpcds_sf1.catalog_sales, samples.tpcds_sf1.date_dim
-Use ss_net_paid/ws_net_paid/cs_net_paid for revenue amounts.""",
+Relevant tables: samples.tpcds_sf1.store_sales, samples.tpcds_sf1.web_sales, samples.tpcds_sf1.catalog_sales, samples.tpcds_sf1.date_dim""",
 
     "customer-rfm-segments": """
-Recommended tables: samples.tpch.orders (use o_orderdate for recency, COUNT for frequency, SUM(o_totalprice) for monetary)
-Or: samples.tpcds_sf1.store_sales/web_sales/catalog_sales joined with date_dim""",
+Relevant tables: samples.tpch.orders, samples.tpch.customer""",
 
     "taxi-trip-metrics": """
-Recommended tables: samples.nyctaxi.trips
-Use trip_distance for brackets, HOUR(tpep_pickup_datetime) for time of day, fare_amount for revenue.""",
+Relevant tables: samples.nyctaxi.trips""",
 
     "slow-moving-inventory": """
-Recommended tables: samples.tpcds_sf1.item (for products), samples.tpcds_sf1.store_sales/web_sales (for turnover calculation)
-Note: Warehouse capacity data may need to be mocked or derived from sales patterns.""",
+Relevant tables: samples.tpcds_sf1.item, samples.tpcds_sf1.store_sales, samples.tpcds_sf1.web_sales""",
 
     "customer-360-view": """
-Recommended tables: samples.tpcds_sf1.customer, samples.tpcds_sf1.store_sales/web_sales/catalog_sales, samples.tpcds_sf1.item (for categories)
-Or: samples.tpch.customer, samples.tpch.orders, samples.tpch.lineitem, samples.tpch.part""",
+Relevant tables: samples.tpcds_sf1.customer, samples.tpcds_sf1.store_sales, samples.tpcds_sf1.web_sales, samples.tpcds_sf1.catalog_sales, samples.tpcds_sf1.item""",
 
     "product-pair-analysis": """
-Recommended tables: samples.tpch.lineitem (join on l_orderkey to find items in same order), samples.tpch.part (for product details)
-Or: samples.tpcds_sf1.store_sales with self-join on ticket_number""",
+Relevant tables: samples.tpch.lineitem, samples.tpch.part, samples.tpch.orders""",
 
     "revenue-forecast-quarterly": """
-Recommended tables: samples.tpcds_sf1.store_sales/web_sales/catalog_sales, samples.tpcds_sf1.date_dim (use d_year, d_moy, d_qoy for temporal analysis)
-Or: samples.tpch.orders (use o_orderdate, o_totalprice)""",
+Relevant tables: samples.tpcds_sf1.store_sales, samples.tpcds_sf1.web_sales, samples.tpcds_sf1.catalog_sales, samples.tpcds_sf1.date_dim""",
 
     "data-quality-metrics": """
-Recommended tables: Any of the sample tables - analyze NULL percentages, value ranges, and distributions
-Suggested: samples.tpcds_sf1.store_sales (check completeness of ss_net_paid, ss_quantity), samples.tpch.orders""",
+Relevant tables: samples.tpcds_sf1.store_sales, samples.tpch.orders""",
 
     "channel-conversion-comparison": """
-Recommended tables: samples.tpcds_sf1.store_sales, samples.tpcds_sf1.web_sales, samples.tpcds_sf1.catalog_sales, samples.tpcds_sf1.customer
-Note: Conversion rates may need to be inferred from purchase patterns or use mock session data.""",
+Relevant tables: samples.tpcds_sf1.store_sales, samples.tpcds_sf1.web_sales, samples.tpcds_sf1.catalog_sales, samples.tpcds_sf1.customer""",
 
     "customer-churn-analysis": """
-Recommended tables: samples.tpch.orders (find customers with no recent o_orderdate), samples.tpch.customer
-Or: samples.tpcds_sf1.customer with sales tables joined by customer_sk""",
+Relevant tables: samples.tpch.orders, samples.tpch.customer""",
 
     "pricing-impact-analysis": """
-Recommended tables: samples.tpcds_sf1.item (i_current_price, i_category), samples.tpcds_sf1.store_sales (ss_sales_price, ss_net_paid)
-Or: samples.tpch.part (p_retailprice), samples.tpch.lineitem (l_extendedprice)""",
+Relevant tables: samples.tpcds_sf1.item, samples.tpcds_sf1.store_sales""",
 
     "supplier-scorecard": """
-Recommended tables: samples.tpch.supplier, samples.tpch.lineitem (use l_commitdate vs l_receiptdate for on-time delivery, l_returnflag for defects)
-Note: Some metrics like defect rate may need to be simulated.""",
+Relevant tables: samples.tpch.supplier, samples.tpch.lineitem""",
 
     "sales-density-heatmap": """
-Recommended tables: samples.tpcds_sf1.customer_address (ca_zip), samples.tpcds_sf1.customer, samples.tpcds_sf1.store_sales/web_sales
-Note: Population density data may need to be mocked.""",
+Relevant tables: samples.tpcds_sf1.customer_address, samples.tpcds_sf1.customer, samples.tpcds_sf1.store_sales, samples.tpcds_sf1.web_sales""",
 
     "cac-by-channel": """
-Recommended tables: samples.tpcds_sf1.promotion (p_channel_email, p_channel_dmail, p_channel_tv), samples.tpcds_sf1.store_sales/web_sales
-Note: CAC data may need to be mocked; calculate LTV from customer lifetime revenue.""",
+Relevant tables: samples.tpcds_sf1.promotion, samples.tpcds_sf1.store_sales, samples.tpcds_sf1.web_sales""",
 
     "subscription-tier-optimization": """
-Recommended tables: samples.tpcds_sf1.customer (segment by c_preferred_cust_flag or mock tiers), analyze purchase frequency from sales tables
-Note: Subscription tier data will need to be simulated; use purchase patterns as proxy for usage.""",
+Relevant tables: samples.tpcds_sf1.customer, samples.tpcds_sf1.store_sales, samples.tpcds_sf1.web_sales, samples.tpcds_sf1.catalog_sales""",
 
     "product-profitability": """
-Recommended tables: samples.tpcds_sf1.item, samples.tpcds_sf1.store_sales (ss_net_profit), samples.tpcds_sf1.store_returns
-Or: samples.tpch.lineitem (l_extendedprice, l_discount), samples.tpch.part""",
+Relevant tables: samples.tpcds_sf1.item, samples.tpcds_sf1.store_sales, samples.tpcds_sf1.store_returns""",
 
     "warehouse-efficiency": """
-Recommended tables: samples.tpch.orders, samples.tpch.lineitem (use l_commitdate, l_shipdate for SLA calculation)
-Note: Warehouse facility data may need to be mocked.""",
+Relevant tables: samples.tpch.orders, samples.tpch.lineitem""",
 
     "customer-ltv-cohorts": """
-Recommended tables: samples.tpch.orders (use MIN(o_orderdate) per o_custkey for cohort, SUM(o_totalprice) for LTV)
-Or: samples.tpcds_sf1.customer with sales tables grouped by cohort month""",
+Relevant tables: samples.tpch.orders, samples.tpch.customer""",
 
     "promotion-roi-analysis": """
-Recommended tables: samples.tpcds_sf1.promotion (p_cost, p_start_date_sk, p_end_date_sk), samples.tpcds_sf1.store_sales/web_sales
-Join with date_dim to analyze revenue during promotion periods.""",
+Relevant tables: samples.tpcds_sf1.promotion, samples.tpcds_sf1.store_sales, samples.tpcds_sf1.web_sales, samples.tpcds_sf1.date_dim""",
 }
 
 
