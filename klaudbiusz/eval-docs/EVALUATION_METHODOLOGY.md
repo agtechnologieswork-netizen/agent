@@ -76,6 +76,14 @@ This frames evaluation around practical functionality rather than abstract code 
 - ✅ "Are there visible errors?" → yes/no
 - ❌ "Is the UI well-designed?" → subjective, prohibited
 
+**LLM for objective command discovery:**
+- ✅ "What command installs dependencies?" → discovers from package.json/requirements.txt
+- ✅ "How do I run tests?" → analyzes project structure objectively
+- ✅ "What's the build command?" → reads configuration files
+- ❌ "Is this code well-structured?" → subjective, prohibited
+
+This maintains zero-bias while enabling stack-agnostic evaluation.
+
 ---
 
 ## The 9-Metric Framework
@@ -161,6 +169,50 @@ Our objective approach directly supports DevOps Research and Assessment (DORA) p
 - No dependency on local tool versions (Node.js, Python, etc.)
 - Reproducible results on any machine
 - Matches production deployment approach
+
+### Why LLM-Based Command Discovery?
+
+**Decision:** Use LLM to discover build/test/run commands instead of hardcoding framework assumptions.
+
+**Rationale:**
+- **Stack Agnostic**: Works with TypeScript, Python, Streamlit, Flask, any framework
+- **Zero Maintenance**: No code updates needed for new frameworks
+- **Objective**: LLM analyzes actual files (package.json, requirements.txt, Dockerfile)
+- **Reproducible**: Same app structure → same discovered commands
+- **Zero Bias**: Evaluates what the app *is*, not what we *assume* it should be
+
+**Implementation:**
+```python
+def discover_app_commands(app_dir: Path) -> dict:
+    """Use LLM to objectively discover commands from project files."""
+
+    # Gather objective facts
+    structure = list_files(app_dir)
+    config_files = read_configs(app_dir)  # package.json, requirements.txt, etc.
+
+    # Ask LLM to analyze objective facts
+    prompt = f"""
+    Based on these files: {config_files}
+    And this structure: {structure}
+
+    Return JSON with:
+    - install_deps_cmd: ["command", "args"]
+    - test_cmd: ["command", "args"]
+    - type_check_cmd: ["command", "args"] or null
+
+    Use ONLY information from the files. No assumptions.
+    """
+
+    return llm.analyze(prompt)  # Returns objective facts
+```
+
+**Why this maintains zero-bias:**
+- LLM doesn't judge quality, only reads configuration
+- Same as human reading package.json to find "scripts.test"
+- Deterministic for same app structure
+- No subjective assessment involved
+
+**Cost:** ~$0.006 per app for command discovery
 
 ### Why Checklist Scores for DevX?
 

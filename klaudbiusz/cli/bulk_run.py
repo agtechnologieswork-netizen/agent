@@ -21,7 +21,23 @@ load_dotenv()
 # Data context for vanilla Claude SDK mode (non-MCP)
 # This provides ONLY table schemas - no implementation hints
 DATA_CONTEXT = """
+## Application Requirements
+
+Build a web application deployable as a Databricks App (https://www.databricks.com/product/databricks-apps).
+
+Requirements:
+- Must be a web application with a UI (choose any stack: Streamlit, Dash, Flask+React, FastAPI+React, etc.)
+- Must include `app.yaml` configuration file for Databricks Apps deployment
+- Must connect to Databricks SQL using environment variables
+- Must be containerized (include Dockerfile)
+
+app.yaml format:
+```yaml
+command: ["python", "app.py"]  # or appropriate start command
+```
+
 ## Databricks Connection
+
 Environment variables required:
 - DATABRICKS_HOST
 - DATABRICKS_TOKEN
@@ -60,6 +76,7 @@ class RunResult(TypedDict):
     app_dir: str | None
     screenshot_path: str | None
     browser_logs_path: str | None
+    enable_mcp: bool  # Track which mode was used for this generation
 
 
 PROMPTS = {
@@ -211,6 +228,10 @@ def run_single_generation(
         # Get the appropriate prompt based on MCP enablement
         final_prompt = get_prompt_with_context(app_name, prompt, enable_mcp)
 
+        # Log mode for this app
+        mode_str = "MCP" if enable_mcp else "SDK"
+        print(f"[{mode_str}] Generating {app_name}...", flush=True)
+
         # Configure AppBuilder based on MCP enablement
         codegen = AppBuilder(
             app_name=app_name,
@@ -232,6 +253,7 @@ def run_single_generation(
             "app_dir": app_dir,
             "screenshot_path": None,  # filled in later by enrichment
             "browser_logs_path": None,  # filled in later by enrichment
+            "enable_mcp": enable_mcp,  # Track which mode was used
         }
     except TimeoutError as e:
         signal.alarm(0)  # cancel timeout
@@ -244,6 +266,7 @@ def run_single_generation(
             "app_dir": None,
             "screenshot_path": None,
             "browser_logs_path": None,
+            "enable_mcp": enable_mcp,
         }
 
 
@@ -347,6 +370,8 @@ def main(
     print(f"\n{'=' * 80}")
     print("Bulk Generation Summary")
     print(f"{'=' * 80}")
+    mode_str = "MCP (Databricks tools)" if enable_mcp else "Pure SDK (embedded context)"
+    print(f"Mode: {mode_str}")
     print(f"Total prompts: {len(PROMPTS)}")
     print(f"Successful: {len(successful)}")
     print(f"Failed: {len(failed)}")

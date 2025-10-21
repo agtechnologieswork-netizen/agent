@@ -2,27 +2,29 @@
 
 **Implementation details for the 9-metric framework. For design philosophy, see [EVALUATION_METHODOLOGY.md](EVALUATION_METHODOLOGY.md).**
 
+**Stack Agnostic**: Evaluation uses LLM-based command discovery to work with any framework (TypeScript, Python, Streamlit, Flask, etc.) without hardcoded assumptions.
+
 ---
 
 ## The 9 Metrics
 
 ### 1. BUILD SUCCESS (Binary)
-`docker build` exits with code 0
+LLM-discovered build command exits with code 0 (e.g., `docker build`, `npm run build`, or no build if not needed)
 
 ### 2. RUNTIME SUCCESS (Binary)
-Container starts, health check responds within 30s
+Container starts using LLM-discovered run command, health check responds within 30s
 
 ### 3. TYPE SAFETY (Binary)
-`npx tsc --noEmit` passes with zero errors
+LLM-discovered type checking command passes with zero errors (e.g., `npx tsc --noEmit` for TypeScript, or skipped for Python)
 
 ### 4. TESTS PASS (Binary + Coverage %)
-All tests pass, coverage reported (target: ≥70%)
+LLM-discovered test command succeeds, coverage reported if available (e.g., `npm test`, `pytest`, or skipped if no tests)
 
 ### 5. DATABRICKS CONNECTIVITY (Binary)
 App connects to Databricks, executes queries without errors
 
 ### 6. DATA RETURNED (Binary)
-**Status:** Not implemented (requires app-specific tRPC procedures)
+**Status:** Not implemented (requires app-specific endpoint knowledge)
 
 ### 7. UI RENDERS (Binary) ✅
 **VLM check:** Screenshot shows content, no errors, page not blank
@@ -30,7 +32,7 @@ App connects to Databricks, executes queries without errors
 - Cost: ~$0.001 per check
 
 ### 8. LOCAL RUNABILITY (Score 0-5)
-Checklist: README, .env.example, npm install, npm start, local startup
+Checklist: README, .env.example, discovered install command works, discovered run command works, local startup
 
 ### 9. DEPLOYABILITY (Score 0-5)
 Checklist: Dockerfile, multi-stage, health check, no secrets, deploy config
@@ -78,11 +80,17 @@ Automatically tracked during `bulk_run.py`:
 ## Usage
 
 ```bash
-# Generate apps
-uv run python cli/bulk_run.py
+# Required for LLM-based command discovery
+export ANTHROPIC_API_KEY=sk-ant-...
 
-# Evaluate all apps
-uv run python cli/evaluate_all.py
+# Generate apps (MCP mode - TypeScript/tRPC)
+uv run cli/bulk_run.py
+
+# Generate apps (Vanilla SDK mode - Streamlit/Python)
+uv run cli/bulk_run.py --enable_mcp=False
+
+# Evaluate all apps (stack-agnostic)
+python3 cli/evaluate_all.py
 
 # View results
 open app-eval/evaluation_viewer.html
@@ -93,20 +101,23 @@ open app-eval/evaluation_viewer.html
 ## Cost & Time
 
 **Evaluation per app:**
-- Time: 15-20 min (Docker build, tests, npm install)
-- Cost: ~$0.001 (VLM check only, if screenshot exists)
+- Time: 15-20 min (Docker build, tests, discovered install commands)
+- Cost: ~$0.007 total
+  - LLM command discovery: ~$0.006
+  - VLM UI check: ~$0.001 (if screenshot exists)
 
 **Generation per app (tracked):**
-- Average: $0.74
-- Turns: ~93
-- Tokens/turn: ~173
+- MCP mode: $0.74, ~115 turns
+- Vanilla SDK mode: $0.27, ~33 turns
 
 ---
 
 ## Troubleshooting
 
-**Missing dependencies error:**
-- Evaluation runs `npm install` automatically
+**LLM command discovery fails:**
+- Ensure `ANTHROPIC_API_KEY` is set
+- LLM analyzes app structure to discover build/test/run commands
+- Falls back to empty commands if unavailable
 
 **VLM check fails:**
 - Ensure `ANTHROPIC_API_KEY` is set
