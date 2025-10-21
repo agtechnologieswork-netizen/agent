@@ -150,11 +150,19 @@ class TrackerDB:
 
 
 class AppBuilder:
-    def __init__(self, app_name: str, wipe_db: bool = True, suppress_logs: bool = False, use_subagents: bool = False):
+    def __init__(
+        self,
+        app_name: str,
+        wipe_db: bool = True,
+        suppress_logs: bool = False,
+        use_subagents: bool = False,
+        use_mcp: bool = True,
+    ):
         self.project_root = Path(__file__).parent.parent.parent
         self.mcp_manifest = self.project_root / "dabgent" / "dabgent_mcp" / "Cargo.toml"
+        self.use_mcp = use_mcp
 
-        if not self.mcp_manifest.exists():
+        if use_mcp and not self.mcp_manifest.exists():
             raise RuntimeError(f"dabgent-mcp Cargo.toml not found at {self.mcp_manifest}")
 
         self.tracker = TrackerDB(wipe_on_start=wipe_db)
@@ -215,17 +223,21 @@ Use up to 10 tools per call to speed up the process.\n"""
         # The CLI doesn't support per-agent tool permissions yet.
         # Instead, we rely on system prompt instructions to enforce delegation.
 
-        options = ClaudeAgentOptions(
-            system_prompt={
+        # Build options dict - conditionally include mcp_servers based on use_mcp flag
+        options_dict = {
+            "system_prompt": {
                 "type": "preset",
                 "preset": "claude_code",
                 "append": base_instructions,
             },
-            permission_mode="bypassPermissions",
-            disallowed_tools=disallowed_tools,
-            agents=agents,
-            max_turns=75,
-            mcp_servers={
+            "permission_mode": "bypassPermissions",
+            "disallowed_tools": disallowed_tools,
+            "agents": agents,
+            "max_turns": 75,
+        }
+
+        if self.use_mcp:
+            options_dict["mcp_servers"] = {
                 "dabgent": {
                     "type": "stdio",
                     "command": "cargo",
@@ -236,8 +248,9 @@ Use up to 10 tools per call to speed up the process.\n"""
                     ],
                     "env": {},
                 }
-            },
-        )
+            }
+
+        options = ClaudeAgentOptions(**options_dict)
 
         if not self.suppress_logs:
             print(f"\n{'=' * 80}")
