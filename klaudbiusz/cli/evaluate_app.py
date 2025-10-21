@@ -325,7 +325,7 @@ def check_data_validity_llm(app_dir: Path, prompt: str | None) -> tuple[int, str
     try:
         client = anthropic.Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY"))
         message = client.messages.create(
-            model="claude-3-5-haiku-20241022",
+            model="claude-haiku-4-5-20251001",
             max_tokens=500,
             messages=[
                 {
@@ -370,12 +370,15 @@ ISSUES: [list issues or "None"]""",
         return 0, f"LLM check failed: {str(e)}"
 
 
-def check_ui_functional_vlm(app_dir: Path, prompt: str | None) -> tuple[int, str]:
-    """Metric 7: VLM validates UI from screenshot."""
-    print("  [7/7] Checking UI functional (VLM)...")
+def check_ui_functional_vlm(app_dir: Path, prompt: str | None) -> tuple[bool, str]:
+    """Metric 7: VLM binary check - does UI render without errors?
 
-    if not anthropic or not prompt:
-        return 0, "Skipped: Anthropic client not available or no prompt"
+    Returns: (passes: bool, details: str)
+    """
+    print("  [7/7] Checking UI renders (VLM)...")
+
+    if not anthropic:
+        return False, "Skipped: Anthropic client not available"
 
     # Find screenshot
     screenshot_dir = app_dir / "screenshot_output"
@@ -386,7 +389,7 @@ def check_ui_functional_vlm(app_dir: Path, prompt: str | None) -> tuple[int, str
         screenshot_path = app_dir / "screenshot.png"
 
     if not screenshot_path.exists():
-        return 0, "No screenshot found"
+        return False, "No screenshot found"
 
     # Read screenshot as base64
     import base64
@@ -397,7 +400,7 @@ def check_ui_functional_vlm(app_dir: Path, prompt: str | None) -> tuple[int, str
     try:
         client = anthropic.Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY"))
         message = client.messages.create(
-            model="claude-3-5-sonnet-20241022",
+            model="claude-sonnet-4-5-20250929",
             max_tokens=500,
             messages=[
                 {
@@ -413,43 +416,35 @@ def check_ui_functional_vlm(app_dir: Path, prompt: str | None) -> tuple[int, str
                         },
                         {
                             "type": "text",
-                            "text": f"""Analyze this screenshot of a Databricks data dashboard.
+                            "text": """Look at this screenshot and answer ONLY these objective binary questions:
 
-Original prompt: {prompt}
+1. Is the page NOT blank (does something render)? Answer: YES or NO
+2. Are there NO visible error messages (no 404, 500, crash messages, red error text)? Answer: YES or NO
+3. Is there ANY visible content (text, tables, charts, buttons, etc.)? Answer: YES or NO
 
-Rate the UI on these criteria (answer yes/no for each):
-1. Does the page load successfully (not blank/error page)?
-2. Is data visible (tables, charts, or metrics)?
-3. Do the visualizations match the prompt requirements?
-4. Is the UI professional and functional?
-5. Are there visible errors or broken elements?
+DO NOT assess quality, aesthetics, or whether it matches requirements.
+ONLY verify: Does the page render without errors?
 
-Respond in this exact format:
-SCORE: X/5
-ISSUES: [list issues or "None"]""",
+If ALL THREE answers are YES, respond: PASS
+If ANY answer is NO, respond: FAIL
+
+Respond with ONLY one word: PASS or FAIL""",
                         },
                     ],
                 }
             ],
         )
 
-        response_text = message.content[0].text
-        score = 0
-        issues = "Unknown"
+        response_text = message.content[0].text.strip().upper()
 
-        for line in response_text.split("\n"):
-            if "SCORE:" in line:
-                try:
-                    score = int(line.split("/")[0].split(":")[-1].strip())
-                except ValueError:
-                    pass
-            if "ISSUES:" in line:
-                issues = line.split(":", 1)[1].strip()
-
-        return score, issues
+        # Binary check: PASS or FAIL
+        if "PASS" in response_text:
+            return True, "UI renders without errors"
+        else:
+            return False, f"VLM check failed: {response_text}"
 
     except Exception as e:
-        return 0, f"VLM check failed: {str(e)}"
+        return False, f"VLM check failed: {str(e)}"
 
 
 def check_local_runability(app_dir: Path) -> tuple[int, list[str]]:

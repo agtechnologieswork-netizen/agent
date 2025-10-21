@@ -211,10 +211,58 @@ def evaluate_app(app_dir: Path, prompt: str | None = None) -> EvalResult:
     metrics.data_returned = False  # TODO: Implement app-specific procedure calls
 
     # Metric 7: UI Renders (binary VLM check - requires screenshot)
-    # For now, we skip this as it requires running browser automation
-    # This would require Playwright or similar + VLM to check if page is not blank
-    # Setting to False for now
-    metrics.ui_renders = False  # TODO: Implement browser screenshot + VLM check
+    if ANTHROPIC_AVAILABLE:
+        screenshot_path = app_dir / "screenshot_output" / "screenshot.png"
+        if not screenshot_path.exists():
+            screenshot_path = app_dir / "screenshot.png"
+
+        if screenshot_path.exists():
+            try:
+                import base64
+                image_data = base64.standard_b64encode(screenshot_path.read_bytes()).decode("utf-8")
+
+                client = anthropic.Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY"))
+                message = client.messages.create(
+                    model="claude-sonnet-4-5-20250929",
+                    max_tokens=100,
+                    messages=[{
+                        "role": "user",
+                        "content": [{
+                            "type": "image",
+                            "source": {
+                                "type": "base64",
+                                "media_type": "image/png",
+                                "data": image_data,
+                            },
+                        }, {
+                            "type": "text",
+                            "text": """Look at this screenshot and answer ONLY these objective binary questions:
+
+1. Is the page NOT blank (does something render)? Answer: YES or NO
+2. Are there NO visible error messages (no 404, 500, crash messages, red error text)? Answer: YES or NO
+3. Is there ANY visible content (text, tables, charts, buttons, etc.)? Answer: YES or NO
+
+DO NOT assess quality, aesthetics, or whether it matches requirements.
+ONLY verify: Does the page render without errors?
+
+If ALL THREE answers are YES, respond: PASS
+If ANY answer is NO, respond: FAIL
+
+Respond with ONLY one word: PASS or FAIL""",
+                        }],
+                    }],
+                )
+
+                # Extract text from content block
+                content_block = message.content[0]
+                response_text = getattr(content_block, 'text', '').strip().upper()
+                metrics.ui_renders = "PASS" in response_text
+            except Exception:
+                metrics.ui_renders = False
+        else:
+            metrics.ui_renders = False
+    else:
+        metrics.ui_renders = False
 
     # Metric 8: Local runability
     local_score = 0
