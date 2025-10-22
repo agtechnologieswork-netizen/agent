@@ -163,7 +163,8 @@ async fn main() -> Result<()> {
                     .map(|path| client.host().directory(path))
                     .collect();
 
-                tracing::info!("Screenshotting {} apps in batch", app_dirs.len());
+                let num_apps = app_dirs.len();
+                tracing::info!("Screenshotting {} apps in batch", num_apps);
 
                 let screenshots_dir =
                     screenshot_apps_batch(&client, app_dirs, options, concurrency).await?;
@@ -172,7 +173,11 @@ async fn main() -> Result<()> {
                 screenshots_dir.export(&output).await?;
 
                 println!("✓ Screenshots saved to: {}", output);
-                println!("  Check app-0/, app-1/, etc. subdirectories");
+                if num_apps == 1 {
+                    println!("  Check app-0/ subdirectory");
+                } else {
+                    println!("  Check app-0/ through app-{}/ subdirectories", num_apps - 1);
+                }
                 Ok(())
             })
             .await?;

@@ -1,7 +1,28 @@
 use crate::playwright::build_playwright_base;
 use crate::types::{ScreenshotError, ScreenshotOptions};
 use dagger_sdk::{DaggerConn, Directory, Service};
-use eyre::Result;
+use eyre::{Context, Result};
+use std::time::{SystemTime, UNIX_EPOCH};
+
+/// Build an app service from source directory
+async fn build_app_service(
+    app_source: Directory,
+    options: &ScreenshotOptions,
+) -> Result<Service> {
+    let mut app_container = app_source.docker_build();
+
+    for (key, value) in &options.env_vars {
+        tracing::debug!("Setting env var: {}={}", key, value);
+        app_container = app_container.with_env_variable(key, value);
+    }
+
+    app_container
+        .sync()
+        .await
+        .context("failed to build app container")?;
+
+    Ok(app_container.with_exposed_port(options.port as isize).as_service())
+}
 
 /// Capture a screenshot of a running web service
 pub async fn screenshot_service(
@@ -13,23 +34,27 @@ pub async fn screenshot_service(
 
     let playwright_base = build_playwright_base(client)
         .await
-        .map_err(|e| ScreenshotError::PlaywrightBuildFailed(e.to_string()))?;
-
-    let url = options.url.unwrap_or_else(|| "/".to_string());
+        .context("failed to build playwright container")?;
 
     tracing::debug!(
         "Configuring Playwright: url={}, port={}, wait_time={}ms",
-        url,
+        options.url,
         options.port,
         options.wait_time_ms
     );
 
+    let cache_bust = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_secs()
+        .to_string();
+
     let container = playwright_base
         .with_service_binding("app", service)
-        .with_env_variable("TARGET_URL", url)
+        .with_env_variable("TARGET_URL", &options.url)
         .with_env_variable("TARGET_PORT", options.port.to_string())
         .with_env_variable("WAIT_TIME", options.wait_time_ms.to_string())
-        .with_env_variable("CACHE_BUST", chrono::Utc::now().timestamp().to_string())
+        .with_env_variable("CACHE_BUST", cache_bust)
         .with_exec(vec![
             "npx",
             "playwright",
@@ -39,9 +64,7 @@ pub async fn screenshot_service(
 
     tracing::info!("Executing screenshot capture");
 
-    let screenshots_dir = container.directory("/screenshots");
-
-    Ok(screenshots_dir)
+    Ok(container.directory("/screenshots"))
 }
 
 /// Build and screenshot an app from a directory with a Dockerfile
@@ -52,29 +75,11 @@ pub async fn screenshot_app(
 ) -> Result<Directory, ScreenshotError> {
     tracing::info!("Building app from Dockerfile");
 
-    // exclude node_modules and .git
-    // Note: dagger-sdk doesn't have exclude patterns, so we use the source as-is
-    // The Dockerfile should handle exclusions via .dockerignore
-    let filtered_source = app_source;
-
-    // build container from Dockerfile
-    let mut app_container = filtered_source.docker_build();
-
-    // parse and apply environment variables
-    for (key, value) in &options.env_vars {
-        tracing::debug!("Setting env var: {}={}", key, value);
-        app_container = app_container.with_env_variable(key, value);
-    }
-
-    // force evaluation to catch build errors early
-    app_container
-        .sync()
+    let service = build_app_service(app_source, &options)
         .await
-        .map_err(|e| ScreenshotError::AppBuildFailed(e.to_string()))?;
+        .context("failed to build app service")?;
 
     tracing::info!("App build successful, starting service");
-
-    let service = app_container.with_exposed_port(options.port as isize).as_service();
 
     screenshot_service(client, service, options).await
 }
@@ -86,86 +91,40 @@ pub async fn screenshot_apps_batch(
     options: ScreenshotOptions,
     concurrency: usize,
 ) -> Result<Directory, ScreenshotError> {
+    use futures::stream::{FuturesUnordered, StreamExt};
+
     tracing::info!(
         "Starting batch screenshot for {} apps with concurrency {}",
         app_sources.len(),
         concurrency
     );
 
-    // build and validate app containers with controlled concurrency
-    let mut services = Vec::new();
-    let mut handles: Vec<tokio::task::JoinHandle<Result<Option<(usize, Service)>, ScreenshotError>>> = Vec::new();
+    let semaphore = std::sync::Arc::new(tokio::sync::Semaphore::new(concurrency));
+    let mut futures = FuturesUnordered::new();
 
     for (i, app_source) in app_sources.into_iter().enumerate() {
-        let client_clone = client.clone();
         let options_clone = options.clone();
+        let permit = semaphore.clone().acquire_owned().await.unwrap();
 
-        let handle = tokio::spawn(async move {
+        futures.push(async move {
+            let _permit = permit;
             tracing::info!("[app-{}] Building container", i);
 
-            // Note: dagger-sdk doesn't have exclude patterns, so we use the source as-is
-            let filtered_source = app_source;
-
-            let mut app_container = filtered_source.docker_build();
-
-            for (key, value) in &options_clone.env_vars {
-                app_container = app_container.with_env_variable(key, value);
-            }
-
-            // validate build
-            match app_container.sync().await {
-                Ok(_) => {
+            match build_app_service(app_source, &options_clone).await {
+                Ok(service) => {
                     tracing::info!("[app-{}] Build successful", i);
-
-                    let service = app_container
-                        .with_exposed_port(options_clone.port as isize)
-                        .as_service();
-
-                    // test service startup
-                    let test_result = client_clone
-                        .container()
-                        .from("alpine:3.18")
-                        .with_service_binding("test-app", service.clone())
-                        .with_exec(vec!["sh", "-c", "sleep 3"])
-                        .sync()
-                        .await;
-
-                    match test_result {
-                        Ok(_) => {
-                            tracing::info!("[app-{}] Service starts successfully", i);
-                            Ok(Some((i, service)))
-                        }
-                        Err(e) => {
-                            tracing::error!("[app-{}] Service failed to start: {}", i, e);
-                            Ok(None)
-                        }
-                    }
+                    Some((i, service))
                 }
                 Err(e) => {
                     tracing::error!("[app-{}] Build failed: {}", i, e);
-                    Ok(None)
+                    None
                 }
             }
         });
-
-        handles.push(handle);
-
-        // limit concurrency
-        if handles.len() >= concurrency {
-            let result = handles.remove(0).await.map_err(|e| {
-                ScreenshotError::Other(eyre::eyre!("Task join error: {}", e))
-            })??;
-            if let Some(service) = result {
-                services.push(service);
-            }
-        }
     }
 
-    // wait for remaining tasks
-    for handle in handles {
-        let result = handle.await.map_err(|e| {
-            ScreenshotError::Other(eyre::eyre!("Task join error: {}", e))
-        })??;
+    let mut services = Vec::new();
+    while let Some(result) = futures.next().await {
         if let Some(service) = result {
             services.push(service);
         }
@@ -174,25 +133,29 @@ pub async fn screenshot_apps_batch(
     let num_services = services.len();
     tracing::info!("Successfully built {} apps", num_services);
 
-    // build playwright container and bind all services
     let playwright_base = build_playwright_base(client)
         .await
-        .map_err(|e| ScreenshotError::PlaywrightBuildFailed(e.to_string()))?;
+        .context("failed to build playwright container")?;
 
     let mut playwright_container = playwright_base;
     for (i, service) in services {
-        playwright_container = playwright_container.with_service_binding(&format!("app-{}", i), service);
+        playwright_container =
+            playwright_container.with_service_binding(&format!("app-{}", i), service);
     }
 
-    let url = options.url.unwrap_or_else(|| "/".to_string());
+    let cache_bust = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_secs()
+        .to_string();
 
     playwright_container = playwright_container
-        .with_env_variable("TARGET_URL", url)
+        .with_env_variable("TARGET_URL", &options.url)
         .with_env_variable("TARGET_PORT", options.port.to_string())
         .with_env_variable("WAIT_TIME", options.wait_time_ms.to_string())
         .with_env_variable("CONCURRENCY", concurrency.to_string())
         .with_env_variable("NUM_APPS", num_services.to_string())
-        .with_env_variable("CACHE_BUST", chrono::Utc::now().timestamp().to_string())
+        .with_env_variable("CACHE_BUST", cache_bust)
         .with_exec(vec![
             "npx",
             "playwright",

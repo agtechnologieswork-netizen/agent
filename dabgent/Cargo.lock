@@ -801,11 +801,11 @@ dependencies = [
 name = "dabgent_screenshot"
 version = "0.1.0"
 dependencies = [
- "chrono",
  "clap",
  "dabgent_sandbox",
  "dagger-sdk",
  "eyre",
+ "futures",
  "include_dir",
  "serde",
  "serde_json",

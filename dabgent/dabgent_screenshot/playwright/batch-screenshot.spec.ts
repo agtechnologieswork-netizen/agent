@@ -76,7 +76,7 @@ async function screenshotApp(
 
     console.log(`[app-${appIndex}] Screenshot saved`);
 
-    // save logs
+    // save browser logs
     const logText = logs.map((log) => {
       const prefix = log.type === "pageerror" ? "[ERROR]" : `[${log.level?.toUpperCase()}]`;
       return `${log.timestamp} ${prefix} ${log.message}`;
@@ -91,6 +91,24 @@ async function screenshotApp(
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error);
     console.error(`[app-${appIndex}] Failed: ${errorMessage}`);
+
+    // save error and logs for failed apps (but no screenshot file)
+    try {
+      await mkdir(`/screenshots/app-${appIndex}`, { recursive: true });
+
+      // write error to error.txt
+      await writeFile(`/screenshots/app-${appIndex}/error.txt`, errorMessage, "utf-8");
+
+      // write browser logs separately
+      const logText = logs.map((log) => {
+        const prefix = log.type === "pageerror" ? "[ERROR]" : `[${log.level?.toUpperCase()}]`;
+        return `${log.timestamp} ${prefix} ${log.message}`;
+      }).join("\n");
+
+      await writeFile(`/screenshots/app-${appIndex}/logs.txt`, logText, "utf-8");
+    } catch (writeError) {
+      console.error(`[app-${appIndex}] Failed to write error files: ${writeError}`);
+    }
 
     return {
       appIndex,
