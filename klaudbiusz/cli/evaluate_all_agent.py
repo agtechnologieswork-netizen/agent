@@ -8,10 +8,20 @@ to discover how to build, run, test, and evaluate each app.
 from __future__ import annotations
 
 import asyncio
-import json
 from pathlib import Path
 
 from claude_agent_sdk import ClaudeAgentOptions, query
+
+# Load environment variables from .env file if it exists
+try:
+    from dotenv import load_dotenv
+    env_path = Path(__file__).parent.parent / ".env"
+    if env_path.exists():
+        load_dotenv(env_path)
+        print(f"✅ Loaded environment variables from {env_path}")
+except ImportError:
+    # python-dotenv not installed, environment variables must be set in shell
+    pass
 
 
 EVAL_PROMPT = """Evaluate all apps in ../app using the evaluation framework in ../eval-docs/evals.md.
@@ -34,7 +44,7 @@ async def main():
         max_turns=100,
     )
 
-    async for message in query(prompt=EVAL_PROMPT, options=options):
+    async for _ in query(prompt=EVAL_PROMPT, options=options):
         pass
 
     print("✅ Done! Check evaluation_report.json and EVALUATION_REPORT.md")
