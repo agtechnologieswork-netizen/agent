@@ -43,22 +43,23 @@ uv run cli/main.py "Create dashboard" --enable_mcp=False
 
 ### Evaluate Generated Apps
 
-**LLM-Based Stack-Agnostic Evaluation** - Works with any framework:
+**Agentic Evaluation** - AI agent with bash tools evaluates apps:
 
 ```bash
-cd cli
+cd klaudbiusz
 export DATABRICKS_HOST=https://your-workspace.databricks.com
 export DATABRICKS_TOKEN=dapi...
-export ANTHROPIC_API_KEY=sk-ant-...  # Required for LLM-based discovery
+export ANTHROPIC_API_KEY=sk-ant-...  # Required for evaluation agent
 
-# Evaluate all apps (auto-detects TypeScript, Python, Streamlit, etc.)
-python3 evaluate_all.py
+# Run agentic evaluation (works with any framework)
+uv run cli/evaluate_all_agent.py
 
-# Evaluate single app
-python3 evaluate_app.py ../app/customer-churn-analysis
+# View results
+cat evaluation_report.json
+cat EVALUATION_REPORT.md
 ```
 
-The evaluation uses an LLM to intelligently discover how to build, run, and test each app - no hardcoded assumptions about stack or structure.
+The evaluation agent reads app files, discovers build/test/run commands, executes them, and generates an objective report - no hardcoded logic.
 
 ## Evaluation Framework
 
@@ -73,14 +74,16 @@ We use **9 objective metrics** to measure autonomous deployability:
 
 **See [eval-docs/evals.md](eval-docs/evals.md) for complete metric definitions.**
 
-### Key Innovation: Agentic DevX
+### Key Innovation: Agentic Evaluation
 
-We measure **whether an AI agent can autonomously run and deploy the code** with zero configuration:
+We use an **AI agent to evaluate apps** using objective, measurable criteria:
 
-- **Local Runability:** Can run with `npm install && npm start`? (3.0/5)
-- **Deployability:** Can deploy with `docker build && docker run`? (3.0/5)
+- **Agent-Driven:** Agent reads files, discovers commands, executes builds/tests
+- **Stack Agnostic:** Works with TypeScript, Python, Streamlit, any framework
+- **Zero Hardcoding:** No assumptions about app structure or build process
+- **Reproducible:** Same app → same evaluation results
 
-**See [eval-docs/DORA_METRICS.md](eval-docs/DORA_METRICS.md) for detailed agentic evaluation approach.**
+**See [eval-docs/EVALUATION_METHODOLOGY.md](eval-docs/EVALUATION_METHODOLOGY.md) for detailed agentic evaluation approach.**
 
 ## Documentation
 

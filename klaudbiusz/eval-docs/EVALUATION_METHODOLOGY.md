@@ -170,49 +170,45 @@ Our objective approach directly supports DevOps Research and Assessment (DORA) p
 - Reproducible results on any machine
 - Matches production deployment approach
 
-### Why LLM-Based Command Discovery?
+### Why Agentic Evaluation?
 
-**Decision:** Use LLM to discover build/test/run commands instead of hardcoding framework assumptions.
+**Decision:** Use an AI agent with bash tools to perform evaluation instead of hardcoded scripts.
 
 **Rationale:**
-- **Stack Agnostic**: Works with TypeScript, Python, Streamlit, Flask, any framework
+- **Stack Agnostic**: Agent discovers how to build/test/run any framework
 - **Zero Maintenance**: No code updates needed for new frameworks
-- **Objective**: LLM analyzes actual files (package.json, requirements.txt, Dockerfile)
-- **Reproducible**: Same app structure → same discovered commands
+- **Objective**: Agent reads actual files (package.json, requirements.txt, Dockerfile) and executes commands
+- **Reproducible**: Same app structure → same evaluation results
 - **Zero Bias**: Evaluates what the app *is*, not what we *assume* it should be
+- **Truly Agentic**: Agent makes decisions and uses tools, not hardcoded logic
 
 **Implementation:**
 ```python
-def discover_app_commands(app_dir: Path) -> dict:
-    """Use LLM to objectively discover commands from project files."""
+EVAL_PROMPT = """
+Evaluate all applications in ../app directory using 9-metric framework.
 
-    # Gather objective facts
-    structure = list_files(app_dir)
-    config_files = read_configs(app_dir)  # package.json, requirements.txt, etc.
+For each app:
+1. Read files to discover build/test/run commands
+2. Execute commands to verify build, runtime, tests
+3. Check for Dockerfile, README, tests, type safety
+4. Assign objective scores (binary PASS/FAIL, numeric 0-5)
+5. Generate JSON report
 
-    # Ask LLM to analyze objective facts
-    prompt = f"""
-    Based on these files: {config_files}
-    And this structure: {structure}
+Use ONLY bash tools to read files and execute commands.
+Be objective: no quality judgments, only measurable facts.
+"""
 
-    Return JSON with:
-    - install_deps_cmd: ["command", "args"]
-    - test_cmd: ["command", "args"]
-    - type_check_cmd: ["command", "args"] or null
-
-    Use ONLY information from the files. No assumptions.
-    """
-
-    return llm.analyze(prompt)  # Returns objective facts
+query(EVAL_PROMPT, ClaudeAgentOptions(permission_mode="bypassPermissions"))
 ```
 
 **Why this maintains zero-bias:**
-- LLM doesn't judge quality, only reads configuration
-- Same as human reading package.json to find "scripts.test"
+- Agent doesn't judge quality, only measures objective facts
+- Agent reads configuration files like a human would
 - Deterministic for same app structure
 - No subjective assessment involved
+- Agent uses standard tools (bash) to verify builds, tests, runs
 
-**Cost:** ~$0.006 per app for command discovery
+**Cost:** ~$0.02-0.05 per full evaluation run (all apps)
 
 ### Why Checklist Scores for DevX?
 

@@ -2,40 +2,38 @@
 
 **Implementation details for the 9-metric framework. For design philosophy, see [EVALUATION_METHODOLOGY.md](EVALUATION_METHODOLOGY.md).**
 
-**Stack Agnostic**: Evaluation uses LLM-based command discovery to work with any framework (TypeScript, Python, Streamlit, Flask, etc.) without hardcoded assumptions.
+**Agentic Evaluation**: An AI agent with bash tools evaluates apps by reading files, executing commands, and measuring objective metrics. No hardcoded logic - the agent discovers how to build, run, and test each app regardless of framework.
 
 ---
 
 ## The 9 Metrics
 
 ### 1. BUILD SUCCESS (Binary)
-LLM-discovered build command exits with code 0 (e.g., `docker build`, `npm run build`, or no build if not needed)
+Agent discovers build command from app files (package.json, Dockerfile, etc.), executes it, checks exit code 0
 
 ### 2. RUNTIME SUCCESS (Binary)
-Container starts using LLM-discovered run command, health check responds within 30s
+Agent discovers run command, starts app, verifies it runs without immediate errors
 
 ### 3. TYPE SAFETY (Binary)
-LLM-discovered type checking command passes with zero errors (e.g., `npx tsc --noEmit` for TypeScript, or skipped for Python)
+Agent checks if app has type checking (tsc, mypy), runs it if present, reports pass/fail or N/A
 
 ### 4. TESTS PASS (Binary + Coverage %)
-LLM-discovered test command succeeds, coverage reported if available (e.g., `npm test`, `pytest`, or skipped if no tests)
+Agent checks if app has tests (npm test, pytest), runs them if present, reports pass/fail or N/A
 
 ### 5. DATABRICKS CONNECTIVITY (Binary)
-App connects to Databricks, executes queries without errors
+Agent verifies app uses Databricks SQL connector and environment variables correctly
 
 ### 6. DATA RETURNED (Binary)
-**Status:** Not implemented (requires app-specific endpoint knowledge)
+**Status:** Not implemented
 
-### 7. UI RENDERS (Binary) ✅
-**VLM check:** Screenshot shows content, no errors, page not blank
-- Requires: Screenshot + `ANTHROPIC_API_KEY`
-- Cost: ~$0.001 per check
+### 7. UI RENDERS (Binary)
+**Status:** Not implemented (requires screenshot)
 
 ### 8. LOCAL RUNABILITY (Score 0-5)
-Checklist: README, .env.example, discovered install command works, discovered run command works, local startup
+Checklist: README (1), .env.example (1), install works (1), run works (1), starts successfully (1)
 
 ### 9. DEPLOYABILITY (Score 0-5)
-Checklist: Dockerfile, multi-stage, health check, no secrets, deploy config
+Checklist: Dockerfile (1), multi-stage build (1), health check (1), no hardcoded secrets (1), app.yaml (1)
 
 ---
 
@@ -80,8 +78,10 @@ Automatically tracked during `bulk_run.py`:
 ## Usage
 
 ```bash
-# Required for LLM-based command discovery
+# Required for evaluation agent
 export ANTHROPIC_API_KEY=sk-ant-...
+export DATABRICKS_HOST=https://...
+export DATABRICKS_TOKEN=dapi...
 
 # Generate apps (MCP mode - TypeScript/tRPC)
 uv run cli/bulk_run.py
@@ -89,22 +89,22 @@ uv run cli/bulk_run.py
 # Generate apps (Vanilla SDK mode - Streamlit/Python)
 uv run cli/bulk_run.py --enable_mcp=False
 
-# Evaluate all apps (stack-agnostic)
-python3 cli/evaluate_all.py
+# Evaluate all apps (agentic evaluation)
+uv run cli/evaluate_all_agent.py
 
 # View results
-open app-eval/evaluation_viewer.html
+cat evaluation_report.json
+cat EVALUATION_REPORT.md
 ```
 
 ---
 
 ## Cost & Time
 
-**Evaluation per app:**
-- Time: 15-20 min (Docker build, tests, discovered install commands)
-- Cost: ~$0.007 total
-  - LLM command discovery: ~$0.006
-  - VLM UI check: ~$0.001 (if screenshot exists)
+**Agentic Evaluation (all apps):**
+- Time: Variable (agent discovers and executes commands for each app)
+- Cost: ~$0.02-0.05 per full run (20 apps)
+- Agent reads files, executes builds/tests, generates report
 
 **Generation per app (tracked):**
 - MCP mode: $0.74, ~115 turns
@@ -114,22 +114,23 @@ open app-eval/evaluation_viewer.html
 
 ## Troubleshooting
 
-**LLM command discovery fails:**
+**Evaluation agent fails:**
 - Ensure `ANTHROPIC_API_KEY` is set
-- LLM analyzes app structure to discover build/test/run commands
-- Falls back to empty commands if unavailable
+- Ensure `DATABRICKS_HOST` and `DATABRICKS_TOKEN` are set
+- Check agent has permission to execute bash commands
+- Review agent output for specific errors
 
-**VLM check fails:**
-- Ensure `ANTHROPIC_API_KEY` is set
-- Screenshot must exist at `app_dir/screenshot_output/screenshot.png`
+**Apps not found:**
+- Verify apps exist in ../app/ directory
+- Check that bulk_run.py completed successfully
 
 **Generation metrics missing:**
-- Check `bulk_run_results_*.json` exists
+- Check `bulk_run_results_*.json` exists in app/ directory
 - Verify `PROMPTS` dict in `bulk_run.py`
 
 ---
 
 For detailed implementation, see:
-- `cli/evaluate_all.py` - Batch evaluation
-- `cli/evaluate_app.py` - Single app evaluation
+- `cli/evaluate_all_agent.py` - Agentic evaluation script (~150 lines)
 - `cli/bulk_run.py` - App generation with metrics tracking
+- `eval-docs/EVALUATION_METHODOLOGY.md` - Zero-bias methodology
