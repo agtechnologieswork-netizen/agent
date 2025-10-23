@@ -61,6 +61,7 @@ echo ""
 # Step 4: Run evaluation
 echo "📊 Step 4/5: Running evaluation..."
 EVAL_START=$(date +%s)
+export EVAL_MODE="vanilla_sdk"
 uv run cli/evaluate_all_agent.py
 EVAL_END=$(date +%s)
 EVAL_DURATION=$((EVAL_END - EVAL_START))

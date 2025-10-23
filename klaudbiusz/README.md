@@ -116,6 +116,29 @@ We use **9 objective metrics** to measure autonomous deployability:
 
 **See [eval-docs/evals.md](eval-docs/evals.md) for complete metric definitions.**
 
+### MLflow Integration
+
+**Track evaluation quality over time** using Databricks Managed MLflow:
+
+- 📊 **Automatic Tracking**: Every evaluation run logged to MLflow
+- 📈 **Metrics Trends**: Monitor success rates, quality scores, cost efficiency
+- 🔍 **Run Comparison**: Compare MCP vs Vanilla modes, track improvements
+- 📦 **Artifacts**: All reports automatically saved and versioned
+
+```bash
+# Automatic MLflow tracking with run scripts
+./run_vanilla_eval.sh  # Tracked as "vanilla_sdk" mode
+./run_mcp_eval.sh      # Tracked as "mcp" mode
+
+# Compare recent runs
+uv run cli/mlflow_compare.py
+
+# View in Databricks UI
+# Navigate to ML → Experiments → /Shared/klaudbiusz-evaluations
+```
+
+**See [MLFLOW_INTEGRATION.md](MLFLOW_INTEGRATION.md) for detailed MLflow documentation.**
+
 ### Key Innovation: Agentic Evaluation
 
 We use an **AI agent to evaluate apps** using objective, measurable criteria:
@@ -134,6 +157,9 @@ We use an **AI agent to evaluate apps** using objective, measurable criteria:
 - **[eval-docs/EVALUATION_METHODOLOGY.md](eval-docs/EVALUATION_METHODOLOGY.md)** - Zero-bias evaluation methodology
 - **[eval-docs/DORA_METRICS.md](eval-docs/DORA_METRICS.md)** - DORA metrics integration & agentic DevX
 - **[eval-docs/LLM_BASED_EVALUATION.md](eval-docs/LLM_BASED_EVALUATION.md)** - LLM-based stack-agnostic evaluation
+
+### Integration & Tracking
+- **[MLFLOW_INTEGRATION.md](MLFLOW_INTEGRATION.md)** - MLflow tracking for evaluation runs, metrics, and trends
 
 ### Generation Modes
 - **[VANILLA_SDK_MODE.md](VANILLA_SDK_MODE.md)** - Pure Claude SDK mode (63% cheaper, no MCP tools)

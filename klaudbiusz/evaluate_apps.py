@@ -5,9 +5,13 @@ Evaluate all apps in the app/ directory using the 9-metric framework.
 import os
 import json
 import subprocess
+import sys
 import time
 from pathlib import Path
 from typing import Dict, List, Any, Optional
+
+# Add cli directory to path for mlflow_tracker import
+sys.path.insert(0, str(Path(__file__).parent / "cli"))
 
 APP_DIR = Path("app")
 RESULTS = []
@@ -527,6 +531,44 @@ def main():
     with open("EVALUATION_REPORT.md", "w") as f:
         f.write(md_report)
     print("✓ Saved EVALUATION_REPORT.md")
+
+    # Track evaluation in MLflow
+    try:
+        from mlflow_tracker import EvaluationTracker
+        from datetime import datetime, timezone
+
+        # Determine mode from environment or default to "manual"
+        mode = os.environ.get("EVAL_MODE", "manual")
+
+        tracker = EvaluationTracker()
+        if tracker.enabled:
+            timestamp = datetime.now(timezone.utc).isoformat()
+            run_name = f"eval_{mode}_{timestamp}"
+
+            run_id = tracker.start_run(run_name, tags={"mode": mode})
+
+            if run_id:
+                # Log parameters
+                tracker.log_evaluation_parameters(
+                    mode=mode,
+                    total_apps=summary['total_apps'],
+                    timestamp=timestamp,
+                    model_version="claude-sonnet-4-5-20250929"
+                )
+
+                # Log metrics
+                tracker.log_evaluation_metrics(report)
+
+                # Log artifacts
+                tracker.log_artifact_file("evaluation_report.json")
+                tracker.log_artifact_file("EVALUATION_REPORT.md")
+
+                # End run
+                tracker.end_run()
+
+                print(f"✓ MLflow tracking: {run_id}")
+    except Exception as e:
+        print(f"⚠️  MLflow tracking failed: {e}")
 
     print(f"\nEvaluation complete! Evaluated {len(results)} apps.")
 
