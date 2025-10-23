@@ -45,7 +45,7 @@ enum Commands {
     /// Screenshot multiple apps in batch
     Batch {
         /// Directories containing app sources (comma-separated)
-        #[arg(long, value_delimiter = ',')]
+        #[arg(long, value_delimiter = ',', num_args = 1..)]
         app_sources: Vec<String>,
 
         /// Environment variables shared across all apps (KEY=VALUE,KEY2=VALUE2)
@@ -68,6 +68,17 @@ enum Commands {
         #[arg(long, default_value = "./screenshots")]
         output: String,
     },
+}
+
+fn create_dagger_opts(verbose: bool) -> ConnectOpts {
+    let logger = if verbose {
+        Logger::Default
+    } else {
+        Logger::Silent
+    };
+    ConnectOpts::default()
+        .with_logger(logger)
+        .with_execute_timeout(Some(600))
 }
 
 #[tokio::main]
@@ -99,15 +110,7 @@ async fn main() -> Result<()> {
                 ..Default::default()
             };
 
-            // connect to Dagger with options
-            let logger = if cli.verbose {
-                Logger::Default
-            } else {
-                Logger::Silent
-            };
-            let opts = ConnectOpts::default()
-                .with_logger(logger)
-                .with_execute_timeout(Some(600));
+            let opts = create_dagger_opts(cli.verbose);
 
             opts.connect(move |client| async move {
                 let app_source_dir = client.host().directory(&app_source);
@@ -133,11 +136,6 @@ async fn main() -> Result<()> {
             concurrency,
             output,
         } => {
-            if app_sources.is_empty() {
-                eprintln!("Error: No app sources provided");
-                std::process::exit(1);
-            }
-
             let env_vars = parse_env_vars(env_vars.as_deref().unwrap_or(""));
 
             let options = ScreenshotOptions {
@@ -147,15 +145,7 @@ async fn main() -> Result<()> {
                 ..Default::default()
             };
 
-            // connect to Dagger with options
-            let logger = if cli.verbose {
-                Logger::Default
-            } else {
-                Logger::Silent
-            };
-            let opts = ConnectOpts::default()
-                .with_logger(logger)
-                .with_execute_timeout(Some(600));
+            let opts = create_dagger_opts(cli.verbose);
 
             opts.connect(move |client| async move {
                 let app_dirs: Vec<_> = app_sources

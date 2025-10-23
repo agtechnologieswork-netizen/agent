@@ -22,7 +22,3 @@ impl Default for ScreenshotOptions {
         }
     }
 }
-
-#[derive(Debug, thiserror::Error)]
-#[error(transparent)]
-pub struct ScreenshotError(#[from] pub eyre::Error);

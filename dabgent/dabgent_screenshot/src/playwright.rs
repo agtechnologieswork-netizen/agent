@@ -32,16 +32,18 @@ fn get_playwright_source(client: &DaggerConn) -> Result<Directory> {
 
     tracing::debug!("Extracting embedded Playwright files to: {:?}", temp_path);
 
-    // Extract all files from embedded directory
+    // extract all files from embedded directory
     extract_dir(&PLAYWRIGHT_DIR, temp_path)?;
 
-    // Create Dagger directory from temp path
+    // create Dagger directory from temp path
+    // note: temp_dir must outlive the directory creation, so we leak it intentionally
+    // this is acceptable as it only happens once per Dagger connection and the temp files
+    // are cleaned up by the OS. Alternative would be to make this function async and
+    // wait for Dagger to fully consume the directory, but that would complicate the API
     let playwright_dir = client
         .host()
         .directory(temp_path.to_string_lossy().to_string());
 
-    // Keep temp_dir alive for the duration of this operation
-    // Dagger will read files from it before it's dropped
     std::mem::forget(temp_dir);
 
     Ok(playwright_dir)

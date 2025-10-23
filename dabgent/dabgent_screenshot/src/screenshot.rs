@@ -1,54 +1,8 @@
 use crate::playwright::build_playwright_base;
-use crate::types::{ScreenshotError, ScreenshotOptions};
+use crate::types::ScreenshotOptions;
 use dagger_sdk::{DaggerConn, Directory, Service};
 use eyre::{Context, Result};
-use serde::Deserialize;
 use std::time::{SystemTime, UNIX_EPOCH};
-
-#[derive(Deserialize)]
-struct AppSummary {
-    app: String,
-    success: bool,
-    error: Option<String>,
-}
-
-async fn report_batch_results(screenshots_dir: &Directory, total_apps: usize, build_failures: usize) {
-    let summary_json = match screenshots_dir.file("summary.json").contents().await {
-        Ok(content) => content,
-        Err(e) => {
-            tracing::warn!("Failed to read summary.json: {}", e);
-            return;
-        }
-    };
-
-    let summary: Vec<AppSummary> = match serde_json::from_str(&summary_json) {
-        Ok(s) => s,
-        Err(e) => {
-            tracing::warn!("Failed to parse summary.json: {}", e);
-            return;
-        }
-    };
-
-    let successful = summary.iter().filter(|s| s.success).count();
-    let failed = summary.iter().filter(|s| !s.success).count();
-
-    tracing::info!("Screenshot phase: {} succeeded, {} failed", successful, failed);
-
-    if failed > 0 {
-        tracing::warn!("Failed apps:");
-        for app in summary.iter().filter(|s| !s.success) {
-            let error = app.error.as_deref().unwrap_or("unknown error");
-            tracing::warn!("  {} - {}", app.app, error);
-        }
-    }
-
-    tracing::info!(
-        "Total: {} apps processed, {} screenshots captured, {} failed",
-        total_apps,
-        successful,
-        build_failures + failed
-    );
-}
 
 /// Build an app service from source directory
 async fn build_app_service(
@@ -67,7 +21,8 @@ async fn build_app_service(
         .await
         .context("failed to build app container")?;
 
-    Ok(app_container.with_exposed_port(options.port as isize).as_service())
+    let port = options.port as isize;
+    Ok(app_container.with_exposed_port(port).as_service())
 }
 
 /// Capture a screenshot of a running web service
@@ -75,7 +30,7 @@ pub async fn screenshot_service(
     client: &DaggerConn,
     service: Service,
     options: ScreenshotOptions,
-) -> Result<Directory, ScreenshotError> {
+) -> Result<Directory> {
     tracing::info!("Starting screenshot capture for service");
 
     let playwright_base = build_playwright_base(client)
@@ -91,7 +46,7 @@ pub async fn screenshot_service(
 
     let cache_bust = SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .unwrap()
+        .context("system time before UNIX_EPOCH")?
         .as_secs()
         .to_string();
 
@@ -121,7 +76,7 @@ pub async fn screenshot_app(
     client: &DaggerConn,
     app_source: Directory,
     options: ScreenshotOptions,
-) -> Result<Directory, ScreenshotError> {
+) -> Result<Directory> {
     tracing::info!("Building app from Dockerfile");
 
     let service = build_app_service(app_source, &options)
@@ -139,7 +94,7 @@ pub async fn screenshot_apps_batch(
     app_sources: Vec<Directory>,
     options: ScreenshotOptions,
     concurrency: usize,
-) -> Result<Directory, ScreenshotError> {
+) -> Result<Directory> {
     use futures::stream::{FuturesUnordered, StreamExt};
 
     let total_apps = app_sources.len();
@@ -157,7 +112,10 @@ pub async fn screenshot_apps_batch(
         let semaphore_clone = semaphore.clone();
 
         futures.push(async move {
-            let _permit = semaphore_clone.acquire_owned().await.unwrap();
+            let _permit = semaphore_clone
+                .acquire_owned()
+                .await
+                .expect("semaphore should not be closed");
             tracing::info!("[app-{}] Building container", i);
 
             match build_app_service(app_source, &options_clone).await {
@@ -194,15 +152,58 @@ pub async fn screenshot_apps_batch(
         .await
         .context("failed to build playwright container")?;
 
-    let mut playwright_container = playwright_base;
+    // validate services can start by checking their endpoints
+    // services that fail this check will be filtered out before binding to playwright
+    tracing::info!("Validating {} services", num_services);
+
+    let mut valid_services = Vec::new();
+    let mut service_check_failures = 0;
+
     for (i, service) in services {
+        // attempt to check if service can start by creating a test container that connects to it
+        let check_container = client
+            .container()
+            .from("alpine:latest")
+            .with_service_binding(&format!("app-{}", i), service.clone())
+            .with_exec(vec!["true"]);
+
+        match check_container.sync().await {
+            Ok(_) => {
+                tracing::debug!("[app-{}] Service validation passed", i);
+                valid_services.push((i, service));
+            }
+            Err(e) => {
+                tracing::warn!("[app-{}] Service validation failed: {}", i, e);
+                service_check_failures += 1;
+            }
+        }
+    }
+
+    if service_check_failures > 0 {
+        tracing::warn!(
+            "Service validation: {} passed, {} failed",
+            valid_services.len(),
+            service_check_failures
+        );
+    }
+
+    if valid_services.is_empty() {
+        return Err(eyre::eyre!(
+            "All services failed validation. Check that apps are listening on port {} and starting successfully.",
+            options.port
+        ));
+    }
+
+    // bind all valid services to playwright container
+    let mut playwright_container = playwright_base;
+    for (i, service) in &valid_services {
         playwright_container =
-            playwright_container.with_service_binding(&format!("app-{}", i), service);
+            playwright_container.with_service_binding(&format!("app-{}", i), service.clone());
     }
 
     let cache_bust = SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .unwrap()
+        .context("system time before UNIX_EPOCH")?
         .as_secs()
         .to_string();
 
@@ -211,7 +212,7 @@ pub async fn screenshot_apps_batch(
         .with_env_variable("TARGET_PORT", options.port.to_string())
         .with_env_variable("WAIT_TIME", options.wait_time_ms.to_string())
         .with_env_variable("CONCURRENCY", concurrency.to_string())
-        .with_env_variable("NUM_APPS", num_services.to_string())
+        .with_env_variable("NUM_APPS", valid_services.len().to_string())
         .with_env_variable("CACHE_BUST", cache_bust)
         .with_exec(vec![
             "npx",
@@ -220,15 +221,19 @@ pub async fn screenshot_apps_batch(
             "--config=playwright.batch.config.ts",
         ]);
 
-    tracing::info!("Executing batch screenshot capture");
+    tracing::info!("Executing batch screenshot capture for {} services", valid_services.len());
 
-    // force execution before returning directory
     playwright_container.sync().await.context("failed to execute playwright tests")?;
 
     let screenshots_dir = playwright_container.directory("/screenshots");
 
-    // report results from summary.json
-    report_batch_results(&screenshots_dir, total_apps, build_failures).await;
+    // TODO: parse summary.json to report per-app screenshot results
+    tracing::info!(
+        "Total: {} apps processed, {} build failures, {} service validation failures",
+        total_apps,
+        build_failures,
+        service_check_failures
+    );
 
     Ok(screenshots_dir)
 }
