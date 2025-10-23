@@ -64,6 +64,21 @@ EVAL_START=$(date +%s)
 uv run cli/evaluate_all_agent.py
 EVAL_END=$(date +%s)
 EVAL_DURATION=$((EVAL_END - EVAL_START))
+
+# Add mode information to evaluation report
+if [ -f evaluation_report.json ]; then
+    python3 -c "
+import json
+with open('evaluation_report.json', 'r') as f:
+    data = json.load(f)
+if 'summary' not in data:
+    data['summary'] = {}
+data['summary']['mode'] = 'MCP (TypeScript/tRPC)'
+with open('evaluation_report.json', 'w') as f:
+    json.dump(data, f, indent=2)
+"
+fi
+
 echo "✅ Evaluation complete (${EVAL_DURATION}s)"
 echo ""
 

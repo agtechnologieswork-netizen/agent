@@ -352,6 +352,7 @@ def generate_html_viewer():
             let html = `
                 <div class="report-info">
                     <p><strong>Timestamp:</strong> ${{summary.timestamp || 'N/A'}}</p>
+                    <p><strong>Mode:</strong> ${{summary.mode || 'N/A'}}</p>
                     <p><strong>Total Apps:</strong> ${{summary.total_apps || 0}}</p>
                     <p><strong>Evaluated:</strong> ${{summary.evaluated || 0}}</p>
                 </div>
