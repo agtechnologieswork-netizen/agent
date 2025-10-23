@@ -28,9 +28,14 @@ async function screenshotApp(
   const logs: LogEntry[] = [];
 
   try {
-    // resolve hostname to IP
-    const { stdout } = await execAsync(`getent hosts app-${appIndex} | awk '{ print $1 }'`);
-    const appIp = stdout.trim();
+    // resolve hostname to IP - if service failed to start, this will fail
+    let appIp: string;
+    try {
+      const { stdout } = await execAsync(`getent hosts app-${appIndex} | awk '{ print $1 }'`);
+      appIp = stdout.trim();
+    } catch (dnsError) {
+      throw new Error(`Service app-${appIndex} not found - DNS lookup failed (service likely crashed on startup)`);
+    }
 
     if (!appIp) {
       throw new Error(`Service app-${appIndex} not found (build likely failed)`);

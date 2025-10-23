@@ -148,58 +148,13 @@ pub async fn screenshot_apps_batch(
         tracing::info!("Build phase: all {} apps built successfully", num_services);
     }
 
+    // screenshot services individually with controlled concurrency
+    // this approach is more robust - if one service crashes, others continue
+    tracing::info!("Starting screenshot capture for {} services", num_services);
+
     let playwright_base = build_playwright_base(client)
         .await
         .context("failed to build playwright container")?;
-
-    // validate services can start by checking their endpoints
-    // services that fail this check will be filtered out before binding to playwright
-    tracing::info!("Validating {} services", num_services);
-
-    let mut valid_services = Vec::new();
-    let mut service_check_failures = 0;
-
-    for (i, service) in services {
-        // attempt to check if service can start by creating a test container that connects to it
-        let check_container = client
-            .container()
-            .from("alpine:latest")
-            .with_service_binding(&format!("app-{}", i), service.clone())
-            .with_exec(vec!["true"]);
-
-        match check_container.sync().await {
-            Ok(_) => {
-                tracing::debug!("[app-{}] Service validation passed", i);
-                valid_services.push((i, service));
-            }
-            Err(e) => {
-                tracing::warn!("[app-{}] Service validation failed: {}", i, e);
-                service_check_failures += 1;
-            }
-        }
-    }
-
-    if service_check_failures > 0 {
-        tracing::warn!(
-            "Service validation: {} passed, {} failed",
-            valid_services.len(),
-            service_check_failures
-        );
-    }
-
-    if valid_services.is_empty() {
-        return Err(eyre::eyre!(
-            "All services failed validation. Check that apps are listening on port {} and starting successfully.",
-            options.port
-        ));
-    }
-
-    // bind all valid services to playwright container
-    let mut playwright_container = playwright_base;
-    for (i, service) in &valid_services {
-        playwright_container =
-            playwright_container.with_service_binding(&format!("app-{}", i), service.clone());
-    }
 
     let cache_bust = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -207,33 +162,89 @@ pub async fn screenshot_apps_batch(
         .as_secs()
         .to_string();
 
-    playwright_container = playwright_container
-        .with_env_variable("TARGET_URL", &options.url)
-        .with_env_variable("TARGET_PORT", options.port.to_string())
-        .with_env_variable("WAIT_TIME", options.wait_time_ms.to_string())
-        .with_env_variable("CONCURRENCY", concurrency.to_string())
-        .with_env_variable("NUM_APPS", valid_services.len().to_string())
-        .with_env_variable("CACHE_BUST", cache_bust)
-        .with_exec(vec![
-            "npx",
-            "playwright",
-            "test",
-            "--config=playwright.batch.config.ts",
-        ]);
+    // use a shared playwright base but create separate containers for each service
+    // this allows us to handle service failures gracefully
+    let semaphore = std::sync::Arc::new(tokio::sync::Semaphore::new(concurrency));
+    let mut screenshot_futures = FuturesUnordered::new();
 
-    tracing::info!("Executing batch screenshot capture for {} services", valid_services.len());
+    for (i, service) in services {
+        let playwright_clone = playwright_base.clone();
+        let options_clone = options.clone();
+        let cache_bust_clone = cache_bust.clone();
+        let semaphore_clone = semaphore.clone();
 
-    playwright_container.sync().await.context("failed to execute playwright tests")?;
+        screenshot_futures.push(async move {
+            let _permit = semaphore_clone
+                .acquire_owned()
+                .await
+                .expect("semaphore should not be closed");
 
-    let screenshots_dir = playwright_container.directory("/screenshots");
+            tracing::info!("[app-{}] Screenshotting", i);
 
-    // TODO: parse summary.json to report per-app screenshot results
+            // bind service and run playwright for this specific app
+            let container = playwright_clone
+                .with_service_binding("app", service)
+                .with_env_variable("TARGET_URL", &options_clone.url)
+                .with_env_variable("TARGET_PORT", options_clone.port.to_string())
+                .with_env_variable("WAIT_TIME", options_clone.wait_time_ms.to_string())
+                .with_env_variable("CACHE_BUST", &cache_bust_clone)
+                .with_exec(vec![
+                    "npx",
+                    "playwright",
+                    "test",
+                    "--config=playwright.single.config.ts",
+                ]);
+
+            // execute and capture result
+            match container.sync().await {
+                Ok(_) => {
+                    tracing::info!("[app-{}] Screenshot captured", i);
+                    Some((i, container.directory("/screenshots")))
+                }
+                Err(e) => {
+                    let error_msg = e.to_string();
+                    if error_msg.contains("exit code: 1") || error_msg.contains("no such host") {
+                        tracing::warn!("[app-{}] Service crashed on startup", i);
+                    } else {
+                        tracing::error!("[app-{}] Screenshot failed: {}", i, e);
+                    }
+                    None
+                }
+            }
+        });
+    }
+
+    // collect results
+    let mut screenshot_results = Vec::new();
+    while let Some(result) = screenshot_futures.next().await {
+        if let Some((i, dir)) = result {
+            screenshot_results.push((i, dir));
+        }
+    }
+
+    let screenshot_count = screenshot_results.len();
+    let screenshot_failures = num_services - screenshot_count;
+
+    // merge all successful screenshots into output directory
+    let mut output_dir = client.directory();
+    for (i, dir) in screenshot_results {
+        output_dir = output_dir.with_directory(&format!("app-{}", i), dir);
+    }
+
     tracing::info!(
-        "Total: {} apps processed, {} build failures, {} service validation failures",
-        total_apps,
-        build_failures,
-        service_check_failures
+        "Screenshot phase: {} succeeded, {} failed",
+        screenshot_count,
+        screenshot_failures
     );
 
-    Ok(screenshots_dir)
+    tracing::info!(
+        "Total: {} apps, {} screenshots, {} failed (build: {}, screenshot: {})",
+        total_apps,
+        screenshot_count,
+        build_failures + screenshot_failures,
+        build_failures,
+        screenshot_failures
+    );
+
+    Ok(output_dir)
 }
