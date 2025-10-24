@@ -210,6 +210,26 @@ query(EVAL_PROMPT, ClaudeAgentOptions(permission_mode="bypassPermissions"))
 
 **Cost:** ~$0.02-0.05 per full evaluation run (all apps)
 
+### Agent SDK Integration
+
+**Technical Implementation:** The evaluation uses Claude Agent SDK for complementary agent-based metrics (build, run, test, deploy). Key implementation detail (`evaluate_apps.py` lines 18-21):
+
+```python
+# Ensure Claude CLI is in PATH for agent SDK
+if "/opt/homebrew/bin" not in os.environ.get("PATH", ""):
+    os.environ["PATH"] = f"/opt/homebrew/bin:{os.environ.get('PATH', '')}"
+```
+
+This ensures the agent SDK can invoke the Claude CLI when running under `uv run`, which doesn't inherit Homebrew paths by default. Environment variables must be exported (not just sourced) to propagate to subprocess invocations.
+
+**Why this maintains methodology:**
+- Agent discovers build/run/test commands by reading project files (package.json, Dockerfile)
+- Objective measurement: Did the agent successfully complete the task? (binary)
+- No quality judgment - only verifies if an autonomous agent can deploy the app
+- Complements direct execution metrics with agentic evaluation
+
+For usage details, see [evals.md](evals.md).
+
 ### Why Checklist Scores for DevX?
 
 **Decision:** Local Runability and Deployability use 0-5 checklists.
