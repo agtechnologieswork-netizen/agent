@@ -1,20 +1,136 @@
 #!/usr/bin/env python3
 """
-Evaluate all apps in the app/ directory using the 9-metric framework.
+Evaluate all apps in the app/ directory using extended metrics framework.
+
+Includes both direct execution metrics and agent-based complementary metrics.
 """
 import os
 import json
 import subprocess
 import sys
 import time
+import base64
+import asyncio
 from pathlib import Path
 from typing import Dict, List, Any, Optional
+import anthropic
 
-# Add cli directory to path for mlflow_tracker import
+# Ensure Claude CLI is in PATH for agent SDK
+# This is critical for the Agent SDK to find the Claude Code CLI
+if "/opt/homebrew/bin" not in os.environ.get("PATH", ""):
+    os.environ["PATH"] = f"/opt/homebrew/bin:{os.environ.get('PATH', '')}"
+
+# Add cli directory to path
 sys.path.insert(0, str(Path(__file__).parent / "cli"))
+
+# Import agent SDK
+try:
+    from claude_agent_sdk import (
+        query,
+        ClaudeAgentOptions,
+        ResultMessage,
+        AssistantMessage,
+        TextBlock,
+    )
+    AGENT_SDK_AVAILABLE = True
+except ImportError as e:
+    print(f"⚠️  Claude Agent SDK not available: {e}")
+    AGENT_SDK_AVAILABLE = False
 
 APP_DIR = Path("app")
 RESULTS = []
+
+# Initialize Anthropic client for VLM evaluations only
+ANTHROPIC_CLIENT = None
+try:
+    api_key = os.environ.get("ANTHROPIC_API_KEY")
+    if api_key:
+        ANTHROPIC_CLIENT = anthropic.Anthropic(api_key=api_key)
+except Exception as e:
+    print(f"⚠️  Could not initialize Anthropic client: {e}")
+    ANTHROPIC_CLIENT = None
+
+
+async def _run_agent_task(prompt: str, task_name: str, app_path: Path) -> tuple[bool, str]:
+    """
+    Helper function to run an agent task using Claude Agent SDK.
+
+    Args:
+        prompt: The task prompt for the agent
+        task_name: Name of the task for logging
+        app_path: Path to the app directory (for working directory context)
+
+    Returns:
+        (success: bool, message: str)
+    """
+    if not AGENT_SDK_AVAILABLE:
+        return None, "Agent SDK not available"
+
+    try:
+        # Configure agent options
+        options = ClaudeAgentOptions(
+            model="claude-sonnet-4-5-20250929",  # Latest Claude 4.5 Sonnet
+            max_turns=15,  # Limit turns for evaluation tasks
+            permission_mode="bypassPermissions",  # Allow agent to execute commands
+            cwd=str(app_path.resolve())  # Set working directory to the app path
+        )
+
+        final_message = ""
+        tool_uses_count = 0
+        error_occurred = False
+
+        # Run agent query with timeout (5 minutes per task)
+        async def _execute_query():
+            nonlocal final_message, tool_uses_count, error_occurred
+
+            async for message in query(prompt=prompt, options=options):
+                match message:
+                    case ResultMessage() as result:
+                        # Agent completed - check for errors
+                        if hasattr(result, 'error') and result.error:
+                            error_occurred = True
+                            final_message += f"Error: {result.error}\n"
+
+                    case AssistantMessage() as msg:
+                        # Collect assistant messages
+                        for block in msg.content:
+                            if isinstance(block, TextBlock):
+                                final_message += block.text
+                            # Count tool uses as indicators of actual work
+                            if hasattr(block, 'type') and 'tool_use' in str(block.type):
+                                tool_uses_count += 1
+
+        # Execute with 5-minute timeout
+        try:
+            await asyncio.wait_for(_execute_query(), timeout=300)  # 5 minutes
+        except asyncio.TimeoutError:
+            return False, f"Agent task '{task_name}' timed out after 5 minutes"
+
+        # Determine success based on:
+        # 1. No errors occurred
+        # 2. Agent used tools (indicating it actually tried to do the task)
+        # 3. Response doesn't contain clear failure indicators
+        if error_occurred:
+            return False, f"Agent encountered errors: {final_message[:300]}"
+
+        # Check for failure indicators in the response
+        final_lower = final_message.lower()
+        failure_indicators = ['failed', 'error', 'cannot', 'unable', 'missing', 'not found']
+        success_indicators = ['success', 'passed', 'completed', 'working', 'running']
+
+        has_failure = any(indicator in final_lower for indicator in failure_indicators)
+        has_success = any(indicator in final_lower for indicator in success_indicators)
+
+        # If agent used tools and didn't report clear failure, consider it success
+        if tool_uses_count > 0 and not has_failure:
+            return True, f"Agent completed task (used {tool_uses_count} tools): {final_message[:300]}"
+        elif has_success and not has_failure:
+            return True, final_message[:300]
+        else:
+            return False, final_message[:300]
+
+    except Exception as e:
+        return False, f"Agent SDK error: {str(e)[:200]}"
 
 
 def run_command(cmd: str, cwd: str, timeout: int = 60) -> tuple[int, str, str]:
@@ -211,6 +327,163 @@ def evaluate_databricks_connectivity(app_path: Path) -> tuple[bool, str]:
     return False, "No Databricks connectivity detected"
 
 
+def evaluate_ui_renders(app_path: Path, app_name: str) -> tuple[Optional[bool], str]:
+    """Metric 7: UI RENDERS (VLM-based Binary)"""
+    if not ANTHROPIC_CLIENT:
+        return None, "Anthropic client not available"
+
+    # Look for screenshot file
+    screenshot_paths = list(app_path.glob("**/screenshot*.png")) + list(app_path.glob("**/screenshot*.jpg"))
+
+    if not screenshot_paths:
+        return None, "No screenshot found"
+
+    screenshot_path = screenshot_paths[0]
+
+    try:
+        # Read and encode screenshot
+        with open(screenshot_path, "rb") as f:
+            image_data = base64.standard_b64encode(f.read()).decode("utf-8")
+
+        # Determine media type
+        media_type = "image/png" if screenshot_path.suffix == ".png" else "image/jpeg"
+
+        # Ask Claude to evaluate the UI
+        response = ANTHROPIC_CLIENT.messages.create(
+            model="claude-3-5-sonnet-20241022",
+            max_tokens=1024,
+            messages=[{
+                "role": "user",
+                "content": [
+                    {
+                        "type": "image",
+                        "source": {
+                            "type": "base64",
+                            "media_type": media_type,
+                            "data": image_data,
+                        },
+                    },
+                    {
+                        "type": "text",
+                        "text": """Analyze this application screenshot. Does it show a properly rendered UI?
+
+Answer with JSON:
+{
+    "renders": true/false,
+    "reason": "brief explanation"
+}
+
+Consider:
+- UI elements are visible and not blank
+- Layout appears intentional
+- No obvious errors or crashes
+- Contains actual content/data/visualizations"""
+                    }
+                ],
+            }]
+        )
+
+        # Parse response
+        response_text = response.content[0].text
+        result = json.loads(response_text)
+
+        return result["renders"], result["reason"]
+
+    except Exception as e:
+        return None, f"VLM evaluation failed: {str(e)[:100]}"
+
+
+def invoke_agent_to_build(app_path: Path, app_name: str) -> tuple[Optional[bool], str]:
+    """Agent Metric: Actually invoke agent to build this app (Binary)"""
+    prompt = f"""You are evaluating the buildability of the application "{app_name}".
+
+Your task:
+1. Read package.json or other build configuration files to understand the build system
+2. Install dependencies if needed (npm install, pip install, etc.)
+3. Execute the build command (npm run build, etc.)
+4. Report whether the build succeeded or failed
+
+Working directory: {app_path}
+
+Important:
+- Actually execute the build commands using available tools
+- Do not modify source code
+- Report clear success or failure based on build command exit codes
+
+Please proceed with building the application and report the result."""
+
+    return asyncio.run(_run_agent_task(prompt, "build", app_path))
+
+
+def invoke_agent_to_run(app_path: Path, app_name: str) -> tuple[Optional[bool], str]:
+    """Agent Metric: Actually invoke agent to run this app (Binary)"""
+    prompt = f"""You are evaluating the runnability of the application "{app_name}".
+
+Your task:
+1. Read package.json or other configuration to find the start/run command
+2. Start the application (npm start, streamlit run, etc.)
+3. Wait 5-10 seconds to check if it runs without immediate crashes
+4. Verify the process is still running
+5. Stop the application cleanly
+
+Working directory: {app_path}
+
+Important:
+- Actually execute the run commands using available tools
+- Use background processes if needed
+- Check process status after waiting
+- Clean up processes before finishing
+
+Please proceed with running the application and report whether it starts successfully."""
+
+    return asyncio.run(_run_agent_task(prompt, "run", app_path))
+
+
+def invoke_agent_to_test(app_path: Path, app_name: str) -> tuple[Optional[bool], str]:
+    """Agent Metric: Actually invoke agent to run tests (Binary)"""
+    prompt = f"""You are evaluating the testability of the application "{app_name}".
+
+Your task:
+1. Read package.json or other configuration to find the test command
+2. Execute the test command (npm test, pytest, etc.)
+3. Check the exit code to determine if tests passed or failed
+4. Report the test results
+
+Working directory: {app_path}
+
+Important:
+- Actually execute the test commands using available tools
+- Report success only if all tests pass (exit code 0)
+- Report failure if tests fail or test command doesn't exist
+
+Please proceed with running the tests and report the results."""
+
+    return asyncio.run(_run_agent_task(prompt, "test", app_path))
+
+
+def invoke_agent_to_deploy(app_path: Path, app_name: str) -> tuple[Optional[bool], str]:
+    """Agent Metric: Actually invoke agent to deploy this app (Binary)"""
+    prompt = f"""You are evaluating the deployability of the application "{app_name}".
+
+Your task:
+1. Check if Dockerfile exists
+2. Attempt to build the Docker image
+3. Check if app.yaml exists and is valid for Databricks Apps deployment
+4. Verify the deployment configuration is complete
+
+Working directory: {app_path}
+
+Important:
+- Actually execute docker build commands using available tools
+- Validate app.yaml structure if present
+- Report success only if Docker builds successfully AND app.yaml is valid
+- Do not push to any registry or deploy to production
+
+Please proceed with verifying the deployment configuration and report the results."""
+
+    return asyncio.run(_run_agent_task(prompt, "deploy", app_path))
+
+
 def evaluate_local_runability(app_path: Path) -> tuple[int, List[str]]:
     """Metric 8: LOCAL RUNABILITY (Score 0-5)"""
     score = 0
@@ -379,9 +652,12 @@ def evaluate_app(app_name: str) -> Dict[str, Any]:
     result["metrics"]["data_returned"] = None
     print("6. Data returned: Not implemented")
 
-    # Metric 7: UI Renders (Not implemented)
-    result["metrics"]["ui_renders"] = None
-    print("7. UI renders: Not implemented")
+    # Metric 7: UI Renders (VLM-based)
+    print("7. Checking UI renders (VLM-based)...")
+    ui_renders, ui_msg = evaluate_ui_renders(app_path, app_name)
+    result["metrics"]["ui_renders"] = ui_renders
+    result["issues"].append(f"UI Renders: {ui_msg}")
+    print(f"   {('✓' if ui_renders else '✗') if ui_renders is not None else 'N/A'} {ui_msg}")
 
     # Metric 8: Local Runability
     print("8. Checking local runability...")
@@ -401,6 +677,37 @@ def evaluate_app(app_name: str) -> Dict[str, Any]:
     for detail in deploy_details:
         print(f"      {detail}")
 
+    # Agent-Based Complementary Metrics
+    print("\n=== Agent-Based Metrics ===")
+
+    # Agent Metric 1: Can agent build?
+    print("A1. Invoking agent to build...")
+    agent_build, agent_build_msg = invoke_agent_to_build(app_path, app_name)
+    result["metrics"]["agent_build_success"] = agent_build
+    result["issues"].append(f"Agent Build: {agent_build_msg}")
+    print(f"    {('✓' if agent_build else '✗') if agent_build is not None else 'N/A'} {agent_build_msg}")
+
+    # Agent Metric 2: Can agent run?
+    print("A2. Invoking agent to run...")
+    agent_run, agent_run_msg = invoke_agent_to_run(app_path, app_name)
+    result["metrics"]["agent_run_success"] = agent_run
+    result["issues"].append(f"Agent Run: {agent_run_msg}")
+    print(f"    {('✓' if agent_run else '✗') if agent_run is not None else 'N/A'} {agent_run_msg}")
+
+    # Agent Metric 3: Can agent test?
+    print("A3. Invoking agent to test...")
+    agent_test, agent_test_msg = invoke_agent_to_test(app_path, app_name)
+    result["metrics"]["agent_test_success"] = agent_test
+    result["issues"].append(f"Agent Test: {agent_test_msg}")
+    print(f"    {('✓' if agent_test else '✗') if agent_test is not None else 'N/A'} {agent_test_msg}")
+
+    # Agent Metric 4: Can agent deploy?
+    print("A4. Invoking agent to deploy...")
+    agent_deploy, agent_deploy_msg = invoke_agent_to_deploy(app_path, app_name)
+    result["metrics"]["agent_deploy_success"] = agent_deploy
+    result["issues"].append(f"Agent Deploy: {agent_deploy_msg}")
+    print(f"    {('✓' if agent_deploy else '✗') if agent_deploy is not None else 'N/A'} {agent_deploy_msg}")
+
     return result
 
 
@@ -408,7 +715,7 @@ def generate_summary(results: List[Dict[str, Any]]) -> Dict[str, Any]:
     """Generate summary statistics."""
     total_apps = len(results)
 
-    # Count successes
+    # Count successes for direct execution metrics
     build_success_count = sum(1 for r in results if r["metrics"].get("build_success"))
     runtime_success_count = sum(1 for r in results if r["metrics"].get("runtime_success"))
     type_safety_count = sum(1 for r in results if r["metrics"].get("type_safety") is True)
@@ -416,6 +723,18 @@ def generate_summary(results: List[Dict[str, Any]]) -> Dict[str, Any]:
     tests_pass_count = sum(1 for r in results if r["metrics"].get("tests_pass") is True)
     tests_na_count = sum(1 for r in results if r["metrics"].get("tests_pass") is None)
     databricks_count = sum(1 for r in results if r["metrics"].get("databricks_connectivity"))
+    ui_renders_count = sum(1 for r in results if r["metrics"].get("ui_renders") is True)
+    ui_renders_na_count = sum(1 for r in results if r["metrics"].get("ui_renders") is None)
+
+    # Count successes for agent-based metrics
+    agent_build_count = sum(1 for r in results if r["metrics"].get("agent_build_success") is True)
+    agent_build_na_count = sum(1 for r in results if r["metrics"].get("agent_build_success") is None)
+    agent_run_count = sum(1 for r in results if r["metrics"].get("agent_run_success") is True)
+    agent_run_na_count = sum(1 for r in results if r["metrics"].get("agent_run_success") is None)
+    agent_test_count = sum(1 for r in results if r["metrics"].get("agent_test_success") is True)
+    agent_test_na_count = sum(1 for r in results if r["metrics"].get("agent_test_success") is None)
+    agent_deploy_count = sum(1 for r in results if r["metrics"].get("agent_deploy_success") is True)
+    agent_deploy_na_count = sum(1 for r in results if r["metrics"].get("agent_deploy_success") is None)
 
     # Average scores
     avg_runability = sum(r["metrics"].get("local_runability_score", 0) for r in results) / total_apps
@@ -430,9 +749,13 @@ def generate_summary(results: List[Dict[str, Any]]) -> Dict[str, Any]:
             "tests_pass": f"{tests_pass_count}/{total_apps - tests_na_count} (N/A: {tests_na_count})",
             "databricks_connectivity": f"{databricks_count}/{total_apps}",
             "data_returned": "Not implemented",
-            "ui_renders": "Not implemented",
+            "ui_renders": f"{ui_renders_count}/{total_apps - ui_renders_na_count} (N/A: {ui_renders_na_count})",
             "local_runability_avg": f"{avg_runability:.2f}/5",
-            "deployability_avg": f"{avg_deployability:.2f}/5"
+            "deployability_avg": f"{avg_deployability:.2f}/5",
+            "agent_build_success": f"{agent_build_count}/{total_apps - agent_build_na_count} (N/A: {agent_build_na_count})",
+            "agent_run_success": f"{agent_run_count}/{total_apps - agent_run_na_count} (N/A: {agent_run_na_count})",
+            "agent_test_success": f"{agent_test_count}/{total_apps - agent_test_na_count} (N/A: {agent_test_na_count})",
+            "agent_deploy_success": f"{agent_deploy_count}/{total_apps - agent_deploy_na_count} (N/A: {agent_deploy_na_count})"
         }
     }
 

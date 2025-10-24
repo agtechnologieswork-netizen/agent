@@ -58,11 +58,12 @@ GEN_DURATION=$((GEN_END - GEN_START))
 echo "✅ App generation complete (${GEN_DURATION}s)"
 echo ""
 
-# Step 4: Run evaluation
-echo "📊 Step 4/5: Running evaluation..."
+# Step 4: Run evaluation (with agent-based metrics)
+echo "📊 Step 4/5: Running evaluation (direct + agent-based metrics)..."
+echo "   ⚠️  Note: Agent metrics may take 2-3 min per app"
 EVAL_START=$(date +%s)
 export EVAL_MODE="mcp"
-uv run cli/evaluate_all_agent.py
+uv run python3 evaluate_apps.py
 EVAL_END=$(date +%s)
 EVAL_DURATION=$((EVAL_END - EVAL_START))
 

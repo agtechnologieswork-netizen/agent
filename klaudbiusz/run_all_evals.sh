@@ -1,162 +1,152 @@
 #!/bin/bash
 set -e
 
-# Run All Evaluations - Both Vanilla SDK and MCP Mode
-# Generates apps and evaluates in both modes for comparison
+# Master script to run ALL evaluation modes sequentially
+# This ensures complete testing of both Vanilla SDK and MCP modes
 
-echo "=========================================="
-echo "Run All Evaluations - Vanilla SDK + MCP"
-echo "=========================================="
+echo "================================================================"
+echo "Master Evaluation Runner - All Modes"
+echo "================================================================"
+echo ""
+echo "This will run evaluations in sequence:"
+echo "  1. Vanilla SDK mode (Streamlit apps)"
+echo "  2. MCP mode (TypeScript/tRPC apps)"
+echo ""
+echo "⏱️  Expected total time: ~60-90 minutes"
+echo "================================================================"
 echo ""
 
-# Load environment variables from .env file if it exists
-if [ -f .env ]; then
-    echo "✅ Loading environment variables from .env"
-    export $(grep -v '^#' .env | xargs)
-fi
-
-# Record overall start time
-OVERALL_START=$(date +%s)
-OVERALL_RUN_ID=$(date +%Y%m%d_%H%M%S)
-
-# Check required environment variables
-if [ -z "$DATABRICKS_HOST" ] || [ -z "$DATABRICKS_TOKEN" ] || [ -z "$ANTHROPIC_API_KEY" ]; then
-    echo "❌ Error: Required environment variables not set:"
-    echo "   DATABRICKS_HOST, DATABRICKS_TOKEN, ANTHROPIC_API_KEY"
-    echo "   Set them via shell export or create a .env file"
+# Check for .env file
+if [ ! -f .env ]; then
+    echo "❌ Error: .env file not found"
+    echo "   Please create .env with required environment variables:"
+    echo "   - ANTHROPIC_API_KEY"
+    echo "   - DATABRICKS_HOST"
+    echo "   - DATABRICKS_TOKEN"
     exit 1
 fi
 
-echo "📋 Overall Configuration:"
-echo "   Run ID: $OVERALL_RUN_ID"
-echo "   Date: $(date)"
-echo "   Modes: Vanilla SDK + MCP"
+# Load environment
+export $(grep -v '^#' .env | xargs)
+
+# Verify required environment variables
+if [ -z "$ANTHROPIC_API_KEY" ] || [ -z "$DATABRICKS_HOST" ] || [ -z "$DATABRICKS_TOKEN" ]; then
+    echo "❌ Error: Required environment variables not set in .env"
+    exit 1
+fi
+
+echo "✅ Environment loaded from .env"
 echo ""
 
-# Step 1: Run Vanilla SDK Mode
-echo "=========================================="
-echo "1/2: Running Vanilla SDK Mode"
-echo "=========================================="
+# Record start time
+TOTAL_START=$(date +%s)
+
+# Create results directory for this run
+RUN_ID=$(date +%Y%m%d_%H%M%S)
+RESULTS_DIR="results/${RUN_ID}"
+mkdir -p "$RESULTS_DIR"
+
+echo "📁 Results will be saved to: $RESULTS_DIR"
 echo ""
+
+# ============================================================
+# Part 1: Vanilla SDK Mode
+# ============================================================
+echo "================================================================"
+echo "PART 1/2: Vanilla SDK Mode (Streamlit)"
+echo "================================================================"
+echo ""
+
 VANILLA_START=$(date +%s)
-./run_vanilla_eval.sh
+
+./run_vanilla_eval.sh 2>&1 | tee "$RESULTS_DIR/vanilla_eval.log"
+
 VANILLA_END=$(date +%s)
 VANILLA_DURATION=$((VANILLA_END - VANILLA_START))
 
-# Move results to vanilla-specific directory
-mkdir -p results_${OVERALL_RUN_ID}/vanilla
-mv evaluation_report.json results_${OVERALL_RUN_ID}/vanilla/ 2>/dev/null || true
-mv EVALUATION_REPORT.md results_${OVERALL_RUN_ID}/vanilla/ 2>/dev/null || true
-mv run_metadata.json results_${OVERALL_RUN_ID}/vanilla/ 2>/dev/null || true
-mv app results_${OVERALL_RUN_ID}/vanilla/ 2>/dev/null || true
+# Archive vanilla results
+if [ -f evaluation_report.json ]; then
+    cp evaluation_report.json "$RESULTS_DIR/vanilla_report.json"
+fi
+if [ -f EVALUATION_REPORT.md ]; then
+    cp EVALUATION_REPORT.md "$RESULTS_DIR/VANILLA_REPORT.md"
+fi
+if [ -f evaluation_viewer.html ]; then
+    cp evaluation_viewer.html "$RESULTS_DIR/vanilla_viewer.html"
+fi
 
 echo ""
-echo "✅ Vanilla SDK mode complete (${VANILLA_DURATION}s)"
+echo "✅ Vanilla SDK evaluation complete (${VANILLA_DURATION}s)"
+echo ""
+echo "================================================================"
+echo "PART 2/2: MCP Mode (TypeScript/tRPC)"
+echo "================================================================"
 echo ""
 
-# Step 2: Run MCP Mode
-echo "=========================================="
-echo "2/2: Running MCP Mode"
-echo "=========================================="
-echo ""
 MCP_START=$(date +%s)
-./run_mcp_eval.sh
+
+./run_mcp_eval.sh 2>&1 | tee "$RESULTS_DIR/mcp_eval.log"
+
 MCP_END=$(date +%s)
 MCP_DURATION=$((MCP_END - MCP_START))
 
-# Move results to mcp-specific directory
-mkdir -p results_${OVERALL_RUN_ID}/mcp
-mv evaluation_report.json results_${OVERALL_RUN_ID}/mcp/ 2>/dev/null || true
-mv EVALUATION_REPORT.md results_${OVERALL_RUN_ID}/mcp/ 2>/dev/null || true
-mv run_metadata.json results_${OVERALL_RUN_ID}/mcp/ 2>/dev/null || true
-mv app results_${OVERALL_RUN_ID}/mcp/ 2>/dev/null || true
+# Archive MCP results
+if [ -f evaluation_report.json ]; then
+    cp evaluation_report.json "$RESULTS_DIR/mcp_report.json"
+fi
+if [ -f EVALUATION_REPORT.md ]; then
+    cp EVALUATION_REPORT.md "$RESULTS_DIR/MCP_REPORT.md"
+fi
+if [ -f evaluation_viewer.html ]; then
+    cp evaluation_viewer.html "$RESULTS_DIR/mcp_viewer.html"
+fi
 
 echo ""
-echo "✅ MCP mode complete (${MCP_DURATION}s)"
+echo "✅ MCP evaluation complete (${MCP_DURATION}s)"
 echo ""
 
-# Record combined metadata
-OVERALL_END=$(date +%s)
-OVERALL_DURATION=$((OVERALL_END - OVERALL_START))
+# ============================================================
+# Summary
+# ============================================================
+TOTAL_END=$(date +%s)
+TOTAL_DURATION=$((TOTAL_END - TOTAL_START))
 
-cat > results_${OVERALL_RUN_ID}/combined_metadata.json << EOF
+cat > "$RESULTS_DIR/run_summary.json" << EOFSUM
 {
-  "overall_run_id": "$OVERALL_RUN_ID",
+  "run_id": "$RUN_ID",
   "timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
   "date_human": "$(date)",
-  "total_duration_sec": $OVERALL_DURATION,
-  "modes": {
-    "vanilla_sdk": {
-      "duration_sec": $VANILLA_DURATION,
-      "results_dir": "vanilla"
-    },
-    "mcp": {
-      "duration_sec": $MCP_DURATION,
-      "results_dir": "mcp"
-    }
-  },
+  "duration_total_sec": $TOTAL_DURATION,
+  "duration_vanilla_sec": $VANILLA_DURATION,
+  "duration_mcp_sec": $MCP_DURATION,
+  "modes": ["vanilla_sdk", "mcp"],
+  "results_directory": "$RESULTS_DIR",
   "environment": {
-    "databricks_host": "$DATABRICKS_HOST",
     "os": "$(uname -s)",
     "hostname": "$(hostname)"
   }
 }
-EOF
+EOFSUM
 
-# Create comparison summary
-echo "# Combined Evaluation Report" > results_${OVERALL_RUN_ID}/COMPARISON.md
-echo "" >> results_${OVERALL_RUN_ID}/COMPARISON.md
-echo "Run ID: $OVERALL_RUN_ID" >> results_${OVERALL_RUN_ID}/COMPARISON.md
-echo "Date: $(date)" >> results_${OVERALL_RUN_ID}/COMPARISON.md
-echo "" >> results_${OVERALL_RUN_ID}/COMPARISON.md
-echo "## Duration Comparison" >> results_${OVERALL_RUN_ID}/COMPARISON.md
-echo "" >> results_${OVERALL_RUN_ID}/COMPARISON.md
-echo "- **Vanilla SDK Mode:** ${VANILLA_DURATION}s ($(($VANILLA_DURATION / 60))m $(($VANILLA_DURATION % 60))s)" >> results_${OVERALL_RUN_ID}/COMPARISON.md
-echo "- **MCP Mode:** ${MCP_DURATION}s ($(($MCP_DURATION / 60))m $(($MCP_DURATION % 60))s)" >> results_${OVERALL_RUN_ID}/COMPARISON.md
-echo "- **Total:** ${OVERALL_DURATION}s ($(($OVERALL_DURATION / 60))m $(($OVERALL_DURATION % 60))s)" >> results_${OVERALL_RUN_ID}/COMPARISON.md
-echo "" >> results_${OVERALL_RUN_ID}/COMPARISON.md
-echo "## Results Location" >> results_${OVERALL_RUN_ID}/COMPARISON.md
-echo "" >> results_${OVERALL_RUN_ID}/COMPARISON.md
-echo "- Vanilla SDK: \`results_${OVERALL_RUN_ID}/vanilla/\`" >> results_${OVERALL_RUN_ID}/COMPARISON.md
-echo "- MCP: \`results_${OVERALL_RUN_ID}/mcp/\`" >> results_${OVERALL_RUN_ID}/COMPARISON.md
-echo "" >> results_${OVERALL_RUN_ID}/COMPARISON.md
-
-# Create symlink to latest
-rm -f results_latest
-ln -s results_${OVERALL_RUN_ID} results_latest
-
-# Generate HTML viewer
-echo "🌐 Generating HTML viewer..."
-python3 cli/generate_html_viewer.py
-
-echo "=========================================="
-echo "✅ All Evaluations Complete!"
-echo "=========================================="
+echo "================================================================"
+echo "✅ ALL EVALUATIONS COMPLETE!"
+echo "================================================================"
 echo ""
-echo "📊 Overall Summary:"
-echo "   Run ID: $OVERALL_RUN_ID"
-echo "   Total Time: ${OVERALL_DURATION}s ($(($OVERALL_DURATION / 60))m $(($OVERALL_DURATION % 60))s)"
+echo "📊 Summary:"
+echo "   Run ID: $RUN_ID"
+echo "   Total time: ${TOTAL_DURATION}s (~$(($TOTAL_DURATION / 60))m)"
+echo "   Vanilla SDK: ${VANILLA_DURATION}s (~$(($VANILLA_DURATION / 60))m)"
+echo "   MCP mode: ${MCP_DURATION}s (~$(($MCP_DURATION / 60))m)"
 echo ""
-echo "   Vanilla SDK: ${VANILLA_DURATION}s"
-echo "   MCP Mode: ${MCP_DURATION}s"
+echo "📁 All results saved to:"
+echo "   $RESULTS_DIR/"
+echo "   ├── vanilla_report.json"
+echo "   ├── vanilla_viewer.html"
+echo "   ├── mcp_report.json"
+echo "   ├── mcp_viewer.html"
+echo "   └── run_summary.json"
 echo ""
-echo "📁 Results Directory: results_${OVERALL_RUN_ID}/"
-echo "   ├── vanilla/"
-echo "   │   ├── evaluation_report.json"
-echo "   │   ├── EVALUATION_REPORT.md"
-echo "   │   ├── run_metadata.json"
-echo "   │   └── app/"
-echo "   ├── mcp/"
-echo "   │   ├── evaluation_report.json"
-echo "   │   ├── EVALUATION_REPORT.md"
-echo "   │   ├── run_metadata.json"
-echo "   │   └── app/"
-echo "   ├── combined_metadata.json"
-echo "   └── COMPARISON.md"
-echo ""
-echo "📊 Quick Access: results_latest/ -> results_${OVERALL_RUN_ID}/"
-echo ""
-echo "🔍 View results:"
-echo "   cat results_${OVERALL_RUN_ID}/COMPARISON.md"
-echo "   open evaluation_viewer.html"
+echo "🌐 View results:"
+echo "   open $RESULTS_DIR/vanilla_viewer.html"
+echo "   open $RESULTS_DIR/mcp_viewer.html"
 echo ""
