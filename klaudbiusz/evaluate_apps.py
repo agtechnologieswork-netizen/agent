@@ -2,7 +2,7 @@
 """
 Evaluate all apps in the app/ directory using extended metrics framework.
 
-Includes both direct execution metrics and agent-based complementary metrics.
+Includes both direct execution metrics and optional agent-based complementary metrics.
 """
 import os
 import json
@@ -11,6 +11,7 @@ import sys
 import time
 import base64
 import asyncio
+import argparse
 from pathlib import Path
 from typing import Dict, List, Any, Optional
 import anthropic
@@ -599,7 +600,7 @@ def evaluate_deployability(app_path: Path) -> tuple[int, List[str]]:
     return score, details
 
 
-def evaluate_app(app_name: str) -> Dict[str, Any]:
+def evaluate_app(app_name: str, enable_agent_metrics: bool = False) -> Dict[str, Any]:
     """Evaluate a single app using all 9 metrics."""
     print(f"\n{'='*60}")
     print(f"Evaluating: {app_name}")
@@ -677,36 +678,43 @@ def evaluate_app(app_name: str) -> Dict[str, Any]:
     for detail in deploy_details:
         print(f"      {detail}")
 
-    # Agent-Based Complementary Metrics
-    print("\n=== Agent-Based Metrics ===")
+    # Agent-Based Complementary Metrics (optional, controlled by --enable-agent-metrics flag)
+    if enable_agent_metrics:
+        print("\n=== Agent-Based Metrics ===")
 
-    # Agent Metric 1: Can agent build?
-    print("A1. Invoking agent to build...")
-    agent_build, agent_build_msg = invoke_agent_to_build(app_path, app_name)
-    result["metrics"]["agent_build_success"] = agent_build
-    result["issues"].append(f"Agent Build: {agent_build_msg}")
-    print(f"    {('✓' if agent_build else '✗') if agent_build is not None else 'N/A'} {agent_build_msg}")
+        # Agent Metric 1: Can agent build?
+        print("A1. Invoking agent to build...")
+        agent_build, agent_build_msg = invoke_agent_to_build(app_path, app_name)
+        result["metrics"]["agent_build_success"] = agent_build
+        result["issues"].append(f"Agent Build: {agent_build_msg}")
+        print(f"    {('✓' if agent_build else '✗') if agent_build is not None else 'N/A'} {agent_build_msg}")
 
-    # Agent Metric 2: Can agent run?
-    print("A2. Invoking agent to run...")
-    agent_run, agent_run_msg = invoke_agent_to_run(app_path, app_name)
-    result["metrics"]["agent_run_success"] = agent_run
-    result["issues"].append(f"Agent Run: {agent_run_msg}")
-    print(f"    {('✓' if agent_run else '✗') if agent_run is not None else 'N/A'} {agent_run_msg}")
+        # Agent Metric 2: Can agent run?
+        print("A2. Invoking agent to run...")
+        agent_run, agent_run_msg = invoke_agent_to_run(app_path, app_name)
+        result["metrics"]["agent_run_success"] = agent_run
+        result["issues"].append(f"Agent Run: {agent_run_msg}")
+        print(f"    {('✓' if agent_run else '✗') if agent_run is not None else 'N/A'} {agent_run_msg}")
 
-    # Agent Metric 3: Can agent test?
-    print("A3. Invoking agent to test...")
-    agent_test, agent_test_msg = invoke_agent_to_test(app_path, app_name)
-    result["metrics"]["agent_test_success"] = agent_test
-    result["issues"].append(f"Agent Test: {agent_test_msg}")
-    print(f"    {('✓' if agent_test else '✗') if agent_test is not None else 'N/A'} {agent_test_msg}")
+        # Agent Metric 3: Can agent test?
+        print("A3. Invoking agent to test...")
+        agent_test, agent_test_msg = invoke_agent_to_test(app_path, app_name)
+        result["metrics"]["agent_test_success"] = agent_test
+        result["issues"].append(f"Agent Test: {agent_test_msg}")
+        print(f"    {('✓' if agent_test else '✗') if agent_test is not None else 'N/A'} {agent_test_msg}")
 
-    # Agent Metric 4: Can agent deploy?
-    print("A4. Invoking agent to deploy...")
-    agent_deploy, agent_deploy_msg = invoke_agent_to_deploy(app_path, app_name)
-    result["metrics"]["agent_deploy_success"] = agent_deploy
-    result["issues"].append(f"Agent Deploy: {agent_deploy_msg}")
-    print(f"    {('✓' if agent_deploy else '✗') if agent_deploy is not None else 'N/A'} {agent_deploy_msg}")
+        # Agent Metric 4: Can agent deploy?
+        print("A4. Invoking agent to deploy...")
+        agent_deploy, agent_deploy_msg = invoke_agent_to_deploy(app_path, app_name)
+        result["metrics"]["agent_deploy_success"] = agent_deploy
+        result["issues"].append(f"Agent Deploy: {agent_deploy_msg}")
+        print(f"    {('✓' if agent_deploy else '✗') if agent_deploy is not None else 'N/A'} {agent_deploy_msg}")
+    else:
+        # Agent metrics disabled
+        result["metrics"]["agent_build_success"] = None
+        result["metrics"]["agent_run_success"] = None
+        result["metrics"]["agent_test_success"] = None
+        result["metrics"]["agent_deploy_success"] = None
 
     return result
 
@@ -814,7 +822,7 @@ def generate_markdown_report(summary: Dict[str, Any], results: List[Dict[str, An
     return md
 
 
-def main():
+def main(enable_agent_metrics: bool = False):
     """Main evaluation function."""
     # Get list of apps
     apps = [d for d in os.listdir(APP_DIR) if (APP_DIR / d).is_dir()]
@@ -822,11 +830,16 @@ def main():
 
     print(f"Found {len(apps)} apps to evaluate")
 
+    if enable_agent_metrics:
+        print("⚠️  Agent-based metrics ENABLED (slow, ~2-3 min per app)")
+    else:
+        print("ℹ️  Agent-based metrics DISABLED (use --enable-agent-metrics to enable)")
+
     # Evaluate each app
     results = []
     for app_name in apps:
         try:
-            result = evaluate_app(app_name)
+            result = evaluate_app(app_name, enable_agent_metrics=enable_agent_metrics)
             results.append(result)
         except Exception as e:
             print(f"ERROR evaluating {app_name}: {e}")
@@ -897,4 +910,15 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser(
+        description='Evaluate generated apps with objective metrics'
+    )
+    parser.add_argument(
+        '--enable-agent-metrics',
+        action='store_true',
+        default=False,
+        help='Enable agent-based metrics (slow, ~2-3 min per app, adds ~$0.20/app cost)'
+    )
+    args = parser.parse_args()
+
+    main(enable_agent_metrics=args.enable_agent_metrics)
