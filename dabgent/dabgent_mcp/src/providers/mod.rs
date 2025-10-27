@@ -39,7 +39,11 @@ impl CombinedProvider {
         google_sheets: Option<GoogleSheetsProvider>,
         io: Option<IOProvider>,
     ) -> Result<Self> {
-        if databricks.is_none() && deployment.is_none() && google_sheets.is_none() && io.is_none() {
+        if databricks.is_none()
+            && deployment.is_none()
+            && google_sheets.is_none()
+            && io.is_none()
+        {
             return Err(eyre::eyre!("at least one provider must be available"));
         }
         Ok(Self {
