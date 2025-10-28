@@ -116,14 +116,6 @@ jobs:
           mv artifacts/linux/dabgent_mcp release/dabgent_mcp-linux-x86_64
           mv artifacts/macos/dabgent_mcp release/dabgent_mcp-macos-arm64
           chmod +x release/*
-
-          # Generate checksums
-          cd release
-          sha256sum dabgent_mcp-linux-x86_64 > checksums.txt
-          sha256sum dabgent_mcp-macos-arm64 >> checksums.txt
-          cat checksums.txt
-          cd ..
-
           ls -lh release/
 
       - name: Create GitHub release
@@ -137,14 +129,24 @@ jobs:
 
           CI_URL="https://github.com/${{ github.repository }}/actions/runs/${{ needs.validate-and-tag.outputs.run_id }}"
 
+          # Generate checksums
+          cd release
+          LINUX_CHECKSUM=$(sha256sum dabgent_mcp-linux-x86_64 | awk '{print $1}')
+          MACOS_CHECKSUM=$(sha256sum dabgent_mcp-macos-arm64 | awk '{print $1}')
+          cd ..
+
           cat > release_notes.md <<EOF
           $NOTES
 
+          ## SHA256 Checksums
+          \`\`\`
+          $LINUX_CHECKSUM  dabgent_mcp-linux-x86_64
+          $MACOS_CHECKSUM  dabgent_mcp-macos-arm64
+          \`\`\`
+
           ---
-          **Build Verification:**
           - Built from commit: \`${{ inputs.commit_sha }}\`
           - CI Run: $CI_URL
-          - Artifacts can be verified against the CI build
           EOF
 
           gh release create "${{ inputs.version }}" \
