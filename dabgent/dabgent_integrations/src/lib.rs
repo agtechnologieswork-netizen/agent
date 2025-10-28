@@ -11,9 +11,14 @@ pub trait ToolResultDisplay {
 }
 
 pub use databricks::{
-    ColumnMetadata, DatabricksRestClient, DescribeTableRequest, ExecuteSqlRequest,
-    ExecuteSqlResult, ListCatalogsResult, ListSchemasRequest, ListSchemasResult, ListTablesRequest,
+    ColumnMetadata, DatabricksDescribeTableArgs, DatabricksExecuteQueryArgs,
+    DatabricksListCatalogsArgs, DatabricksListSchemasArgs, DatabricksListTablesArgs,
+    DatabricksRestClient, DescribeTableRequest, ExecuteSqlRequest, ExecuteSqlResult,
+    ListCatalogsResult, ListSchemasRequest, ListSchemasResult, ListTablesRequest,
     ListTablesResult, TableDetails, TableInfo,
+};
+pub use deployment::{
+    AppInfo, CreateApp, Resources, create_app, deploy_app, get_app_info, sync_workspace,
 };
 pub use google_sheets::{
     FetchSpreadsheetDataRequest, GetSpreadsheetMetadataRequest, GoogleSheetsClient,
