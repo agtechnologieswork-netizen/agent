@@ -27,11 +27,6 @@ async fn build_app_service(
         app_container = app_container.with_env_variable(key, value);
     }
 
-    app_container
-        .sync()
-        .await
-        .context("docker build failed")?;
-
     let port = options.port as isize;
     Ok(app_container.with_exposed_port(port).as_service())
 }

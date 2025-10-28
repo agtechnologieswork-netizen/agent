@@ -9,8 +9,9 @@ from pathlib import Path
 
 def screenshot_apps(
     apps_dir: str,
-    concurrency: int = 10,
+    concurrency: int = 5,
     wait_time: int = 90000,
+    capture_logs: bool = False,
 ) -> None:
     """Run screenshotting for all apps in a directory.
 
