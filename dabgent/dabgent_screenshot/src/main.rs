@@ -150,7 +150,7 @@ async fn main() -> Result<()> {
             opts.connect(move |client| async move {
                 let app_dirs: Vec<_> = app_sources
                     .iter()
-                    .map(|path| client.host().directory(path))
+                    .map(|path| (path.clone(), client.host().directory(path)))
                     .collect();
 
                 let num_apps = app_dirs.len();

@@ -9,6 +9,17 @@ async fn build_app_service(
     app_source: Directory,
     options: &ScreenshotOptions,
 ) -> Result<Service> {
+    // check for Dockerfile existence first
+    let dockerfile_exists = app_source
+        .file("Dockerfile")
+        .sync()
+        .await
+        .is_ok();
+
+    if !dockerfile_exists {
+        eyre::bail!("Dockerfile not found in app source directory");
+    }
+
     let mut app_container = app_source.docker_build();
 
     for (key, value) in &options.env_vars {
@@ -19,7 +30,7 @@ async fn build_app_service(
     app_container
         .sync()
         .await
-        .context("failed to build app container")?;
+        .context("docker build failed")?;
 
     let port = options.port as isize;
     Ok(app_container.with_exposed_port(port).as_service())
@@ -91,7 +102,7 @@ pub async fn screenshot_app(
 /// Screenshot multiple apps in batch with controlled concurrency
 pub async fn screenshot_apps_batch(
     client: &DaggerConn,
-    app_sources: Vec<Directory>,
+    app_sources: Vec<(String, Directory)>,
     options: ScreenshotOptions,
     concurrency: usize,
 ) -> Result<Directory> {
@@ -107,7 +118,7 @@ pub async fn screenshot_apps_batch(
     let semaphore = std::sync::Arc::new(tokio::sync::Semaphore::new(concurrency));
     let mut futures = FuturesUnordered::new();
 
-    for (i, app_source) in app_sources.into_iter().enumerate() {
+    for (i, (path, app_source)) in app_sources.into_iter().enumerate() {
         let options_clone = options.clone();
         let semaphore_clone = semaphore.clone();
 
@@ -116,7 +127,7 @@ pub async fn screenshot_apps_batch(
                 .acquire_owned()
                 .await
                 .expect("semaphore should not be closed");
-            tracing::info!("[app-{}] Building container", i);
+            tracing::info!("[app-{}] Building container from {}", i, path);
 
             match build_app_service(app_source, &options_clone).await {
                 Ok(service) => {
@@ -124,7 +135,7 @@ pub async fn screenshot_apps_batch(
                     Some((i, service))
                 }
                 Err(e) => {
-                    tracing::error!("[app-{}] Build failed: {}", i, e);
+                    tracing::error!("[app-{}] Build failed ({}): {}", i, path, e);
                     None
                 }
             }

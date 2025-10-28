@@ -51,7 +51,10 @@ def screenshot_apps(
     temp_output = Path(tempfile.mkdtemp(prefix="rescreenshot_"))
 
     cmd = [
-        "cargo", "run", "--release", "--",
+        "cargo",
+        "run",
+        "--release",
+        "--",
         "batch",
         f"--env-vars={env_vars}",
         f"--concurrency={concurrency}",
@@ -78,7 +81,7 @@ def screenshot_apps(
         result = subprocess.run(
             cmd,
             cwd=str(screenshot_tool_path),
-            capture_output=True,
+            capture_output=False,
             text=True,
             timeout=timeout_seconds,
         )
