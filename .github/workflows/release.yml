@@ -16,6 +16,11 @@ on:
         required: false
         type: string
         default: ""
+      mark_as_latest:
+        description: "Mark this release as latest"
+        required: false
+        type: boolean
+        default: true
 
 permissions:
   contents: write
@@ -129,14 +134,24 @@ jobs:
 
           CI_URL="https://github.com/${{ github.repository }}/actions/runs/${{ needs.validate-and-tag.outputs.run_id }}"
 
+          # Generate checksums
+          cd release
+          LINUX_CHECKSUM=$(sha256sum dabgent_mcp-linux-x86_64 | awk '{print $1}')
+          MACOS_CHECKSUM=$(sha256sum dabgent_mcp-macos-arm64 | awk '{print $1}')
+          cd ..
+
           cat > release_notes.md <<EOF
           $NOTES
 
+          ## SHA256 Checksums
+          \`\`\`
+          $LINUX_CHECKSUM  dabgent_mcp-linux-x86_64
+          $MACOS_CHECKSUM  dabgent_mcp-macos-arm64
+          \`\`\`
+
           ---
-          **Build Verification:**
           - Built from commit: \`${{ inputs.commit_sha }}\`
           - CI Run: $CI_URL
-          - Artifacts can be verified against the CI build
           EOF
 
           gh release create "${{ inputs.version }}" \
@@ -144,21 +159,17 @@ jobs:
             --title "${{ inputs.version }}" \
             --notes-file release_notes.md \
             --target "${{ inputs.commit_sha }}" \
-            --verify-tag \
             release/*
 
-      - name: Update latest tag
+      - name: Mark as latest release
+        if: ${{ inputs.mark_as_latest }}
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-
-          # Delete existing latest tag if it exists
-          git tag -d latest 2>/dev/null || true
-          git push origin :refs/tags/latest 2>/dev/null || true
-
-          # Create new latest tag pointing to the release commit
-          git tag latest "${{ inputs.commit_sha }}"
-          git push origin latest
+          # Mark this release as the latest
+          gh release edit "${{ inputs.version }}" \
+            --repo "${{ github.repository }}" \
+            --latest
 
       - name: Output release URL
         run: |
