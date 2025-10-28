@@ -9,8 +9,9 @@ from pathlib import Path
 
 def screenshot_apps(
     apps_dir: str,
-    concurrency: int = 10,
+    concurrency: int = 5,
     wait_time: int = 90000,
+    capture_logs: bool = False,
 ) -> None:
     """Run screenshotting for all apps in a directory.
 
@@ -44,25 +45,30 @@ def screenshot_apps(
 
     env_vars = f"DATABRICKS_HOST={databricks_host},DATABRICKS_TOKEN={databricks_token}"
 
-    # build dagger command
-    sidecar_path = Path(__file__).parent.parent.parent / "screenshot-sidecar"
-
-    cmd = ["dagger", "call", "screenshot-apps"]
-    for app_dir in app_dirs:
-        cmd.extend([f"--app-sources={app_dir}"])
-
-    cmd.extend([
-        f"--env-vars={env_vars}",
-        f"--concurrency={concurrency}",
-        f"--wait-time={wait_time}",
-    ])
+    # build rust CLI command
+    screenshot_tool_path = Path(__file__).parent.parent.parent / "dabgent" / "dabgent_screenshot"
 
     # export to temp directory
     temp_output = Path(tempfile.mkdtemp(prefix="rescreenshot_"))
-    cmd.extend(["export", f"--path={temp_output}"])
 
-    print(f"\nRunning dagger command with concurrency={concurrency}, wait_time={wait_time}ms")
-    print(f"Working directory: {sidecar_path}")
+    cmd = [
+        "cargo",
+        "run",
+        "--release",
+        "--",
+        "batch",
+        f"--env-vars={env_vars}",
+        f"--concurrency={concurrency}",
+        f"--wait-time={wait_time}",
+        f"--output={temp_output}",
+    ]
+
+    # add all app sources
+    app_sources = ",".join(str(d) for d in app_dirs)
+    cmd.append(f"--app-sources={app_sources}")
+
+    print(f"\nRunning screenshot tool with concurrency={concurrency}, wait_time={wait_time}ms")
+    print(f"Working directory: {screenshot_tool_path}")
     print(f"Command: {' '.join(cmd)}\n")
 
     try:
@@ -75,8 +81,8 @@ def screenshot_apps(
 
         result = subprocess.run(
             cmd,
-            cwd=str(sidecar_path),
-            capture_output=True,
+            cwd=str(screenshot_tool_path),
+            capture_output=False,
             text=True,
             timeout=timeout_seconds,
         )
@@ -84,7 +90,7 @@ def screenshot_apps(
         if result.returncode != 0:
             print("STDOUT:", result.stdout)
             print("STDERR:", result.stderr)
-            raise RuntimeError(f"Dagger command failed with exit code {result.returncode}")
+            raise RuntimeError(f"Screenshot tool failed with exit code {result.returncode}")
 
         print("Screenshot capture completed successfully\n")
 

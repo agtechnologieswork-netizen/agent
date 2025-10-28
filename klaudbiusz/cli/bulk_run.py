@@ -161,7 +161,9 @@ def main(
             print(f"{'=' * 80}\n")
 
             try:
-                screenshot_apps(apps_dir, concurrency=screenshot_concurrency, wait_time=screenshot_wait_time)
+                screenshot_apps(
+                    apps_dir, concurrency=screenshot_concurrency, wait_time=screenshot_wait_time, capture_logs=True
+                )
             except Exception as e:
                 print(f"Screenshot batch failed: {e}")
 

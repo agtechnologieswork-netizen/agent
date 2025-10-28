@@ -1,0 +1,26 @@
+[package]
+name = "dabgent_screenshot"
+version = "0.1.0"
+edition = "2024"
+
+[[bin]]
+name = "dabgent-screenshot"
+path = "src/main.rs"
+
+[dependencies]
+dagger-sdk = "0.18.16"
+dabgent_sandbox = { path = "../dabgent_sandbox" }
+tokio = { version = "1", features = ["full"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+eyre = "0.6"
+thiserror = "2.0"
+clap = { version = "4", features = ["derive"] }
+tempfile = "3.0"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+include_dir = "0.7"
+futures = "0.3"
+
+[dev-dependencies]
+# TypeScript tests are in playwright/ directory

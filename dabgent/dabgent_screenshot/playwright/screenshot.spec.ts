@@ -56,23 +56,35 @@ test("capture app screenshot", async () => {
     });
   });
 
+  let screenshotError: string | undefined;
+
   try {
     // use IP instead of hostname to avoid SSL protocol errors
     // wait for network idle (500ms of no new requests) to ensure data is loaded
-    await page.goto(`http://${appIp}:${targetPort}${targetUrl}`, {
-      waitUntil: "networkidle",
-      timeout: timeout,
-    });
+    try {
+      await page.goto(`http://${appIp}:${targetPort}${targetUrl}`, {
+        waitUntil: "networkidle",
+        timeout: timeout,
+      });
 
-    // take full page screenshot
-    await page.screenshot({
-      path: "/screenshots/screenshot.png",
-      fullPage: true,
-    });
+      // take full page screenshot
+      await page.screenshot({
+        path: "/screenshots/screenshot.png",
+        fullPage: true,
+      });
 
-    console.log("Screenshot saved to /screenshots/screenshot.png");
+      console.log("Screenshot saved to /screenshots/screenshot.png");
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      console.error(`Failed to screenshot app: ${errorMessage}`);
+      screenshotError = errorMessage;
 
-    // save browser logs as text
+      // write error to separate file
+      await writeFile("/screenshots/error.txt", errorMessage, "utf-8");
+      console.log("Error details saved to /screenshots/error.txt");
+    }
+
+    // save browser logs as text (always, regardless of screenshot success)
     const logText = logs.map((log) => {
       const prefix = log.type === "pageerror" ? "[ERROR]" : `[${log.level?.toUpperCase()}]`;
       return `${log.timestamp} ${prefix} ${log.message}`;

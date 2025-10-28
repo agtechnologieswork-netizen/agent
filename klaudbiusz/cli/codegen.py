@@ -108,19 +108,28 @@ class TrackerDB:
             assert self.pool is not None
 
             async with self.pool.acquire() as conn:
-                if self.wipe_on_start:
-                    await conn.execute("DROP TABLE IF EXISTS messages")
+                # use advisory lock to prevent concurrent schema modifications
+                # lock id: 123456789 (arbitrary unique identifier for this table)
+                await conn.execute("SELECT pg_advisory_lock(123456789)")
+                try:
+                    # use transaction to make drop+create atomic
+                    async with conn.transaction():
+                        if self.wipe_on_start:
+                            await conn.execute("DROP TABLE IF EXISTS messages")
 
-                await conn.execute("""
-                    CREATE TABLE IF NOT EXISTS messages (
-                        id UUID PRIMARY KEY,
-                        role TEXT NOT NULL,
-                        message_type TEXT NOT NULL,
-                        message TEXT NOT NULL,
-                        datetime TIMESTAMP NOT NULL,
-                        run_id UUID NOT NULL
-                    )
-                """)
+                        await conn.execute("""
+                            CREATE TABLE IF NOT EXISTS messages (
+                                id UUID PRIMARY KEY,
+                                role TEXT NOT NULL,
+                                message_type TEXT NOT NULL,
+                                message TEXT NOT NULL,
+                                datetime TIMESTAMP NOT NULL,
+                                run_id UUID NOT NULL
+                            )
+                        """)
+                finally:
+                    # release advisory lock
+                    await conn.execute("SELECT pg_advisory_unlock(123456789)")
         except Exception as e:
             print(f"⚠️  DB init failed: {e}", file=sys.stderr)
             self.pool = None
