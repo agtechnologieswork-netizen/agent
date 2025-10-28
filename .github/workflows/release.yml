@@ -116,6 +116,14 @@ jobs:
           mv artifacts/linux/dabgent_mcp release/dabgent_mcp-linux-x86_64
           mv artifacts/macos/dabgent_mcp release/dabgent_mcp-macos-arm64
           chmod +x release/*
+
+          # Generate checksums
+          cd release
+          sha256sum dabgent_mcp-linux-x86_64 > checksums.txt
+          sha256sum dabgent_mcp-macos-arm64 >> checksums.txt
+          cat checksums.txt
+          cd ..
+
           ls -lh release/
 
       - name: Create GitHub release
@@ -144,7 +152,6 @@ jobs:
             --title "${{ inputs.version }}" \
             --notes-file release_notes.md \
             --target "${{ inputs.commit_sha }}" \
-            --verify-tag \
             release/*
 
       - name: Update latest tag
