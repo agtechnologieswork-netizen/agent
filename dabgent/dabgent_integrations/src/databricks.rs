@@ -687,9 +687,9 @@ impl DatabricksRestClient {
             .and_then(|m| m.schema.as_ref())
             .ok_or_else(|| anyhow!("No schema in response"))?;
 
-        // Check if this is a DDL statement (no columns, no data)
+        // check if statement returns no result set (DDL, DML writes, etc.)
         if schema.columns.is_empty() {
-            debug!("DDL statement executed successfully (no result set)");
+            debug!("Statement executed successfully (no result set)");
             return Ok(vec![]);
         }
 
