@@ -13,6 +13,10 @@ use tracing_subscriber;
 #[command(name = "dabgent_mcp")]
 #[command(about = "Databricks Agent MCP Server", long_about = None)]
 struct Cli {
+    /// Disallow deployment operations (overrides config file)
+    #[arg(long)]
+    disallow_deployment: bool,
+
     #[command(subcommand)]
     command: Option<Commands>,
 }
@@ -75,13 +79,19 @@ async fn main() -> Result<()> {
         }
         None => {
             // Default behavior: launch MCP server
-            run_server().await
+            let mut config = dabgent_mcp::config::Config::load_from_dir();
+
+            // CLI flag overrides config file
+            if cli.disallow_deployment {
+                config.allow_deployment = false;
+            }
+
+            run_server(config).await
         }
     }
 }
 
-async fn run_server() -> Result<()> {
-    let config = dabgent_mcp::config::Config::load_from_dir();
+async fn run_server(config: dabgent_mcp::config::Config) -> Result<()> {
     // configure tracing to write to stderr only if RUST_LOG is set
     // this prevents interference with stdio MCP transport
     if std::env::var("RUST_LOG").is_ok() {
