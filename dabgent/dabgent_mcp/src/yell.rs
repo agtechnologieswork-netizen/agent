@@ -1,5 +1,5 @@
 use chrono::{DateTime, Utc};
-use dialoguer::Editor;
+use dialoguer::Input;
 use eyre::{Context, Result};
 use flate2::write::GzEncoder;
 use flate2::Compression;
@@ -41,11 +41,10 @@ pub fn run_yell_with_paths(
     let description = match message {
         Some(msg) => msg,
         None => {
-            eprintln!("Please describe the bug (editor will open):");
-            Editor::new()
-                .edit("Describe the bug you encountered...")
-                .wrap_err("failed to open editor")?
-                .ok_or_else(|| eyre::eyre!("no description provided"))?
+            Input::<String>::new()
+                .with_prompt("Describe the bug")
+                .interact_text()
+                .wrap_err("failed to read input")?
         }
     };
 
