@@ -62,12 +62,12 @@ pub fn run_yell_with_paths(
         eprintln!("⚠️  Warning: trajectory file not found at {:?}", trajectory_path);
     }
 
-    // collect session logs from last 24h
+    // collect session logs from last 12h
     let logs_dir = temp_dir.join("logs");
     fs::create_dir_all(&logs_dir).wrap_err("failed to create logs directory")?;
 
     if session_log_dir.exists() {
-        let cutoff = SystemTime::now() - std::time::Duration::from_secs(24 * 60 * 60);
+        let cutoff = SystemTime::now() - std::time::Duration::from_secs(12 * 60 * 60);
 
         for entry in fs::read_dir(session_log_dir).wrap_err("failed to read session log directory")? {
             let entry = entry?;

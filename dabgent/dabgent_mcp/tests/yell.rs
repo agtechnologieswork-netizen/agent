@@ -77,7 +77,7 @@ async fn test_yell_includes_full_trajectory() -> Result<()> {
 }
 
 #[tokio::test]
-async fn test_yell_filters_logs_by_24h() -> Result<()> {
+async fn test_yell_filters_logs_by_12h() -> Result<()> {
     let temp_dir = TempDir::new()?;
     let output_dir = TempDir::new()?;
 
@@ -87,10 +87,10 @@ async fn test_yell_filters_logs_by_24h() -> Result<()> {
 
     fs::write(&trajectory_path, "")?;
 
-    // create old log (25h old)
+    // create old log (13h old)
     let old_log = session_log_dir.join("session-old.log");
     fs::write(&old_log, "old log content")?;
-    let old_time = SystemTime::now() - Duration::from_secs(25 * 60 * 60);
+    let old_time = SystemTime::now() - Duration::from_secs(13 * 60 * 60);
     filetime::set_file_mtime(&old_log, filetime::FileTime::from_system_time(old_time))?;
 
     // create recent log (1h old)

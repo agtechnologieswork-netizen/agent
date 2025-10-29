@@ -466,7 +466,6 @@ struct ResultManifest {
 
 #[derive(Debug, Deserialize)]
 struct Schema {
-    #[serde(default)]
     columns: Vec<Column>,
 }
 
@@ -686,12 +685,6 @@ impl DatabricksRestClient {
             .as_ref()
             .and_then(|m| m.schema.as_ref())
             .ok_or_else(|| anyhow!("No schema in response"))?;
-
-        // Check if this is a DDL statement (no columns, no data)
-        if schema.columns.is_empty() {
-            debug!("DDL statement executed successfully (no result set)");
-            return Ok(vec![]);
-        }
 
         // Try to get inline data
         if let Some(result) = &response.result

@@ -237,13 +237,12 @@ Use up to 10 tools per call to speed up the process.\n"""
             mcp_servers={
                 "dabgent": {
                     "type": "stdio",
-                    "command": "/Users/arseni.kravchenko/dev/agent/dabgent/target/release/dabgent_mcp",
-                    # "command": "cargo",
-                    # "args": [
-                    #     "run",
-                    #     "--manifest-path",
-                    #     str(self.mcp_manifest),
-                    # ],
+                    "command": "cargo",
+                    "args": [
+                        "run",
+                        "--manifest-path",
+                        str(self.mcp_manifest),
+                    ],
                     "env": {},
                 }
             },
