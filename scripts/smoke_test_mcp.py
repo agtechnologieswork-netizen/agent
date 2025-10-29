@@ -102,6 +102,30 @@ def main() -> None:
 
         print(f"\n✓ All expected tools present: {expected_tools}")
 
+        # 4. test actual tool call (expect error for invalid arguments)
+        print("\n4. Testing tool call with invalid arguments...")
+        tool_call_response = send_request(
+            process,
+            {
+                "jsonrpc": "2.0",
+                "id": 3,
+                "method": "tools/call",
+                "params": {
+                    "name": "scaffold_data_app",
+                    "arguments": {
+                        "work_dir": "relative/path",  # invalid - must be absolute
+                        "force_rewrite": False,
+                    },
+                },
+            },
+        )
+
+        if "error" not in tool_call_response:
+            print(f"❌ Expected error for invalid arguments, got: {tool_call_response}")
+            sys.exit(1)
+
+        print(f"✓ Tool call correctly rejected invalid arguments")
+
         print("\n✅ Smoke test passed!")
 
     except Exception as e:
