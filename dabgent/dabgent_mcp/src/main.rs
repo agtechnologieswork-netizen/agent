@@ -2,12 +2,16 @@ use clap::{Parser, Subcommand};
 use dabgent_mcp::providers::{
     CombinedProvider, DatabricksProvider, DeploymentProvider, GoogleSheetsProvider, IOProvider,
 };
+use dabgent_mcp::trajectory::TrajectoryTrackingProvider;
 use dabgent_sandbox::dagger::{ConnectOpts, Logger};
 use dabgent_sandbox::{DaggerSandbox, Sandbox};
 use eyre::Result;
 use rmcp::ServiceExt;
 use rmcp::transport::stdio;
 use tracing_subscriber;
+use uuid::Uuid;
+
+mod yell;
 
 #[derive(Parser)]
 #[command(name = "dabgent_mcp")]
@@ -23,8 +27,11 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
-    /// Placeholder yell command
-    Yell,
+    /// Report a bug and bundle diagnostic data
+    Yell {
+        /// Bug description (optional, will prompt if not provided)
+        message: Option<String>,
+    },
 }
 
 /// check if docker is available by running 'docker ps'
@@ -73,9 +80,8 @@ async fn main() -> Result<()> {
     let cli = Cli::parse();
 
     match cli.command {
-        Some(Commands::Yell) => {
-            // Placeholder - does nothing for now
-            Ok(())
+        Some(Commands::Yell { message }) => {
+            yell::run_yell(message)
         }
         None => {
             // Default behavior: launch MCP server
@@ -92,19 +98,47 @@ async fn main() -> Result<()> {
 }
 
 async fn run_server(config: dabgent_mcp::config::Config) -> Result<()> {
-    // configure tracing to write to stderr only if RUST_LOG is set
-    // this prevents interference with stdio MCP transport
-    if std::env::var("RUST_LOG").is_ok() {
-        // write to a file to avoid interfering with stdio
-        let log_file = std::fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open("/tmp/dabgent-mcp.log")?;
+    // detect if running as binary (not via cargo run)
+    let is_binary = std::env::var("CARGO").is_err();
 
-        tracing_subscriber::fmt()
-            .with_writer(move || log_file.try_clone().unwrap())
-            .init();
-    }
+    // generate session ID for binary mode (used for both logs and trajectory tracking)
+    let session_id = match is_binary {
+        true => Some(Uuid::new_v4().to_string()),
+        false => None,
+    };
+
+    // configure tracing: enabled by default for binary builds, opt-in for cargo run
+    let log_path = match (&session_id, std::env::var("RUST_LOG").is_ok()) {
+        (Some(session_id), _) => {
+            // binary mode: write to session file by default
+            let session_short = &session_id[..8];
+
+            let log_dir = "/tmp/dabgent-mcp";
+            std::fs::create_dir_all(log_dir)?;
+
+            let log_path = format!("{}/session-{}.log", log_dir, session_short);
+
+            let log_file = std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(&log_path)?;
+
+            tracing_subscriber::fmt()
+                .with_writer(move || log_file.try_clone().unwrap())
+                .init();
+
+            Some(log_path)
+        }
+        (None, true) => {
+            // cargo run mode with RUST_LOG: write to stderr (original behavior)
+            tracing_subscriber::fmt()
+                .with_writer(std::io::stderr)
+                .init();
+
+            None
+        }
+        (None, false) => None,
+    };
 
     // check if docker is available before initializing providers
     let docker_available = check_docker_available().await.is_ok();
@@ -144,13 +178,19 @@ async fn run_server(config: dabgent_mcp::config::Config) -> Result<()> {
         providers_list.push("I/O");
     }
 
+    let log_info = match &log_path {
+        Some(path) => format!("\n Logs: {}", path),
+        None => String::new(),
+    };
+
     eprintln!(
         "🚀 Dabgent MCP Server v{} - build data apps deployable on Databricks Apps platform \n\
          Configured providers: {}\n\
-         Got questions? eng-appbuild@databricks.com\n\
+         Got questions? eng-appbuild@databricks.com{}\n\
          Server running on stdio transport...",
         env!("CARGO_PKG_VERSION"),
-        providers_list.join(", ")
+        providers_list.join(", "),
+        log_info
     );
 
     // create combined provider with all available integrations
@@ -165,7 +205,18 @@ async fn run_server(config: dabgent_mcp::config::Config) -> Result<()> {
             )
         })?;
 
-    let service = provider.serve(stdio()).await?;
-    service.waiting().await?;
+    // wrap with trajectory tracking in binary mode
+    match session_id {
+        Some(session_id) => {
+            let tracking_provider = TrajectoryTrackingProvider::new(provider, session_id)?;
+            let service = tracking_provider.serve(stdio()).await?;
+            service.waiting().await?;
+        }
+        None => {
+            let service = provider.serve(stdio()).await?;
+            service.waiting().await?;
+        }
+    }
+
     Ok(())
 }

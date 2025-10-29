@@ -317,13 +317,15 @@ async fn run_typescript_validation(
     sandbox: &mut DaggerSandbox,
     work_dir: String,
 ) -> Result<(), ValidationDetails> {
+    let start_time = std::time::Instant::now();
     tracing::info!("Starting validation (build + tests)...");
 
     refresh_sandbox_files(sandbox, &work_dir).await?;
     run_build(sandbox).await?;
     run_tests(sandbox).await?;
 
-    tracing::info!("All validation checks passed");
+    let duration = start_time.elapsed().as_secs_f64();
+    tracing::info!(duration, "All validation checks passed");
     Ok(())
 }
 
@@ -342,6 +344,7 @@ async fn refresh_sandbox_files(
 }
 
 async fn run_build(sandbox: &mut DaggerSandbox) -> Result<(), ValidationDetails> {
+    let start_time = std::time::Instant::now();
     let build_result = sandbox
         .exec("cd /app && npm run build")
         .await
@@ -360,11 +363,13 @@ async fn run_build(sandbox: &mut DaggerSandbox) -> Result<(), ValidationDetails>
         });
     }
 
-    tracing::info!("Build passed");
+    let duration = start_time.elapsed().as_secs_f64();
+    tracing::info!(duration, "Build passed");
     Ok(())
 }
 
 async fn run_tests(sandbox: &mut DaggerSandbox) -> Result<(), ValidationDetails> {
+    let start_time = std::time::Instant::now();
     let test_result = sandbox
         .exec("cd /app && npm test")
         .await
@@ -383,7 +388,8 @@ async fn run_tests(sandbox: &mut DaggerSandbox) -> Result<(), ValidationDetails>
         });
     }
 
-    tracing::info!("Tests passed");
+    let duration = start_time.elapsed().as_secs_f64();
+    tracing::info!(duration, "Tests passed");
     Ok(())
 }
 
