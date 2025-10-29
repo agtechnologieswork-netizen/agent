@@ -55,7 +55,6 @@ async fn test_trajectory_tracking_records_tool_calls() -> Result<()> {
     assert_eq!(entry.session_id, session_id);
     assert_eq!(entry.tool_name, "scaffold_data_app");
     assert!(entry.arguments.is_some());
-    assert!(entry.duration_ms > 0);
 
     service.cancel().await?;
 
@@ -148,7 +147,6 @@ async fn test_trajectory_entry_format() -> Result<()> {
     assert!(!entry.timestamp.is_empty());
     assert_eq!(entry.tool_name, "scaffold_data_app");
     assert!(entry.arguments.is_some());
-    assert!(entry.duration_ms > 0);
 
     // verify timestamp is ISO 8601
     assert!(

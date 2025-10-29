@@ -16,7 +16,6 @@ pub struct TrajectoryEntry {
     pub timestamp: String,
     pub tool_name: String,
     pub arguments: Option<serde_json::Value>,
-    pub duration_ms: u64,
     pub success: bool,
     pub result: Option<serde_json::Value>,
     pub error: Option<String>,
@@ -78,12 +77,19 @@ impl ServerHandler for TrajectoryTrackingProvider {
         self.inner.get_info()
     }
 
+    async fn list_tools(
+        &self,
+        request: Option<rmcp::model::PaginatedRequestParam>,
+        context: RequestContext<RoleServer>,
+    ) -> Result<rmcp::model::ListToolsResult, ErrorData> {
+        self.inner.list_tools(request, context).await
+    }
+
     async fn call_tool(
         &self,
         params: CallToolRequestParam,
         ctx: RequestContext<RoleServer>,
     ) -> Result<CallToolResult, ErrorData> {
-        let start_time = std::time::Instant::now();
         let timestamp = Utc::now().to_rfc3339();
         let tool_name = params.name.to_string();
         let arguments = params.arguments.as_ref().map(|args| {
@@ -92,7 +98,6 @@ impl ServerHandler for TrajectoryTrackingProvider {
 
         // call inner provider
         let result = self.inner.call_tool(params, ctx).await;
-        let duration_ms = start_time.elapsed().as_millis() as u64;
 
         // record trajectory
         let entry = match &result {
@@ -101,7 +106,6 @@ impl ServerHandler for TrajectoryTrackingProvider {
                 timestamp,
                 tool_name,
                 arguments,
-                duration_ms,
                 success: !call_result.is_error.unwrap_or(false),
                 result: Some(serde_json::to_value(call_result).unwrap_or(serde_json::Value::Null)),
                 error: None,
@@ -111,7 +115,6 @@ impl ServerHandler for TrajectoryTrackingProvider {
                 timestamp,
                 tool_name,
                 arguments,
-                duration_ms,
                 success: false,
                 result: None,
                 error: Some(error_data.to_string()),
@@ -137,7 +140,6 @@ mod tests {
             timestamp: "2025-10-29T10:00:00Z".to_string(),
             tool_name: "test_tool".to_string(),
             arguments: Some(serde_json::json!({"key": "value"})),
-            duration_ms: 100,
             success: true,
             result: Some(serde_json::json!({"output": "success"})),
             error: None,
@@ -148,7 +150,6 @@ mod tests {
 
         assert_eq!(deserialized.session_id, "test-sess");
         assert_eq!(deserialized.tool_name, "test_tool");
-        assert_eq!(deserialized.duration_ms, 100);
         assert!(deserialized.success);
         assert!(deserialized.error.is_none());
     }
@@ -160,7 +161,6 @@ mod tests {
             timestamp: "2025-10-29T10:00:00Z".to_string(),
             tool_name: "failing_tool".to_string(),
             arguments: None,
-            duration_ms: 50,
             success: false,
             result: None,
             error: Some("Tool execution failed".to_string()),
@@ -182,7 +182,6 @@ mod tests {
             timestamp: "2025-10-29T12:34:56Z".to_string(),
             tool_name: "deploy_app".to_string(),
             arguments: Some(serde_json::json!({"name": "myapp"})),
-            duration_ms: 5000,
             success: true,
             result: Some(serde_json::json!({"url": "https://example.com"})),
             error: None,
@@ -202,7 +201,6 @@ mod tests {
         assert!(obj.contains_key("session_id"));
         assert!(obj.contains_key("timestamp"));
         assert!(obj.contains_key("tool_name"));
-        assert!(obj.contains_key("duration_ms"));
         assert!(obj.contains_key("success"));
     }
 }
