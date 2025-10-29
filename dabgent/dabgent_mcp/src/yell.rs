@@ -6,9 +6,11 @@ use flate2::Compression;
 use serde::Serialize;
 use sha2::{Sha256, Digest};
 use std::fs::{self, File};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::time::SystemTime;
 use tar::Builder;
+
+use crate::paths;
 
 #[derive(Serialize)]
 struct Metadata {
@@ -20,12 +22,8 @@ struct Metadata {
 }
 
 pub fn run_yell(message: Option<String>) -> Result<()> {
-    let trajectory_path = dirs::home_dir()
-        .ok_or_else(|| eyre::eyre!("failed to get home directory"))?
-        .join(".dabgent")
-        .join("history.jsonl");
-
-    let session_log_dir = PathBuf::from("/tmp/dabgent-mcp");
+    let trajectory_path = paths::trajectory_path()?;
+    let session_log_dir = paths::session_log_dir();
     let output_dir = std::env::temp_dir();
 
     run_yell_with_paths(message, &trajectory_path, &session_log_dir, &output_dir)

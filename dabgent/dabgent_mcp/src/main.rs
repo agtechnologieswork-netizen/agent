@@ -1,4 +1,5 @@
 use clap::{Parser, Subcommand};
+use dabgent_mcp::paths;
 use dabgent_mcp::providers::{
     CombinedProvider, DatabricksProvider, DeploymentProvider, GoogleSheetsProvider, IOProvider,
 };
@@ -112,21 +113,21 @@ async fn run_server(config: dabgent_mcp::config::Config) -> Result<()> {
             // binary mode: write to session file by default
             let session_short = &session_id[..8];
 
-            let log_dir = "/tmp/dabgent-mcp";
-            std::fs::create_dir_all(log_dir)?;
+            let log_dir = paths::session_log_dir();
+            std::fs::create_dir_all(&log_dir)?;
 
-            let log_path = format!("{}/session-{}.log", log_dir, session_short);
+            let log_path_buf = log_dir.join(format!("session-{}.log", session_short));
 
             let log_file = std::fs::OpenOptions::new()
                 .create(true)
                 .append(true)
-                .open(&log_path)?;
+                .open(&log_path_buf)?;
 
             tracing_subscriber::fmt()
                 .with_writer(move || log_file.try_clone().unwrap())
                 .init();
 
-            Some(log_path)
+            Some(log_path_buf.display().to_string())
         }
         (None, true) => {
             // cargo run mode with RUST_LOG: write to stderr (original behavior)
