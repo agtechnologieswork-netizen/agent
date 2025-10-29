@@ -161,10 +161,10 @@ class TrackerDB:
 class AppBuilder:
     def __init__(self, app_name: str, wipe_db: bool = True, suppress_logs: bool = False, use_subagents: bool = False):
         self.project_root = Path(__file__).parent.parent.parent
-        self.mcp_manifest = self.project_root / "dabgent" / "dabgent_mcp" / "Cargo.toml"
+        self.mcp_manifest = self.project_root / "edda" / "edda_mcp" / "Cargo.toml"
 
         if not self.mcp_manifest.exists():
-            raise RuntimeError(f"dabgent-mcp Cargo.toml not found at {self.mcp_manifest}")
+            raise RuntimeError(f"edda-mcp Cargo.toml not found at {self.mcp_manifest}")
 
         self.tracker = TrackerDB(wipe_on_start=wipe_db)
         self.run_id: UUID = uuid4()
@@ -235,7 +235,7 @@ Use up to 10 tools per call to speed up the process.\n"""
             agents=agents,
             max_turns=75,
             mcp_servers={
-                "dabgent": {
+                "edda": {
                     "type": "stdio",
                     "command": "cargo",
                     "args": [
@@ -350,7 +350,7 @@ Use up to 10 tools per call to speed up the process.\n"""
                     await self._log_todo_update(block, truncate)
                 case ToolUseBlock(name="Task"):
                     await self._log_tool_use(block, truncate)
-                case ToolUseBlock(name="mcp__dabgent__scaffold_data_app"):
+                case ToolUseBlock(name="mcp__edda__scaffold_data_app"):
                     if block.input is not None and "work_dir" in block.input:
                         self._pending_scaffold_calls[block.id] = block.input["work_dir"]
                     await self._log_generic_tool(block, truncate)

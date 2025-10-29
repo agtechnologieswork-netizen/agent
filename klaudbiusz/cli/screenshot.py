@@ -46,7 +46,7 @@ def screenshot_apps(
     env_vars = f"DATABRICKS_HOST={databricks_host},DATABRICKS_TOKEN={databricks_token}"
 
     # build rust CLI command
-    screenshot_tool_path = Path(__file__).parent.parent.parent / "dabgent" / "dabgent_screenshot"
+    screenshot_tool_path = Path(__file__).parent.parent.parent / "edda" / "edda_screenshot"
 
     # export to temp directory
     temp_output = Path(tempfile.mkdtemp(prefix="rescreenshot_"))

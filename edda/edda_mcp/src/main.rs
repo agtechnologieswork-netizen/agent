@@ -80,9 +80,7 @@ async fn main() -> Result<()> {
     let cli = Cli::parse();
 
     match cli.command {
-        Some(Commands::Yell { message }) => {
-            yell::run_yell(message)
-        }
+        Some(Commands::Yell { message }) => yell::run_yell(message),
         None => {
             // Default behavior: launch MCP server
             let mut config = edda_mcp::config::Config::load_from_dir();
@@ -184,7 +182,7 @@ async fn run_server(config: edda_mcp::config::Config) -> Result<()> {
     };
 
     eprintln!(
-        "🚀 Dabgent MCP Server v{} - build data apps deployable on Databricks Apps platform \n\
+        "🚀 Edda MCP Server v{} - build data apps deployable on Databricks Apps platform \n\
          Configured providers: {}\n\
          Got questions? eng-appbuild@databricks.com{}\n\
          Server running on stdio transport...",
