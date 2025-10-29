@@ -25,6 +25,10 @@ schemars = "1"
 blake3 = "1.5"
 chrono = { version = "0.4", features = ["serde"] }
 clap = { version = "4.5.50", features = ["derive"] }
+tar = "0.4"
+flate2 = "1.0"
+dialoguer = "0.11"
+dirs = "5.0"
 
 # internal dependencies
 dabgent_integrations = { path = "../dabgent_integrations" }
@@ -34,6 +38,7 @@ dabgent_templates = { path = "../dabgent_templates" }
 [dev-dependencies]
 rmcp-in-process-transport = "0.3.0"
 tempfile = "3"
+filetime = "0.2"
 
 [build-dependencies]
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "io-util", "process", "sync"] }

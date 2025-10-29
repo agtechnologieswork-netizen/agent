@@ -11,6 +11,8 @@ use rmcp::transport::stdio;
 use tracing_subscriber;
 use uuid::Uuid;
 
+mod yell;
+
 #[derive(Parser)]
 #[command(name = "dabgent_mcp")]
 #[command(about = "Databricks Agent MCP Server", long_about = None)]
@@ -25,8 +27,11 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
-    /// Placeholder yell command
-    Yell,
+    /// Report a bug and bundle diagnostic data
+    Yell {
+        /// Bug description (optional, will prompt if not provided)
+        message: Option<String>,
+    },
 }
 
 /// check if docker is available by running 'docker ps'
@@ -75,9 +80,8 @@ async fn main() -> Result<()> {
     let cli = Cli::parse();
 
     match cli.command {
-        Some(Commands::Yell) => {
-            // Placeholder - does nothing for now
-            Ok(())
+        Some(Commands::Yell { message }) => {
+            yell::run_yell(message)
         }
         None => {
             // Default behavior: launch MCP server
