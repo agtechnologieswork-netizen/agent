@@ -190,13 +190,13 @@ async fn test_yell_bundle_is_valid_tarball() -> Result<()> {
     assert!(metadata.get("os").is_some());
     assert!(metadata.get("arch").is_some());
     assert!(metadata.get("version").is_some());
-    assert!(metadata.get("file_mtimes").is_some());
+    assert!(metadata.get("binary_checksum").is_some());
 
     Ok(())
 }
 
 #[tokio::test]
-async fn test_yell_preserves_file_mtimes() -> Result<()> {
+async fn test_yell_includes_binary_checksum() -> Result<()> {
     let temp_dir = TempDir::new()?;
     let output_dir = TempDir::new()?;
 
@@ -206,31 +206,27 @@ async fn test_yell_preserves_file_mtimes() -> Result<()> {
 
     fs::write(&trajectory_path, r#"{"test":"data"}"#)?;
 
-    // create log with specific mtime
-    let log_path = session_log_dir.join("session-test.log");
-    fs::write(&log_path, "log content")?;
-
     run_yell_with_paths(
-        Some("mtime test".to_string()),
+        Some("checksum test".to_string()),
         &trajectory_path,
         &session_log_dir,
         output_dir.path(),
     )?;
 
-    // extract and verify mtimes are recorded
+    // extract and verify checksum is included
     let bundle_path = find_bundle(output_dir.path())?;
     let extracted = extract_bundle(&bundle_path)?;
 
     let metadata_content = fs::read_to_string(extracted.path().join("metadata.json"))?;
     let metadata: serde_json::Value = serde_json::from_str(&metadata_content)?;
 
-    let file_mtimes = metadata.get("file_mtimes").unwrap().as_object().unwrap();
-    assert!(file_mtimes.contains_key("history.jsonl"), "should track trajectory mtime");
-    assert!(file_mtimes.contains_key("logs/session-test.log"), "should track log mtime");
-
-    // verify mtime format (RFC3339)
-    let trajectory_mtime = file_mtimes.get("history.jsonl").unwrap().as_str().unwrap();
-    assert!(chrono::DateTime::parse_from_rfc3339(trajectory_mtime).is_ok(), "mtime should be valid RFC3339");
+    let checksum = metadata.get("binary_checksum").unwrap().as_str().unwrap();
+    assert!(!checksum.is_empty(), "checksum should not be empty");
+    // SHA256 hashes are 64 hex chars or "unknown"
+    assert!(checksum == "unknown" || checksum.len() == 64, "checksum should be SHA256 hash or 'unknown'");
+    if checksum != "unknown" {
+        assert!(checksum.chars().all(|c| c.is_ascii_hexdigit()), "checksum should be hex");
+    }
 
     Ok(())
 }
