@@ -325,7 +325,7 @@ async fn run_typescript_validation(
     run_tests(sandbox).await?;
 
     let duration = start_time.elapsed().as_secs_f64();
-    tracing::info!("All validation checks passed in {:.2}s", duration);
+    tracing::info!(duration, "All validation checks passed");
     Ok(())
 }
 
@@ -364,7 +364,7 @@ async fn run_build(sandbox: &mut DaggerSandbox) -> Result<(), ValidationDetails>
     }
 
     let duration = start_time.elapsed().as_secs_f64();
-    tracing::info!("Build passed in {:.2}s", duration);
+    tracing::info!(duration, "Build passed");
     Ok(())
 }
 
@@ -389,7 +389,7 @@ async fn run_tests(sandbox: &mut DaggerSandbox) -> Result<(), ValidationDetails>
     }
 
     let duration = start_time.elapsed().as_secs_f64();
-    tracing::info!("Tests passed in {:.2}s", duration);
+    tracing::info!(duration, "Tests passed");
     Ok(())
 }
 

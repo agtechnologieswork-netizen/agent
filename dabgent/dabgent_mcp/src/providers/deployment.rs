@@ -170,20 +170,22 @@ impl DeploymentProvider {
         tracing::info!("Syncing workspace from {} to Databricks", server_dir);
         sync_workspace(&app_info, &server_dir)
             .map_err(|e| eyre::eyre!("Failed to sync workspace: {}", e))?;
-        tracing::info!("Workspace sync completed in {:.2}s", sync_start.elapsed().as_secs_f64());
+        let sync_duration = sync_start.elapsed().as_secs_f64();
+        tracing::info!(duration = sync_duration, "Workspace sync completed");
 
         // Deploy app
         let deploy_start = std::time::Instant::now();
         tracing::info!("Deploying app: {}", name);
         deploy_app(&app_info).map_err(|e| eyre::eyre!("Failed to deploy app: {}", e))?;
-        tracing::info!("App deployment completed in {:.2}s", deploy_start.elapsed().as_secs_f64());
+        let deploy_duration = deploy_start.elapsed().as_secs_f64();
+        tracing::info!(duration = deploy_duration, "App deployment completed");
 
         // transition to deployed state
         let project_state = project_state.deploy()?;
         state::save_state(&work_path, &project_state)?;
 
         let total_duration = start_time.elapsed().as_secs_f64();
-        tracing::info!("Full deployment completed in {:.2}s", total_duration);
+        tracing::info!(duration = total_duration, "Full deployment completed");
 
         Ok(DeployDatabricksAppResult {
             success: true,
