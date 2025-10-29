@@ -8,6 +8,7 @@ use std::io::Write as IoWrite;
 use std::path::PathBuf;
 use std::sync::Mutex;
 
+use crate::paths;
 use crate::providers::CombinedProvider;
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -29,14 +30,7 @@ pub struct TrajectoryTrackingProvider {
 
 impl TrajectoryTrackingProvider {
     pub fn new(inner: CombinedProvider, session_id: String) -> Result<Self> {
-        // create ~/.dabgent directory
-        let home = std::env::var("HOME")
-            .map_err(|_| eyre::eyre!("HOME environment variable not set"))?;
-        let dabgent_dir = PathBuf::from(home).join(".dabgent");
-        std::fs::create_dir_all(&dabgent_dir)?;
-
-        // open history.jsonl in append mode
-        let history_path = dabgent_dir.join("history.jsonl");
+        let history_path = paths::trajectory_path()?;
         Self::new_with_path(inner, session_id, history_path)
     }
 

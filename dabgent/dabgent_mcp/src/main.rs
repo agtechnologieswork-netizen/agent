@@ -1,8 +1,10 @@
 use clap::{Parser, Subcommand};
+use dabgent_mcp::paths;
 use dabgent_mcp::providers::{
     CombinedProvider, DatabricksProvider, DeploymentProvider, GoogleSheetsProvider, IOProvider,
 };
 use dabgent_mcp::trajectory::TrajectoryTrackingProvider;
+use dabgent_mcp::yell;
 use dabgent_sandbox::dagger::{ConnectOpts, Logger};
 use dabgent_sandbox::{DaggerSandbox, Sandbox};
 use eyre::Result;
@@ -25,8 +27,11 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
-    /// Placeholder yell command
-    Yell,
+    /// Report a bug and bundle diagnostic data
+    Yell {
+        /// Bug description (optional, will prompt if not provided)
+        message: Option<String>,
+    },
 }
 
 /// check if docker is available by running 'docker ps'
@@ -75,9 +80,8 @@ async fn main() -> Result<()> {
     let cli = Cli::parse();
 
     match cli.command {
-        Some(Commands::Yell) => {
-            // Placeholder - does nothing for now
-            Ok(())
+        Some(Commands::Yell { message }) => {
+            yell::run_yell(message)
         }
         None => {
             // Default behavior: launch MCP server
@@ -109,21 +113,21 @@ async fn run_server(config: dabgent_mcp::config::Config) -> Result<()> {
             // binary mode: write to session file by default
             let session_short = &session_id[..8];
 
-            let log_dir = "/tmp/dabgent-mcp";
-            std::fs::create_dir_all(log_dir)?;
+            let log_dir = paths::session_log_dir();
+            std::fs::create_dir_all(&log_dir)?;
 
-            let log_path = format!("{}/session-{}.log", log_dir, session_short);
+            let log_path_buf = log_dir.join(format!("session-{}.log", session_short));
 
             let log_file = std::fs::OpenOptions::new()
                 .create(true)
                 .append(true)
-                .open(&log_path)?;
+                .open(&log_path_buf)?;
 
             tracing_subscriber::fmt()
                 .with_writer(move || log_file.try_clone().unwrap())
                 .init();
 
-            Some(log_path)
+            Some(log_path_buf.display().to_string())
         }
         (None, true) => {
             // cargo run mode with RUST_LOG: write to stderr (original behavior)
