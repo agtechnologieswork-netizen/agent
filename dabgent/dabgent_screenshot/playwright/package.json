@@ -1,8 +1,0 @@
-{
-  "name": "screenshot-sidecar-playwright",
-  "version": "1.0.0",
-  "private": true,
-  "dependencies": {
-    "@playwright/test": "^1.40.0"
-  }
-}
