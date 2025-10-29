@@ -3,6 +3,7 @@ use dabgent_mcp::providers::{
     CombinedProvider, DatabricksProvider, DeploymentProvider, GoogleSheetsProvider, IOProvider,
 };
 use dabgent_mcp::trajectory::TrajectoryTrackingProvider;
+use dabgent_mcp::yell;
 use dabgent_sandbox::dagger::{ConnectOpts, Logger};
 use dabgent_sandbox::{DaggerSandbox, Sandbox};
 use eyre::Result;
@@ -10,8 +11,6 @@ use rmcp::ServiceExt;
 use rmcp::transport::stdio;
 use tracing_subscriber;
 use uuid::Uuid;
-
-mod yell;
 
 #[derive(Parser)]
 #[command(name = "dabgent_mcp")]
