@@ -102,7 +102,7 @@ jobs:
       - name: Download Linux artifact
         uses: actions/download-artifact@v4
         with:
-          name: dabgent-mcp-linux-x86_64
+          name: edda-mcp-linux-x86_64
           path: artifacts/linux
           run-id: ${{ needs.validate-and-tag.outputs.run_id }}
           github-token: ${{ github.token }}
@@ -110,7 +110,7 @@ jobs:
       - name: Download macOS artifact
         uses: actions/download-artifact@v4
         with:
-          name: dabgent-mcp-macos-arm64
+          name: edda-mcp-macos-arm64
           path: artifacts/macos
           run-id: ${{ needs.validate-and-tag.outputs.run_id }}
           github-token: ${{ github.token }}
@@ -118,8 +118,8 @@ jobs:
       - name: Prepare artifacts for release
         run: |
           mkdir -p release
-          mv artifacts/linux/dabgent_mcp release/dabgent_mcp-linux-x86_64
-          mv artifacts/macos/dabgent_mcp release/dabgent_mcp-macos-arm64
+          mv artifacts/linux/edda_mcp release/edda_mcp-linux-x86_64
+          mv artifacts/macos/edda_mcp release/edda_mcp-macos-arm64
           chmod +x release/*
           ls -lh release/
 
@@ -136,8 +136,8 @@ jobs:
 
           # Generate checksums
           cd release
-          LINUX_CHECKSUM=$(sha256sum dabgent_mcp-linux-x86_64 | awk '{print $1}')
-          MACOS_CHECKSUM=$(sha256sum dabgent_mcp-macos-arm64 | awk '{print $1}')
+          LINUX_CHECKSUM=$(sha256sum edda_mcp-linux-x86_64 | awk '{print $1}')
+          MACOS_CHECKSUM=$(sha256sum edda_mcp-macos-arm64 | awk '{print $1}')
           cd ..
 
           cat > release_notes.md <<EOF
@@ -145,8 +145,8 @@ jobs:
 
           ## SHA256 Checksums
           \`\`\`
-          $LINUX_CHECKSUM  dabgent_mcp-linux-x86_64
-          $MACOS_CHECKSUM  dabgent_mcp-macos-arm64
+          $LINUX_CHECKSUM  edda_mcp-linux-x86_64
+          $MACOS_CHECKSUM  edda_mcp-macos-arm64
           \`\`\`
 
           ---
