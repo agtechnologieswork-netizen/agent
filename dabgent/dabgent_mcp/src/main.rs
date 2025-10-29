@@ -98,41 +98,42 @@ async fn run_server(config: dabgent_mcp::config::Config) -> Result<()> {
     let is_binary = std::env::var("CARGO").is_err();
 
     // generate session ID for binary mode (used for both logs and trajectory tracking)
-    let session_id = if is_binary {
-        Some(Uuid::new_v4().to_string())
-    } else {
-        None
+    let session_id = match is_binary {
+        true => Some(Uuid::new_v4().to_string()),
+        false => None,
     };
 
     // configure tracing: enabled by default for binary builds, opt-in for cargo run
-    let log_path = if let Some(ref session_id) = session_id {
-        // binary mode: write to session file by default
-        let session_short = &session_id[..8];
+    let log_path = match (&session_id, std::env::var("RUST_LOG").is_ok()) {
+        (Some(session_id), _) => {
+            // binary mode: write to session file by default
+            let session_short = &session_id[..8];
 
-        let log_dir = "/tmp/dabgent-mcp";
-        std::fs::create_dir_all(log_dir)?;
+            let log_dir = "/tmp/dabgent-mcp";
+            std::fs::create_dir_all(log_dir)?;
 
-        let log_path = format!("{}/session-{}.log", log_dir, session_short);
+            let log_path = format!("{}/session-{}.log", log_dir, session_short);
 
-        let log_file = std::fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(&log_path)?;
+            let log_file = std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(&log_path)?;
 
-        tracing_subscriber::fmt()
-            .with_writer(move || log_file.try_clone().unwrap())
-            .init();
+            tracing_subscriber::fmt()
+                .with_writer(move || log_file.try_clone().unwrap())
+                .init();
 
-        Some(log_path)
-    } else if std::env::var("RUST_LOG").is_ok() {
-        // cargo run mode with RUST_LOG: write to stderr (original behavior)
-        tracing_subscriber::fmt()
-            .with_writer(std::io::stderr)
-            .init();
+            Some(log_path)
+        }
+        (None, true) => {
+            // cargo run mode with RUST_LOG: write to stderr (original behavior)
+            tracing_subscriber::fmt()
+                .with_writer(std::io::stderr)
+                .init();
 
-        None
-    } else {
-        None
+            None
+        }
+        (None, false) => None,
     };
 
     // check if docker is available before initializing providers
@@ -201,13 +202,16 @@ async fn run_server(config: dabgent_mcp::config::Config) -> Result<()> {
         })?;
 
     // wrap with trajectory tracking in binary mode
-    if let Some(session_id) = session_id {
-        let tracking_provider = TrajectoryTrackingProvider::new(provider, session_id)?;
-        let service = tracking_provider.serve(stdio()).await?;
-        service.waiting().await?;
-    } else {
-        let service = provider.serve(stdio()).await?;
-        service.waiting().await?;
+    match session_id {
+        Some(session_id) => {
+            let tracking_provider = TrajectoryTrackingProvider::new(provider, session_id)?;
+            let service = tracking_provider.serve(stdio()).await?;
+            service.waiting().await?;
+        }
+        None => {
+            let service = provider.serve(stdio()).await?;
+            service.waiting().await?;
+        }
     }
 
     Ok(())
