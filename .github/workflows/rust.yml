@@ -28,14 +28,14 @@ jobs:
       - name: Cache cargo dependencies
         uses: Swatinem/rust-cache@v2
         with:
-          workspaces: dabgent
+          workspaces: edda
 
       - name: Run cargo check all targets
-        working-directory: ./dabgent
+        working-directory: ./edda
         run: cargo check --all-targets --workspace
 
       - name: Run cargo clippy
-        working-directory: ./dabgent
+        working-directory: ./edda
         run: cargo clippy --workspace -- -W warnings
         continue-on-error: true
 
@@ -56,14 +56,14 @@ jobs:
       - name: Cache cargo dependencies
         uses: Swatinem/rust-cache@v2
         with:
-          workspaces: dabgent
+          workspaces: edda
 
       - name: Run unit tests
-        working-directory: ./dabgent
+        working-directory: ./edda
         run: cargo nextest run --lib --bins --workspace
 
       - name: Run integration tests
-        working-directory: ./dabgent
+        working-directory: ./edda
         # Run with single thread due to Dagger connection race conditions
         run: cargo nextest run --tests --workspace --test-threads=1
 
@@ -94,8 +94,8 @@ jobs:
 
           echo "should_build=${should_build}" >> $GITHUB_OUTPUT
 
-  build-dabgent-mcp:
-    name: Build dabgent_mcp (${{ matrix.platform }})
+  build-edda-mcp:
+    name: Build edda_mcp (${{ matrix.platform }})
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 15
     needs: [rust-checks, rust-tests, check-release-condition]
@@ -117,12 +117,12 @@ jobs:
       - name: Cache cargo dependencies
         uses: Swatinem/rust-cache@v2
         with:
-          workspaces: dabgent
+          workspaces: edda
 
       - name: Build release binary
         run: |
-          cd dabgent
-          cargo build --release -p dabgent_mcp
+          cd edda
+          cargo build --release -p edda_mcp
           ls -la target/release/
         env:
           # Disable LTO on macOS for faster builds
@@ -131,15 +131,15 @@ jobs:
       - name: Upload binary artifact
         uses: actions/upload-artifact@v4
         with:
-          name: dabgent-mcp-${{ matrix.platform }}
-          path: dabgent/target/release/dabgent_mcp
+          name: edda-mcp-${{ matrix.platform }}
+          path: edda/target/release/edda_mcp
           retention-days: 30
 
   smoke-test-mcp:
     name: Smoke Test MCP Binary (${{ matrix.platform }})
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 5
-    needs: build-dabgent-mcp
+    needs: build-edda-mcp
     strategy:
       matrix:
         include:
@@ -154,11 +154,11 @@ jobs:
       - name: Download binary artifact
         uses: actions/download-artifact@v4
         with:
-          name: dabgent-mcp-${{ matrix.platform }}
+          name: edda-mcp-${{ matrix.platform }}
           path: ./binary
 
       - name: Make binary executable
-        run: chmod +x ./binary/dabgent_mcp
+        run: chmod +x ./binary/edda_mcp
 
       - name: Setup Python
         uses: actions/setup-python@v4
@@ -166,4 +166,4 @@ jobs:
           python-version: '3.11'
 
       - name: Run smoke test
-        run: python3 scripts/smoke_test_mcp.py ./binary/dabgent_mcp
+        run: python3 scripts/smoke_test_mcp.py ./binary/edda_mcp

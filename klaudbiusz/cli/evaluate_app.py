@@ -33,7 +33,7 @@ try:
     from dotenv import load_dotenv
     # Try loading from various locations
     env_paths = [
-        Path(__file__).parent.parent.parent / "dabgent" / ".env",
+        Path(__file__).parent.parent.parent / "edda" / ".env",
         Path(__file__).parent.parent / ".env",
         Path(__file__).parent / ".env",
     ]

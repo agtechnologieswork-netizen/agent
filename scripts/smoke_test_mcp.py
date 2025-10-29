@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Smoke test for dabgent_mcp binary.
+Smoke test for edda_mcp binary.
 Verifies the MCP server starts, responds to protocol messages, and lists tools.
 """
 
@@ -25,7 +25,7 @@ def send_request(process: subprocess.Popen, request: dict) -> dict:
 
 def main() -> None:
     if len(sys.argv) != 2:
-        print(f"Usage: {sys.argv[0]} <path-to-dabgent_mcp-binary>")
+        print(f"Usage: {sys.argv[0]} <path-to-edda_mcp-binary>")
         sys.exit(1)
 
     binary_path = Path(sys.argv[1])

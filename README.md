@@ -90,9 +90,9 @@ LLM_VISION_MODEL=gemini:gemini-2.5-flash-lite-preview-06-17  # vision model for 
 
 This repository contains:
 - **Python agent** (`./agent/`) - Original implementation, no longer maintained but available for use and forking
-- **Rust implementation** (`./dabgent/`) - v2, currently under in early stage (not usable), under active development
+- **Rust implementation** (`./edda/`) - v2, currently under in early stage (not usable), under active development
 
-### Rust Implementation (dabgent)
+### Rust Implementation (edda)
 
 The new Rust-based agent is being built from the ground up with:
 - **Event sourcing architecture** for full auditability and replay capabilities
