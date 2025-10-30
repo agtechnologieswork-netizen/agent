@@ -28,14 +28,14 @@ jobs:
       - name: Cache cargo dependencies
         uses: Swatinem/rust-cache@v2
         with:
-          workspaces: dabgent
+          workspaces: edda
 
       - name: Run cargo check all targets
-        working-directory: ./dabgent
+        working-directory: ./edda
         run: cargo check --all-targets --workspace
 
       - name: Run cargo clippy
-        working-directory: ./dabgent
+        working-directory: ./edda
         run: cargo clippy --workspace -- -W warnings
         continue-on-error: true
 
@@ -56,13 +56,114 @@ jobs:
       - name: Cache cargo dependencies
         uses: Swatinem/rust-cache@v2
         with:
-          workspaces: dabgent
+          workspaces: edda
 
       - name: Run unit tests
-        working-directory: ./dabgent
+        working-directory: ./edda
         run: cargo nextest run --lib --bins --workspace
 
       - name: Run integration tests
-        working-directory: ./dabgent
+        working-directory: ./edda
         # Run with single thread due to Dagger connection race conditions
         run: cargo nextest run --tests --workspace --test-threads=1
+
+  check-release-condition:
+    name: Check Release Condition
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      should_build: ${{ steps.check.outputs.should_build }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 2
+
+      - name: Check if release build needed
+        id: check
+        run: |
+          should_build="false"
+          # we check two commits because the first commit is the merge commit
+          if git log -2 --pretty=%s | tail -n 1 | grep -q "build-rust"; then
+            should_build="true"
+            echo "Rust build detected based on commit message."
+          elif [[ "${{ github.event_name }}" == "push" && "${{ github.ref }}" == "refs/heads/main" ]]; then
+            should_build="true"
+            echo "Rust build detected based on push to main branch."
+          fi
+
+          echo "should_build=${should_build}" >> $GITHUB_OUTPUT
+
+  build-edda-mcp:
+    name: Build edda_mcp (${{ matrix.platform }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 15
+    needs: [rust-checks, rust-tests, check-release-condition]
+    if: needs.check-release-condition.outputs.should_build == 'true'
+    strategy:
+      matrix:
+        include:
+          - platform: linux-x86_64
+            runner: ubuntu-latest
+          - platform: macos-arm64
+            runner: macos-15-xlarge
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: edda
+
+      - name: Build release binary
+        run: |
+          cd edda
+          cargo build --release -p edda_mcp
+          ls -la target/release/
+        env:
+          # Disable LTO on macOS for faster builds
+          CARGO_PROFILE_RELEASE_LTO: ${{ matrix.platform == 'macos-arm64' && 'off' || 'thin' }}
+
+      - name: Upload binary artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: edda-mcp-${{ matrix.platform }}
+          path: edda/target/release/edda_mcp
+          retention-days: 30
+
+  smoke-test-mcp:
+    name: Smoke Test MCP Binary (${{ matrix.platform }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 5
+    needs: build-edda-mcp
+    strategy:
+      matrix:
+        include:
+          - platform: linux-x86_64
+            runner: ubuntu-latest
+          - platform: macos-arm64
+            runner: macos-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Download binary artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: edda-mcp-${{ matrix.platform }}
+          path: ./binary
+
+      - name: Make binary executable
+        run: chmod +x ./binary/edda_mcp
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Run smoke test
+        run: python3 scripts/smoke_test_mcp.py ./binary/edda_mcp

@@ -1,8 +1,0 @@
-{
-  "name": "screenshot-sidecar",
-  "engineVersion": "v0.19.2",
-  "sdk": {
-    "source": "typescript"
-  },
-  "source": ".dagger"
-}

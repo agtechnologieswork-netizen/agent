@@ -12,7 +12,7 @@
       "args": [
         "run",
         "--manifest-path",
-        "${CLAUDE_PLUGIN_ROOT}/../dabgent/dabgent_mcp/Cargo.toml"
+        "${CLAUDE_PLUGIN_ROOT}/../edda/edda_mcp/Cargo.toml"
       ],
       "env": {}
     }

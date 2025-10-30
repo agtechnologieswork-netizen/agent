@@ -1,0 +1,19 @@
+[workspace]
+resolver = "3"
+members = ["edda_agent", "edda_cli", "edda_mq", "edda_sandbox", "edda_integrations", "edda_mcp", "edda_screenshot", "edda_templates"]
+
+[profile.dev]
+opt-level = 0
+debug = true
+split-debuginfo = "unpacked"
+incremental = true
+
+[profile.dev.package."*"]
+opt-level = 0
+debug = 0
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+strip = true

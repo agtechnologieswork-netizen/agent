@@ -215,7 +215,7 @@ def enrich_results_with_screenshots(results: list[RunResult]) -> None:
 
 
 def run_single_generation(
-    app_name: str, prompt: str, wipe_db: bool = False, use_subagents: bool = False, enable_mcp: bool = True
+    app_name: str, prompt: str, wipe_db: bool = False, use_subagents: bool = False, enable_mcp: bool = True, mcp_binary: str | None = None
 ) -> RunResult:
     def timeout_handler(signum, frame):
         raise TimeoutError(f"Generation timed out after 900 seconds")
@@ -239,6 +239,7 @@ def run_single_generation(
             suppress_logs=True,
             use_subagents=use_subagents,
             use_mcp=enable_mcp,
+            mcp_binary=mcp_binary,
         )
         metrics = codegen.run(final_prompt, wipe_db=wipe_db)
         app_dir = metrics.get("app_dir") if metrics else None
@@ -277,6 +278,7 @@ def main(
     screenshot_concurrency: int = 5,
     screenshot_wait_time: int = 120000,
     enable_mcp: bool = True,
+    mcp_binary: str | None = None,
 ) -> None:
     """Run bulk generation of apps from prompts.
 
@@ -298,6 +300,7 @@ def main(
     print(f"Parallel jobs: {n_jobs}")
     print(f"Wipe DB: {wipe_db}")
     print(f"Use subagents: {use_subagents}")
+    print(f"MCP binary: {mcp_binary if mcp_binary else 'cargo run (default)'}")
     print(f"Screenshot concurrency: {screenshot_concurrency}\n")
 
     if enable_mcp:
@@ -307,7 +310,7 @@ def main(
 
     # generate all apps
     results: list[RunResult] = Parallel(n_jobs=n_jobs, verbose=10)(  # type: ignore[assignment]
-        delayed(run_single_generation)(app_name, prompt, wipe_db, use_subagents, enable_mcp)
+        delayed(run_single_generation)(app_name, prompt, wipe_db, use_subagents, enable_mcp, mcp_binary)
         for app_name, prompt in PROMPTS.items()
     )
 
@@ -333,7 +336,9 @@ def main(
             print(f"{'=' * 80}\n")
 
             try:
-                screenshot_apps(apps_dir, concurrency=screenshot_concurrency, wait_time=screenshot_wait_time)
+                screenshot_apps(
+                    apps_dir, concurrency=screenshot_concurrency, wait_time=screenshot_wait_time, capture_logs=True
+                )
             except Exception as e:
                 print(f"Screenshot batch failed: {e}")
 

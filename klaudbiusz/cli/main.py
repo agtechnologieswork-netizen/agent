@@ -15,6 +15,7 @@ def run(
     suppress_logs: bool = False,
     use_subagents: bool = False,
     enable_mcp: bool = True,
+    mcp_binary: str | None = None,
 ):
     """Run app builder with given prompt.
 
@@ -25,12 +26,14 @@ def run(
         suppress_logs: Whether to suppress logs
         use_subagents: Whether to enable subagent delegation (e.g., dataresearch)
         enable_mcp: Enable MCP server for Databricks access (default: True)
+        mcp_binary: Optional path to pre-built edda-mcp binary (default: use cargo run)
 
     Usage:
         python main.py "your prompt here" --use_subagents
         python main.py "build dashboard" --app_name=my-dashboard --use_subagents
         python main.py "build dashboard" --use_subagents --no-wipe_db
         python main.py "build dashboard" --no-enable_mcp  # Pure SDK mode
+        python main.py "build dashboard" --mcp_binary=/path/to/edda-mcp
     """
     if app_name is None:
         app_name = f"app-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
@@ -41,6 +44,7 @@ def run(
         suppress_logs=suppress_logs,
         use_subagents=use_subagents,
         use_mcp=enable_mcp,
+        mcp_binary=mcp_binary,
     )
     metrics = builder.run(prompt, wipe_db=wipe_db)
     print(f"\n{'=' * 80}")
