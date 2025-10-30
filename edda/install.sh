@@ -282,26 +282,6 @@ print_claude_instructions() {
     echo ""
     echo ""
 
-    # Claude Desktop section
-    echo "${BOLD}For Claude Desktop:${RESET}"
-    echo ""
-    echo "  Add this to ${DIM}$_claude_desktop_config${RESET}"
-    echo ""
-    cat <<EOF
-  ${CYAN}{
-    "mcpServers": {
-      "edda": {
-        "command": "$_install_path",
-        "args": []
-      }
-    }
-  }${RESET}
-EOF
-    echo ""
-    echo "  Then restart Claude Desktop"
-    echo ""
-    echo ""
-
     # Cursor section
     echo "${BOLD}For Cursor:${RESET}"
     echo ""
