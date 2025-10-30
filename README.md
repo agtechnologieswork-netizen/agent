@@ -36,7 +36,13 @@ and attach to your favorite MCP client, e.g. Claude Code:
 ```
 claude mcp add --transport stdio edda -- ~/.local/bin/edda_mcp
 ```
-For successful usage of Databricks integration, make sure you have `DATABRICKS_HOST`, `DATABRICKS_TOKEN` and `DATABRICKS_WAREHOUSE_ID` environment variables set.
+
+**Set Databricks environment variables** (required for app generation):
+```bash
+export DATABRICKS_HOST=https://your-workspace.cloud.databricks.com
+export DATABRICKS_TOKEN=dapi...
+export DATABRICKS_WAREHOUSE_ID=your-warehouse-id
+```
 
 Then start using it with Claude Code:
 ```bash
@@ -48,6 +54,11 @@ claude mcp list
 
 # Run sample app generation
 claude "Create a Databricks app that shows daily sales by region"
+```
+
+**To deploy to Databricks** (optional, requires write to /usr/local/bin), install Databricks CLI:
+```bash
+curl -fsSL https://raw.githubusercontent.com/databricks/setup-cli/main/install.sh | sudo sh
 ```
 
 Got any problems during usage? Prepare a bug report:
