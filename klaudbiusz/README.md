@@ -1,6 +1,6 @@
 # Klaudbiusz
 
-AI-powered Databricks application generator with objective evaluation framework.
+AI-powered Databricks application generator with objective evaluation framework. A thin wrapper around the Claude Agent SDK leveraging the `edda` MCP.
 
 ## Overview
 
