@@ -23,6 +23,10 @@ It is located in `./edda/` directory (under active development). The purpose of 
 Unlike the Python version, it is available not only as a standalone agent but also as a MCP powering your favorite agents (like Claude Code) or being wrapped into custom agents programmatically (see `klaudbiusz/cli/codegen.py` for the example of using with Claude Agent SDK).
 
 ### MCP Installation
+
+**Prerequisites:**
+- OCI-compatible container runtime (Docker, OrbStack, Podman...) must be installed and running for Dagger-based sandboxed execution
+
 Try it out!
 
 ```

@@ -24,7 +24,8 @@ const appRouter = router({
   // Example:
   // getUsers: publicProcedure.query(async () => {
   //   const client = new DatabricksClient();
-  //   return await client.executeQuery("SELECT * FROM users LIMIT 100");
+  //   const { rows } = await client.executeQuery("SELECT * FROM users LIMIT 100");
+  //   return rows;
   // }),
 });
 

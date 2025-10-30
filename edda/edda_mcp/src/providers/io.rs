@@ -318,10 +318,11 @@ async fn run_typescript_validation(
     work_dir: String,
 ) -> Result<(), ValidationDetails> {
     let start_time = std::time::Instant::now();
-    tracing::info!("Starting validation (build + tests)...");
+    tracing::info!("Starting validation (build + tests + type checks)...");
 
     refresh_sandbox_files(sandbox, &work_dir).await?;
     run_build(sandbox).await?;
+    run_client_type_check(sandbox).await?;
     run_tests(sandbox).await?;
 
     let duration = start_time.elapsed().as_secs_f64();
@@ -365,6 +366,31 @@ async fn run_build(sandbox: &mut DaggerSandbox) -> Result<(), ValidationDetails>
 
     let duration = start_time.elapsed().as_secs_f64();
     tracing::info!(duration, "Build passed");
+    Ok(())
+}
+
+async fn run_client_type_check(sandbox: &mut DaggerSandbox) -> Result<(), ValidationDetails> {
+    let start_time = std::time::Instant::now();
+    let check_result = sandbox
+        .exec("cd /app/client && npx tsc --noEmit")
+        .await
+        .map_err(|e| ValidationDetails {
+            exit_code: -1,
+            stdout: String::new(),
+            stderr: format!("Failed to run client type check: {}", e),
+        })?;
+
+    if check_result.exit_code != 0 {
+        tracing::error!("Client type check failed: {:?}", check_result);
+        return Err(ValidationDetails {
+            exit_code: check_result.exit_code,
+            stdout: check_result.stdout,
+            stderr: check_result.stderr,
+        });
+    }
+
+    let duration = start_time.elapsed().as_secs_f64();
+    tracing::info!(duration, "Client type check passed");
     Ok(())
 }
 

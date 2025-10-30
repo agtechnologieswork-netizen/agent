@@ -17,6 +17,22 @@ Re-validation is allowed (Deployed → Validated) to update the checksum after i
 - When working with Databricks or other services, use real API calls in tests (no mocks) to verify end-to-end functionality, unless explicitly instructed otherwise. It can be done on subset of data if applicable.
 - Do NOT create summary files, reports, or README unless explicitly requested
 
+## Testing Guidelines:
+
+**CRITICAL**: Use Node.js native test runner only. Do NOT import vitest, jest, or supertest.
+```typescript
+import { test } from "node:test";
+import { strict as assert } from "node:assert";
+```
+
+## Databricks Type Handling:
+
+- **QueryResult access**: `executeQuery()` returns `{rows: T[], rowCount: number}`. Always use `.rows` property: `const {rows} = await client.executeQuery(...)` or `result.rows.map(...)`
+- **Type imports**: Use `import type { T }` (not `import { T }`) when `verbatimModuleSyntax` is enabled
+- **Column access**: Use bracket notation `row['column_name']` (TypeScript strict mode requirement)
+- **DATE/TIMESTAMP columns**: Databricks returns Date objects. Use `z.coerce.date()` in schemas (never `z.string()` for dates)
+- **Dynamic properties**: Cast explicitly `row['order_id'] as number`
+
 ## Frontend Styling Guidelines:
 
 ### Component Structure Pattern:
