@@ -184,3 +184,6 @@ dabgent/dabgent_agent/output/**
 
 # klaudbiusz - all archives stored locally
 klaudbiusz/archive/**
+klaudbiusz/results_*/**
+klaudbiusz/results/**
+klaudbiusz/results_latest/**
