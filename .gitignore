@@ -175,9 +175,9 @@ agent/bin/*.*
 agent/laravel_agent/template_backup_*/**
 agent/benchmark_results*/*
 
-# dabgent
-dabgent/claude_code.json
-dabgent/dabgent_agent/output/**
+# edda
+edda/claude_code.json
+edda/edda_agent/output/**
 
 # Serena
 .serena
@@ -186,4 +186,4 @@ dabgent/dabgent_agent/output/**
 klaudbiusz/archive/**
 klaudbiusz/results_*/**
 klaudbiusz/results/**
-klaudbiusz/results_latest/**
+klaudbiusz/results_latest

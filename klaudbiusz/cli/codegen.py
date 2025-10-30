@@ -108,19 +108,28 @@ class TrackerDB:
             assert self.pool is not None
 
             async with self.pool.acquire() as conn:
-                if self.wipe_on_start:
-                    await conn.execute("DROP TABLE IF EXISTS messages")
+                # use advisory lock to prevent concurrent schema modifications
+                # lock id: 123456789 (arbitrary unique identifier for this table)
+                await conn.execute("SELECT pg_advisory_lock(123456789)")
+                try:
+                    # use transaction to make drop+create atomic
+                    async with conn.transaction():
+                        if self.wipe_on_start:
+                            await conn.execute("DROP TABLE IF EXISTS messages")
 
-                await conn.execute("""
-                    CREATE TABLE IF NOT EXISTS messages (
-                        id UUID PRIMARY KEY,
-                        role TEXT NOT NULL,
-                        message_type TEXT NOT NULL,
-                        message TEXT NOT NULL,
-                        datetime TIMESTAMP NOT NULL,
-                        run_id UUID NOT NULL
-                    )
-                """)
+                        await conn.execute("""
+                            CREATE TABLE IF NOT EXISTS messages (
+                                id UUID PRIMARY KEY,
+                                role TEXT NOT NULL,
+                                message_type TEXT NOT NULL,
+                                message TEXT NOT NULL,
+                                datetime TIMESTAMP NOT NULL,
+                                run_id UUID NOT NULL
+                            )
+                        """)
+                finally:
+                    # release advisory lock
+                    await conn.execute("SELECT pg_advisory_unlock(123456789)")
         except Exception as e:
             print(f"⚠️  DB init failed: {e}", file=sys.stderr)
             self.pool = None
@@ -150,18 +159,19 @@ class TrackerDB:
 
 
 class AppBuilder:
-    def __init__(self, app_name: str, wipe_db: bool = True, suppress_logs: bool = False, use_subagents: bool = False):
+    def __init__(self, app_name: str, wipe_db: bool = True, suppress_logs: bool = False, use_subagents: bool = False, mcp_binary: str | None = None):
         self.project_root = Path(__file__).parent.parent.parent
-        self.mcp_manifest = self.project_root / "dabgent" / "dabgent_mcp" / "Cargo.toml"
+        self.mcp_manifest = self.project_root / "edda" / "edda_mcp" / "Cargo.toml"
 
-        if not self.mcp_manifest.exists():
-            raise RuntimeError(f"dabgent-mcp Cargo.toml not found at {self.mcp_manifest}")
+        if mcp_binary is None and not self.mcp_manifest.exists():
+            raise RuntimeError(f"edda-mcp Cargo.toml not found at {self.mcp_manifest}")
 
         self.tracker = TrackerDB(wipe_on_start=wipe_db)
         self.run_id: UUID = uuid4()
         self.app_name = app_name
         self.use_subagents = use_subagents
         self.suppress_logs = suppress_logs
+        self.mcp_binary = mcp_binary
         self.app_dir: str | None = None
         # track tool_use_id -> (tool_name, work_dir) to capture app_dir from results
         self._pending_scaffold_calls: dict[str, str] = {}
@@ -171,6 +181,8 @@ class AppBuilder:
             logging.getLogger().setLevel(logging.ERROR)
         else:
             coloredlogs.install(level="INFO")
+            mcp_msg = f"Using MCP binary: {self.mcp_binary}" if self.mcp_binary else "Using cargo run for MCP server"
+            logger.info(mcp_msg)
 
     async def run_async(self, prompt: str) -> GenerationMetrics:
         self._setup_logging()
@@ -215,6 +227,25 @@ Use up to 10 tools per call to speed up the process.\n"""
         # The CLI doesn't support per-agent tool permissions yet.
         # Instead, we rely on system prompt instructions to enforce delegation.
 
+        if self.mcp_binary is not None:
+            mcp_config = {
+                "type": "stdio",
+                "command": self.mcp_binary,
+                "args": [],
+                "env": {},
+            }
+        else:
+            mcp_config = {
+                "type": "stdio",
+                "command": "cargo",
+                "args": [
+                    "run",
+                    "--manifest-path",
+                    str(self.mcp_manifest),
+                ],
+                "env": {},
+            }
+
         options = ClaudeAgentOptions(
             system_prompt={
                 "type": "preset",
@@ -226,16 +257,7 @@ Use up to 10 tools per call to speed up the process.\n"""
             agents=agents,
             max_turns=75,
             mcp_servers={
-                "dabgent": {
-                    "type": "stdio",
-                    "command": "cargo",
-                    "args": [
-                        "run",
-                        "--manifest-path",
-                        str(self.mcp_manifest),
-                    ],
-                    "env": {},
-                }
+                "edda": mcp_config
             },
         )
 
@@ -341,7 +363,7 @@ Use up to 10 tools per call to speed up the process.\n"""
                     await self._log_todo_update(block, truncate)
                 case ToolUseBlock(name="Task"):
                     await self._log_tool_use(block, truncate)
-                case ToolUseBlock(name="mcp__dabgent__scaffold_data_app"):
+                case ToolUseBlock(name="mcp__edda__scaffold_data_app"):
                     if block.input is not None and "work_dir" in block.input:
                         self._pending_scaffold_calls[block.id] = block.input["work_dir"]
                     await self._log_generic_tool(block, truncate)

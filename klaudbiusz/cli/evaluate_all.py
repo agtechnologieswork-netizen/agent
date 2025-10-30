@@ -28,7 +28,7 @@ from typing import Any
 try:
     from dotenv import load_dotenv
     env_paths = [
-        Path(__file__).parent.parent.parent / "dabgent" / ".env",
+        Path(__file__).parent.parent.parent / "edda" / ".env",
         Path(__file__).parent.parent / ".env",
     ]
     for env_path in env_paths:

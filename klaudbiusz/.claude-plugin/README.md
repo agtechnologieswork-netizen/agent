@@ -4,7 +4,7 @@ Production-ready data application generator for Claude Code.
 
 ## What This Is
 
-This plugin packages the **dabgent-mcp** MCP server for distribution via Claude Code. It provides:
+This plugin packages the **edda-mcp** MCP server for distribution via Claude Code. It provides:
 
 - **MCP Tools** - `scaffold_data_app`, `validate_data_app`, and other app generation tools
 - **Specialized Subagent** - klaudbiusz agent with workflow expertise
@@ -16,15 +16,15 @@ klaudbiusz serves dual purposes:
 1. **CLI wrapper** (main.py) - Development/debugging with full DB logging
 2. **Claude Code plugin** (.claude-plugin/) - Distribution to users
 
-Both invoke the same `dabgent-mcp` MCP server:
+Both invoke the same `edda-mcp` MCP server:
 
 ```
 agent/
   klaudbiusz/
     main.py            # CLI with DB logging (for debugging)
     .claude-plugin/    # Plugin manifest (for distribution)
-  dabgent/
-    dabgent_mcp/       # Core MCP server (used by both)
+  edda/
+    edda_mcp/       # Core MCP server (used by both)
 ```
 
 **Use CLI for:** Development, debugging, full logging/metrics
@@ -66,8 +66,8 @@ You should see `klaudbiusz` in the list.
 
 1. **Create test directory:**
 ```bash
-mkdir -p /tmp/dabgent-test
-cd /tmp/dabgent-test
+mkdir -p /tmp/edda-test
+cd /tmp/edda-test
 ```
 
 2. **In Claude Code, try:**
@@ -136,17 +136,17 @@ This ensures the appbuild agent delegates to dataresearch instead of using Datab
 
 ## MCP Server Details
 
-**Command:** `cargo run --manifest-path ${CLAUDE_PLUGIN_ROOT}/../../dabgent/dabgent_mcp/Cargo.toml`
+**Command:** `cargo run --manifest-path ${CLAUDE_PLUGIN_ROOT}/../../edda/edda_mcp/Cargo.toml`
 
 **Transport:** stdio
 
 **Dependencies:**
 - Rust toolchain (cargo must be in PATH)
-- dabgent workspace at `../dabgent/`
+- edda workspace at `../edda/`
 
 ## Development Workflow
 
-1. **Make changes to dabgent-mcp** in `../dabgent/dabgent_mcp/src/`
+1. **Make changes to edda-mcp** in `../edda/edda_mcp/src/`
 2. **Test via klaudbiusz CLI** (faster iteration)
 3. **Once working, test via plugin:**
    ```
@@ -159,7 +159,7 @@ This ensures the appbuild agent delegates to dataresearch instead of using Datab
 
 When ready for customers:
 
-1. Build `dabgent-mcp` as static binary
+1. Build `edda_mcp` as static binary
 2. Update `plugin.json` to point to binary instead of `cargo run`
 3. Package plugin directory
 4. Distribute via marketplace or direct download
@@ -172,8 +172,8 @@ When ready for customers:
 
 **MCP server fails to start:**
 - Verify cargo is in PATH: `which cargo`
-- Test MCP server directly: `cd ../dabgent/dabgent_mcp && cargo run`
-- Check `../dabgent/dabgent_mcp/Cargo.toml` exists
+- Test MCP server directly: `cd ../edda/edda_mcp && cargo run`
+- Check `../edda/edda_mcp/Cargo.toml` exists
 
 **Tools not working:**
 - Verify MCP server is loaded: `/mcp list`

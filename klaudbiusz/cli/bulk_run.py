@@ -18,41 +18,6 @@ from screenshot import screenshot_apps
 load_dotenv()
 
 
-# Data context for vanilla Claude SDK mode (non-MCP)
-DATA_CONTEXT = """
-## Databricks Environment Setup
-Set these environment variables before running:
-- DATABRICKS_HOST: Your Databricks workspace URL (e.g., https://your-workspace.cloud.databricks.com/)
-- DATABRICKS_TOKEN: Your Databricks personal access token
-
-## Available Databricks Sample Tables
-
-### samples.tpch.* (TPC-H E-commerce Benchmark)
-- **orders**: o_orderkey, o_custkey, o_orderstatus, o_totalprice, o_orderdate, o_orderpriority
-- **customer**: c_custkey, c_name, c_address, c_nationkey, c_phone, c_acctbal, c_mktsegment
-- **lineitem**: l_orderkey, l_partkey, l_suppkey, l_linenumber, l_quantity, l_extendedprice, l_discount, l_tax, l_returnflag, l_linestatus, l_shipdate, l_commitdate, l_receiptdate
-- **part**: p_partkey, p_name, p_mfgr, p_brand, p_type, p_size, p_container, p_retailprice
-- **supplier**: s_suppkey, s_name, s_address, s_nationkey, s_phone, s_acctbal
-
-### samples.tpcds_sf1.* (TPC-DS Retail Benchmark)
-- **store_sales**: ss_sold_date_sk, ss_sold_time_sk, ss_item_sk, ss_customer_sk, ss_store_sk, ss_quantity, ss_sales_price, ss_net_paid, ss_net_profit
-- **web_sales**: ws_sold_date_sk, ws_item_sk, ws_bill_customer_sk, ws_quantity, ws_sales_price, ws_net_paid, ws_net_profit
-- **catalog_sales**: cs_sold_date_sk, cs_item_sk, cs_bill_customer_sk, cs_quantity, cs_sales_price, cs_net_paid, cs_net_profit
-- **store_returns**: sr_returned_date_sk, sr_item_sk, sr_customer_sk, sr_return_quantity, sr_return_amt
-- **customer**: c_customer_sk, c_customer_id, c_first_name, c_last_name, c_email_address, c_birth_year, c_preferred_cust_flag
-- **customer_address**: ca_address_sk, ca_street_number, ca_street_name, ca_city, ca_county, ca_state, ca_zip, ca_location_type
-- **date_dim**: d_date_sk, d_date, d_month_seq, d_week_seq, d_quarter_seq, d_year, d_dow, d_moy, d_dom, d_qoy
-- **item**: i_item_sk, i_item_id, i_item_desc, i_current_price, i_class, i_category, i_brand, i_manager_id
-- **promotion**: p_promo_sk, p_promo_id, p_promo_name, p_start_date_sk, p_end_date_sk, p_cost, p_response_target, p_channel_dmail, p_channel_email, p_channel_tv
-
-### samples.nyctaxi.trips (NYC Taxi Trip Data)
-- **trips**: tpep_pickup_datetime, tpep_dropoff_datetime, passenger_count, trip_distance, fare_amount, extra, tip_amount, tolls_amount, total_amount, payment_type, pickup_location_id, dropoff_location_id
-
-Use SQL queries against these tables to fetch and analyze data. Connect using DatabricksClient with environment variables.
-
-"""
-
-
 class RunResult(TypedDict):
     prompt: str
     success: bool
@@ -86,109 +51,6 @@ PROMPTS = {
     "promotion-roi-analysis": "Measure promotion ROI: incremental revenue during promo vs cost, with 7-day post-promotion lift. Flag underperforming promotions.",
 }
 
-# Table recommendations for vanilla SDK mode
-PROMPT_TABLE_HINTS = {
-    "churn-risk-dashboard": """
-Recommended tables: samples.tpcds_sf1.customer, samples.tpcds_sf1.store_sales/web_sales/catalog_sales (for activity trends), samples.tpcds_sf1.date_dim
-Note: Login activity may need to be simulated from purchase activity. Support ticket data may need to be mocked.""",
-
-    "revenue-by-channel": """
-Recommended tables: samples.tpcds_sf1.store_sales, samples.tpcds_sf1.web_sales, samples.tpcds_sf1.catalog_sales, samples.tpcds_sf1.date_dim
-Use ss_net_paid/ws_net_paid/cs_net_paid for revenue amounts.""",
-
-    "customer-rfm-segments": """
-Recommended tables: samples.tpch.orders (use o_orderdate for recency, COUNT for frequency, SUM(o_totalprice) for monetary)
-Or: samples.tpcds_sf1.store_sales/web_sales/catalog_sales joined with date_dim""",
-
-    "taxi-trip-metrics": """
-Recommended tables: samples.nyctaxi.trips
-Use trip_distance for brackets, HOUR(tpep_pickup_datetime) for time of day, fare_amount for revenue.""",
-
-    "slow-moving-inventory": """
-Recommended tables: samples.tpcds_sf1.item (for products), samples.tpcds_sf1.store_sales/web_sales (for turnover calculation)
-Note: Warehouse capacity data may need to be mocked or derived from sales patterns.""",
-
-    "customer-360-view": """
-Recommended tables: samples.tpcds_sf1.customer, samples.tpcds_sf1.store_sales/web_sales/catalog_sales, samples.tpcds_sf1.item (for categories)
-Or: samples.tpch.customer, samples.tpch.orders, samples.tpch.lineitem, samples.tpch.part""",
-
-    "product-pair-analysis": """
-Recommended tables: samples.tpch.lineitem (join on l_orderkey to find items in same order), samples.tpch.part (for product details)
-Or: samples.tpcds_sf1.store_sales with self-join on ticket_number""",
-
-    "revenue-forecast-quarterly": """
-Recommended tables: samples.tpcds_sf1.store_sales/web_sales/catalog_sales, samples.tpcds_sf1.date_dim (use d_year, d_moy, d_qoy for temporal analysis)
-Or: samples.tpch.orders (use o_orderdate, o_totalprice)""",
-
-    "data-quality-metrics": """
-Recommended tables: Any of the sample tables - analyze NULL percentages, value ranges, and distributions
-Suggested: samples.tpcds_sf1.store_sales (check completeness of ss_net_paid, ss_quantity), samples.tpch.orders""",
-
-    "channel-conversion-comparison": """
-Recommended tables: samples.tpcds_sf1.store_sales, samples.tpcds_sf1.web_sales, samples.tpcds_sf1.catalog_sales, samples.tpcds_sf1.customer
-Note: Conversion rates may need to be inferred from purchase patterns or use mock session data.""",
-
-    "customer-churn-analysis": """
-Recommended tables: samples.tpch.orders (find customers with no recent o_orderdate), samples.tpch.customer
-Or: samples.tpcds_sf1.customer with sales tables joined by customer_sk""",
-
-    "pricing-impact-analysis": """
-Recommended tables: samples.tpcds_sf1.item (i_current_price, i_category), samples.tpcds_sf1.store_sales (ss_sales_price, ss_net_paid)
-Or: samples.tpch.part (p_retailprice), samples.tpch.lineitem (l_extendedprice)""",
-
-    "supplier-scorecard": """
-Recommended tables: samples.tpch.supplier, samples.tpch.lineitem (use l_commitdate vs l_receiptdate for on-time delivery, l_returnflag for defects)
-Note: Some metrics like defect rate may need to be simulated.""",
-
-    "sales-density-heatmap": """
-Recommended tables: samples.tpcds_sf1.customer_address (ca_zip), samples.tpcds_sf1.customer, samples.tpcds_sf1.store_sales/web_sales
-Note: Population density data may need to be mocked.""",
-
-    "cac-by-channel": """
-Recommended tables: samples.tpcds_sf1.promotion (p_channel_email, p_channel_dmail, p_channel_tv), samples.tpcds_sf1.store_sales/web_sales
-Note: CAC data may need to be mocked; calculate LTV from customer lifetime revenue.""",
-
-    "subscription-tier-optimization": """
-Recommended tables: samples.tpcds_sf1.customer (segment by c_preferred_cust_flag or mock tiers), analyze purchase frequency from sales tables
-Note: Subscription tier data will need to be simulated; use purchase patterns as proxy for usage.""",
-
-    "product-profitability": """
-Recommended tables: samples.tpcds_sf1.item, samples.tpcds_sf1.store_sales (ss_net_profit), samples.tpcds_sf1.store_returns
-Or: samples.tpch.lineitem (l_extendedprice, l_discount), samples.tpch.part""",
-
-    "warehouse-efficiency": """
-Recommended tables: samples.tpch.orders, samples.tpch.lineitem (use l_commitdate, l_shipdate for SLA calculation)
-Note: Warehouse facility data may need to be mocked.""",
-
-    "customer-ltv-cohorts": """
-Recommended tables: samples.tpch.orders (use MIN(o_orderdate) per o_custkey for cohort, SUM(o_totalprice) for LTV)
-Or: samples.tpcds_sf1.customer with sales tables grouped by cohort month""",
-
-    "promotion-roi-analysis": """
-Recommended tables: samples.tpcds_sf1.promotion (p_cost, p_start_date_sk, p_end_date_sk), samples.tpcds_sf1.store_sales/web_sales
-Join with date_dim to analyze revenue during promotion periods.""",
-}
-
-
-def get_prompt_for_mode(app_name: str, base_prompt: str, mode: str = "mcp") -> str:
-    """Get the appropriate prompt based on run mode.
-
-    Args:
-        app_name: Name of the app
-        base_prompt: Base prompt text
-        mode: Either 'mcp' (default, use as-is) or 'vanilla' (add Databricks context)
-
-    Returns:
-        Prompt string ready to use
-    """
-    if mode == "vanilla":
-        # Add Databricks context and table hints for vanilla Claude SDK
-        table_hint = PROMPT_TABLE_HINTS.get(app_name, "")
-        return f"{DATA_CONTEXT}\n{base_prompt}\n{table_hint}"
-    else:
-        # MCP mode - use prompt as-is, MCP will provide Databricks access
-        return base_prompt
-
 
 def enrich_results_with_screenshots(results: list[RunResult]) -> None:
     """Enrich results by checking filesystem for screenshots and logs.
@@ -217,9 +79,7 @@ def enrich_results_with_screenshots(results: list[RunResult]) -> None:
             result["browser_logs_path"] = None
 
 
-def run_single_generation(
-    app_name: str, prompt: str, wipe_db: bool = False, use_subagents: bool = False, mode: str = "mcp"
-) -> RunResult:
+def run_single_generation(app_name: str, prompt: str, wipe_db: bool = False, use_subagents: bool = False, mcp_binary: str | None = None) -> RunResult:
     def timeout_handler(signum, frame):
         raise TimeoutError(f"Generation timed out after 900 seconds")
 
@@ -228,17 +88,14 @@ def run_single_generation(
         signal.signal(signal.SIGALRM, timeout_handler)
         signal.alarm(900)
 
-        # Get the appropriate prompt for the mode
-        final_prompt = get_prompt_for_mode(app_name, prompt, mode)
-
-        codegen = AppBuilder(app_name=app_name, wipe_db=wipe_db, suppress_logs=True, use_subagents=use_subagents)
-        metrics = codegen.run(final_prompt, wipe_db=wipe_db)
+        codegen = AppBuilder(app_name=app_name, wipe_db=wipe_db, suppress_logs=True, use_subagents=use_subagents, mcp_binary=mcp_binary)
+        metrics = codegen.run(prompt, wipe_db=wipe_db)
         app_dir = metrics.get("app_dir") if metrics else None
 
         signal.alarm(0)  # cancel timeout
 
         return {
-            "prompt": prompt,  # Store original prompt for reporting
+            "prompt": prompt,
             "success": True,
             "metrics": metrics,
             "error": None,
@@ -266,38 +123,22 @@ def main(
     use_subagents: bool = False,
     screenshot_concurrency: int = 5,
     screenshot_wait_time: int = 120000,
-    mode: str = "mcp",
+    mcp_binary: str | None = None,
 ) -> None:
-    """Run bulk generation of apps from prompts.
-
-    Args:
-        wipe_db: Whether to wipe the database before running
-        n_jobs: Number of parallel jobs (-1 for all CPUs)
-        use_subagents: Whether to use subagents in generation
-        screenshot_concurrency: Number of concurrent screenshot processes
-        screenshot_wait_time: Wait time for screenshots in ms
-        mode: Run mode - 'mcp' (default, uses MCP for Databricks) or 'vanilla' (adds Databricks context to prompts)
-    """
     # validate required environment variables
     if not os.environ.get("DATABRICKS_HOST") or not os.environ.get("DATABRICKS_TOKEN"):
         raise ValueError("DATABRICKS_HOST and DATABRICKS_TOKEN environment variables must be set")
 
     print(f"Starting bulk generation for {len(PROMPTS)} prompts...")
-    print(f"Mode: {mode}")
     print(f"Parallel jobs: {n_jobs}")
     print(f"Wipe DB: {wipe_db}")
     print(f"Use subagents: {use_subagents}")
+    print(f"MCP binary: {mcp_binary if mcp_binary else 'cargo run (default)'}")
     print(f"Screenshot concurrency: {screenshot_concurrency}\n")
-
-    if mode == "vanilla":
-        print("Running in vanilla SDK mode - prompts will include Databricks table schemas\n")
-    else:
-        print("Running in MCP mode - Databricks access via MCP server\n")
 
     # generate all apps
     results: list[RunResult] = Parallel(n_jobs=n_jobs, verbose=10)(  # type: ignore[assignment]
-        delayed(run_single_generation)(app_name, prompt, wipe_db, use_subagents, mode)
-        for app_name, prompt in PROMPTS.items()
+        delayed(run_single_generation)(app_name, prompt, wipe_db, use_subagents, mcp_binary) for app_name, prompt in PROMPTS.items()
     )
 
     # separate successful and failed generations
@@ -322,7 +163,9 @@ def main(
             print(f"{'=' * 80}\n")
 
             try:
-                screenshot_apps(apps_dir, concurrency=screenshot_concurrency, wait_time=screenshot_wait_time)
+                screenshot_apps(
+                    apps_dir, concurrency=screenshot_concurrency, wait_time=screenshot_wait_time, capture_logs=True
+                )
             except Exception as e:
                 print(f"Screenshot batch failed: {e}")
 
