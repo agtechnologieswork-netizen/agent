@@ -82,14 +82,10 @@ async fn main() -> Result<()> {
     match cli.command {
         Some(Commands::Yell { message }) => yell::run_yell(message),
         None => {
-            // Default behavior: launch MCP server
-            let mut config = edda_mcp::config::Config::load_from_dir();
-
-            // CLI flag overrides config file
+            let mut config = edda_mcp::config::Config::load_from_dir()?;
             if cli.disallow_deployment {
                 config.allow_deployment = false;
             }
-
             run_server(config).await
         }
     }
@@ -157,7 +153,11 @@ async fn run_server(config: edda_mcp::config::Config) -> Result<()> {
 
     // initialize all available providers
     let databricks = DatabricksProvider::new().ok();
-    let deployment = DeploymentProvider::new().ok();
+    let deployment = if config.allow_deployment {
+        DeploymentProvider::new().ok()
+    } else {
+        None
+    };
     let google_sheets = GoogleSheetsProvider::new().await.ok();
     let io = IOProvider::new().ok();
 
@@ -202,6 +202,10 @@ async fn run_server(config: edda_mcp::config::Config) -> Result<()> {
              - I/O: Always available"
             )
         })?;
+
+    provider
+        .check_availability(&config.required_providers)
+        .map_err(|e| eyre::eyre!(e))?;
 
     // wrap with trajectory tracking in binary mode
     match session_id {
