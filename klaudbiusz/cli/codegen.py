@@ -159,11 +159,11 @@ class TrackerDB:
 
 
 class AppBuilder:
-    def __init__(self, app_name: str, wipe_db: bool = True, suppress_logs: bool = False, use_subagents: bool = False):
+    def __init__(self, app_name: str, wipe_db: bool = True, suppress_logs: bool = False, use_subagents: bool = False, mcp_binary: str | None = None):
         self.project_root = Path(__file__).parent.parent.parent
         self.mcp_manifest = self.project_root / "edda" / "edda_mcp" / "Cargo.toml"
 
-        if not self.mcp_manifest.exists():
+        if mcp_binary is None and not self.mcp_manifest.exists():
             raise RuntimeError(f"edda-mcp Cargo.toml not found at {self.mcp_manifest}")
 
         self.tracker = TrackerDB(wipe_on_start=wipe_db)
@@ -171,6 +171,7 @@ class AppBuilder:
         self.app_name = app_name
         self.use_subagents = use_subagents
         self.suppress_logs = suppress_logs
+        self.mcp_binary = mcp_binary
         self.app_dir: str | None = None
         # track tool_use_id -> (tool_name, work_dir) to capture app_dir from results
         self._pending_scaffold_calls: dict[str, str] = {}
@@ -180,6 +181,8 @@ class AppBuilder:
             logging.getLogger().setLevel(logging.ERROR)
         else:
             coloredlogs.install(level="INFO")
+            mcp_msg = f"Using MCP binary: {self.mcp_binary}" if self.mcp_binary else "Using cargo run for MCP server"
+            logger.info(mcp_msg)
 
     async def run_async(self, prompt: str) -> GenerationMetrics:
         self._setup_logging()
@@ -224,6 +227,25 @@ Use up to 10 tools per call to speed up the process.\n"""
         # The CLI doesn't support per-agent tool permissions yet.
         # Instead, we rely on system prompt instructions to enforce delegation.
 
+        if self.mcp_binary is not None:
+            mcp_config = {
+                "type": "stdio",
+                "command": self.mcp_binary,
+                "args": [],
+                "env": {},
+            }
+        else:
+            mcp_config = {
+                "type": "stdio",
+                "command": "cargo",
+                "args": [
+                    "run",
+                    "--manifest-path",
+                    str(self.mcp_manifest),
+                ],
+                "env": {},
+            }
+
         options = ClaudeAgentOptions(
             system_prompt={
                 "type": "preset",
@@ -235,16 +257,7 @@ Use up to 10 tools per call to speed up the process.\n"""
             agents=agents,
             max_turns=75,
             mcp_servers={
-                "edda": {
-                    "type": "stdio",
-                    "command": "cargo",
-                    "args": [
-                        "run",
-                        "--manifest-path",
-                        str(self.mcp_manifest),
-                    ],
-                    "env": {},
-                }
+                "edda": mcp_config
             },
         )
 
