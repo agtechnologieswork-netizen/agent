@@ -32,7 +32,19 @@ and attach to your favorite MCP client, e.g. Claude Code:
 ```
 claude mcp add --transport stdio edda -- ~/.local/bin/edda_mcp
 ```
-For successful usage of Databricks integration, make sure you have `DATABRICKS_HOST`, `DATABRICKS_TOKEN`, `DATABRICKS_WAREHOUSE_ID` environment variables set.
+For successful usage of Databricks integration, make sure you have `DATABRICKS_HOST`, `DATABRICKS_TOKEN` and `DATABRICKS_WAREHOUSE_ID` environment variables set.
+
+Then start using it with Claude Code:
+```bash
+# Create project dir
+mkdir ~/dbrx-sales-by-region && cd ~/dbrx-sales-by-region
+
+# Check the 'edda' MCP is available fo claude
+claude mcp list
+
+# Run sample app generation
+claude "Create a Databricks app that shows daily sales by region"
+```
 
 Got any problems during usage? Prepare a bug report:
 ```
