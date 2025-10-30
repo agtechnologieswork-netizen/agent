@@ -25,7 +25,7 @@ Unlike the Python version, it is available not only as a standalone agent but al
 ### MCP Installation
 
 **Prerequisites:**
-- OCI-compatible container runtime (Docker, Podman, or Nerdctl) must be installed and running for Dagger-based sandboxed execution
+- OCI-compatible container runtime (Docker, OrbStack, Podman...) must be installed and running for Dagger-based sandboxed execution
 
 Try it out!
 
