@@ -227,7 +227,7 @@ Klaudbiusz uses edda's MCP server via Claude Agent SDK:
 
 - Short commit messages (no Claude Code mentions)
 - Use `gh` CLI for GitHub operations
-- Check `.dabgent_state` in klaudbiusz apps before committing
+- Check `.edda_state` in klaudbiusz apps before committing
 
 ### Testing
 
