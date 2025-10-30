@@ -159,7 +159,14 @@ class TrackerDB:
 
 
 class AppBuilder:
-    def __init__(self, app_name: str, wipe_db: bool = True, suppress_logs: bool = False, use_subagents: bool = False, mcp_binary: str | None = None):
+    def __init__(
+        self,
+        app_name: str,
+        wipe_db: bool = True,
+        suppress_logs: bool = False,
+        use_subagents: bool = False,
+        mcp_binary: str | None = None,
+    ):
         self.project_root = Path(__file__).parent.parent.parent
         self.mcp_manifest = self.project_root / "edda" / "edda_mcp" / "Cargo.toml"
 
@@ -208,7 +215,7 @@ class AppBuilder:
                 )
 
         # workflow and template best practices are now in the MCP tool description
-        base_instructions = ""
+        base_instructions = "Use Edda MCP tools to scaffold, build, and test the app as needed.\n"
 
         if self.use_subagents:
             base_instructions += """When you need to explore Databricks tables, schemas, or execute SQL queries, use the Task tool to delegate to the 'dataresearch' subagent. Do NOT use databricks_* tools directly.\n"""
@@ -231,7 +238,7 @@ Use up to 10 tools per call to speed up the process.\n"""
             mcp_config = {
                 "type": "stdio",
                 "command": self.mcp_binary,
-                "args": [],
+                "args": ["--disallow-deployment"],
                 "env": {},
             }
         else:
@@ -242,6 +249,8 @@ Use up to 10 tools per call to speed up the process.\n"""
                     "run",
                     "--manifest-path",
                     str(self.mcp_manifest),
+                    "--",
+                    "--disallow-deployment",
                 ],
                 "env": {},
             }
@@ -256,9 +265,7 @@ Use up to 10 tools per call to speed up the process.\n"""
             disallowed_tools=disallowed_tools,
             agents=agents,
             max_turns=75,
-            mcp_servers={
-                "edda": mcp_config
-            },
+            mcp_servers={"edda": mcp_config},
         )
 
         if not self.suppress_logs:

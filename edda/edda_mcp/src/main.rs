@@ -157,7 +157,11 @@ async fn run_server(config: edda_mcp::config::Config) -> Result<()> {
 
     // initialize all available providers
     let databricks = DatabricksProvider::new().ok();
-    let deployment = DeploymentProvider::new().ok();
+    let deployment = if config.allow_deployment {
+        DeploymentProvider::new().ok()
+    } else {
+        None
+    };
     let google_sheets = GoogleSheetsProvider::new().await.ok();
     let io = IOProvider::new().ok();
 

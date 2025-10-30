@@ -307,9 +307,10 @@ impl IOProvider {
             ErrorData::internal_error(format!("failed to validate project: {}", e), None)
         })?;
 
-        Ok(CallToolResult::success(vec![Content::text(
-            result.display(),
-        )]))
+        match result.success {
+            true => Ok(CallToolResult::success(vec![Content::text(result.display())])),
+            false => Ok(CallToolResult::error(vec![Content::text(result.display())])),
+        }
     }
 }
 
