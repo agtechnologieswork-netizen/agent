@@ -30,9 +30,9 @@ curl -LsSf https://raw.githubusercontent.com/appdotbuild/agent/refs/heads/main/e
 ```
 and attach to your favorite MCP client, e.g. Claude Code:
 ```
-claude mcp add --transport stdio edda -- /Users/Arseny/.local/bin/edda_mcp
+claude mcp add --transport stdio edda -- ~/.local/bin/edda_mcp
 ```
-For successful usage of Databricks integration, make sure you have `DATABRICKS_HOST` and `DATABRICKS_TOKEN` environment variables set.
+For successful usage of Databricks integration, make sure you have `DATABRICKS_HOST`, `DATABRICKS_TOKEN`, `DATABRICKS_WAREHOUSE_ID` environment variables set.
 
 Got any problems during usage? Prepare a bug report:
 ```

@@ -99,18 +99,18 @@ pub fn save_state(work_dir: &Path, state: &ProjectState) -> Result<()> {
 pub fn compute_checksum(work_dir: &Path) -> Result<String> {
     let mut files_to_hash = Vec::new();
 
-    // critical files
-    let package_json = work_dir.join("package.json");
-    if package_json.exists() {
-        files_to_hash.push(package_json);
-    }
-
-    // collect all .ts and .tsx files in client/ and server/
+    // collect all source files in client/ and server/
     for dir in &["client", "server"] {
         let dir_path = work_dir.join(dir);
         if dir_path.exists() {
-            collect_ts_files(&dir_path, &mut files_to_hash)?;
+            collect_source_files(&dir_path, &mut files_to_hash)?;
         }
+    }
+
+    // include root package.json
+    let package_json = work_dir.join("package.json");
+    if package_json.exists() {
+        files_to_hash.push(package_json);
     }
 
     // sort files deterministically
@@ -138,8 +138,8 @@ pub fn verify_checksum(work_dir: &Path, expected: &str) -> Result<bool> {
     Ok(current == expected)
 }
 
-/// recursively collect .ts and .tsx files from directory
-fn collect_ts_files(dir: &Path, files: &mut Vec<PathBuf>) -> Result<()> {
+/// recursively collect source files from directory
+fn collect_source_files(dir: &Path, files: &mut Vec<PathBuf>) -> Result<()> {
     if !dir.is_dir() {
         return Ok(());
     }
@@ -151,11 +151,27 @@ fn collect_ts_files(dir: &Path, files: &mut Vec<PathBuf>) -> Result<()> {
         let entry = entry.map_err(|e| eyre!("failed to read directory entry: {}", e))?;
         let path = entry.path();
 
-        if path.is_dir() {
-            collect_ts_files(&path, files)?;
-        } else if let Some(ext) = path.extension() {
-            if ext == "ts" || ext == "tsx" {
-                files.push(path);
+        match path.is_dir() {
+            true => {
+                // skip excluded directories
+                if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
+                    match name {
+                        "node_modules" | "dist" | ".git" | "build" | "coverage" => continue,
+                        _ => {}
+                    }
+                }
+                collect_source_files(&path, files)?;
+            }
+            false => {
+                // include meaningful source and config files
+                if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
+                    match ext {
+                        "ts" | "tsx" | "js" | "jsx" | "json" | "css" | "html" | "yaml" | "yml" => {
+                            files.push(path)
+                        }
+                        _ => {}
+                    }
+                }
             }
         }
     }

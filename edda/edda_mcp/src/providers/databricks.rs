@@ -28,7 +28,13 @@ impl DatabricksProvider {
         })
     }
 
-    #[tool(name = "databricks_execute_sql", description = "Execute SQL query in Databricks")]
+    #[tool(
+        name = "databricks_execute_sql",
+        description = "Execute SQL query in Databricks. \
+                       Only single SQL statements are supported - do not send multiple statements separated by semicolons. \
+                       For multiple statements, call this tool separately for each one.
+                       Timeout: 60 seconds for query execution."
+    )]
     pub async fn execute_sql(
         &self,
         Parameters(args): Parameters<DatabricksExecuteQueryArgs>,

@@ -79,15 +79,19 @@ pub struct Resources {
 }
 
 impl Resources {
-    pub fn from_env() -> Self {
+    pub fn from_env() -> Result<Self> {
+        let warehouse_id = std::env::var("DATABRICKS_WAREHOUSE_ID")
+            .map_err(|_| anyhow::anyhow!(
+                "DATABRICKS_WAREHOUSE_ID environment variable is required for app deployment. \
+                 Set this to your Databricks SQL warehouse ID."
+            ))?;
+
         let mut resources = Self::default();
-        if let Ok(warehouse_id) = std::env::var("DATABRICKS_WAREHOUSE_ID") {
-            resources.sql_warehouse = Some(Warehouse {
-                id: warehouse_id,
-                permission: Permission::CanUse,
-            })
-        }
-        resources
+        resources.sql_warehouse = Some(Warehouse {
+            id: warehouse_id,
+            permission: Permission::CanUse,
+        });
+        Ok(resources)
     }
 }
 

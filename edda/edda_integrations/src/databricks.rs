@@ -700,11 +700,9 @@ impl DatabricksRestClient {
                 return self.process_data_array(schema, data_array);
             }
 
-        debug!(
-            "Response structure: manifest={:?}, result={:?}",
-            response.manifest, response.result
-        );
-        Err(anyhow!("No data found in response"))
+        // query executed successfully but returned 0 rows (empty result set is valid)
+        debug!("Query executed successfully with empty result set");
+        Ok(vec![])
     }
 
     fn process_data_array(
