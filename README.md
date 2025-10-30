@@ -6,13 +6,11 @@
 
 **app.build** is an open-source AI agent for generating production-ready applications with testing, linting and deployment setup from a single prompt. This agent relies heavily on scaffolding and extensive validation to ensure high-quality outputs.
 
-> **Project Status:** The managed service has been discontinued. The Python version of this agent is no longer actively maintained but remains available for use and forking. Active development has moved to the Rust implementation (see `./edda`) focused on data applications.
-
 There are two generations of this agent:
 
-### v1 - Python implementation
+### v1 - Python implementation (⚠️ deprecated)
 
-Original standalone agent located in `./agent/` directory (⚠️ no longer actively maintained). This version can still be used and forked, it is designed to generate CRUD applications on three stacks: (TypeScript + tRPC + Drizzle + React, Python + NiceGUI + SQLModel, PHP + Laravel).
+Original standalone agent located in `./agent/` directory (no longer actively maintained). This version can still be used and forked, it is designed to generate CRUD applications on three stacks: (TypeScript + tRPC + Drizzle + React, Python + NiceGUI + SQLModel, PHP + Laravel). The managed service has been discontinued.
 
 See [agent/README.md](agent/README.md) for setup and some usage instructions.
 
@@ -59,4 +57,5 @@ If you use this work in your research, please cite our paper:
 
 ---
 Supported by Neon and Databricks.
+
 Built to showcase agent-native infrastructure patterns. Fork it, remix it, use it as a reference for your own projects.
